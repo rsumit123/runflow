@@ -533,7 +533,9 @@ function AddGoalFlow({ onGoalCreated }) {
                   {goalMode === 'sprint' && !recommendation.sprint_best && <span style={{ color: '#666' }}> (no sprint runs)</span>}
                 </span>
                 <span>
-                  Phase best: <strong style={{ color: '#fff' }}>{formatTime(recommendation.current_phase_best)}</strong>
+                  Phase best ({goalMode === 'sprint' ? 'sprint' : 'all'}): <strong style={{ color: '#fff' }}>
+                    {formatTime(goalMode === 'sprint' ? (recommendation.current_phase_best_sprint || null) : recommendation.current_phase_best)}
+                  </strong>
                 </span>
                 {recommendation.trend_direction && (
                   <span>
