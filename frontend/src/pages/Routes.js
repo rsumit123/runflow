@@ -262,10 +262,11 @@ function Routes() {
           const isMerging = mergingRoute === route.route_key;
 
           // Color border based on highlight
-          const highlightBorder = routeBadges.includes('Fastest') ? '2px solid #4ade80'
-            : routeBadges.includes('Most Improved') ? '2px solid #60a5fa'
-            : routeBadges.includes('Hilliest') ? '2px solid #fb923c'
-            : routeBadges.includes('Most Consistent') ? '2px solid #c084fc'
+          const badgeLabels = routeBadges.map(b => b.label);
+          const highlightBorder = badgeLabels.includes('Fastest') ? '2px solid #4ade80'
+            : badgeLabels.includes('Most Improved') ? '2px solid #60a5fa'
+            : badgeLabels.includes('Hilliest') ? '2px solid #fb923c'
+            : badgeLabels.includes('Most Consistent') ? '2px solid #c084fc'
             : '1px solid #252540';
 
           return (
