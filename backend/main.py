@@ -19,6 +19,7 @@ from models import Activity, Split, Stream, BestEffort
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
+from route_matching import group_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -593,6 +594,32 @@ async def activity_analysis(activity_id: int, session: AsyncSession = Depends(ge
         "best_efforts": insights,
         "pace_percentile": pace_percentile,
     }
+
+
+@app.get("/api/routes")
+async def get_routes(session: AsyncSession = Depends(get_session)):
+    """Group activities by route similarity and return route stats."""
+    result = await session.execute(
+        select(Activity).order_by(Activity.start_date.desc())
+    )
+    activities = result.scalars().all()
+
+    act_dicts = []
+    for a in activities:
+        act_dicts.append({
+            "id": a.id,
+            "name": a.name,
+            "start_latlng": a.start_latlng,
+            "end_latlng": a.end_latlng,
+            "distance": a.distance,
+            "moving_time": a.moving_time,
+            "average_speed": a.average_speed,
+            "start_date": a.start_date.isoformat() if a.start_date else None,
+            "total_elevation_gain": a.total_elevation_gain,
+        })
+
+    routes = group_routes(act_dicts)
+    return {"routes": routes, "total_routes": len(routes)}
 
 
 @app.get("/api/phases")

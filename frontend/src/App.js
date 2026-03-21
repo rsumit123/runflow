@@ -5,6 +5,7 @@ import ActivityDetail from './pages/ActivityDetail';
 import Import from './pages/Import';
 import Phases from './pages/Phases';
 import Stats from './pages/Stats';
+import RoutesPage from './pages/Routes';
 
 function App() {
   const location = useLocation();
@@ -45,6 +46,13 @@ function App() {
           }}>
             Stats
           </Link>
+          <Link to="/routes" style={{
+            color: isActive('/routes') ? '#fc5200' : '#a0a0b0',
+            fontWeight: isActive('/routes') ? 600 : 400,
+            fontSize: '14px',
+          }}>
+            Routes
+          </Link>
           <Link to="/phases" style={{
             color: isActive('/phases') ? '#fc5200' : '#a0a0b0',
             fontWeight: isActive('/phases') ? 600 : 400,
@@ -70,6 +78,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/activity/:id" element={<ActivityDetail />} />
           <Route path="/stats" element={<Stats />} />
+          <Route path="/routes" element={<RoutesPage />} />
           <Route path="/phases" element={<Phases />} />
           <Route path="/import" element={<Import />} />
         </Routes>
