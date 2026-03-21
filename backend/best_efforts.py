@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 TARGET_DISTANCES = [100, 200, 400, 500, 1000, 2000]
 
+# Minimum realistic times (seconds) to filter GPS glitches.
+# Based on ~2:30/km pace (very fast amateur sprint) as floor.
+MIN_TIMES = {100: 12, 200: 25, 400: 55, 500: 70, 1000: 150, 2000: 300}
+
 
 def compute_best_efforts_from_streams(
     distance_stream: list[float],
@@ -60,7 +64,8 @@ def compute_best_efforts_from_streams(
                     best_start = i
                     best_end = j
 
-        if best_time < float("inf"):
+        min_time = MIN_TIMES.get(target, 10)
+        if best_time < float("inf") and best_time >= min_time:
             pace = best_time / (target / 1000)
             results.append({
                 "distance_target": target,

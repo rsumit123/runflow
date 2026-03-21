@@ -494,6 +494,22 @@ async def activity_analysis(activity_id: int, session: AsyncSession = Depends(ge
     )
     activity_efforts = {be.distance_target: be for be in be_result.scalars().all()}
 
+    # Find current phase activity IDs (for phase comparison)
+    act_result = await session.execute(
+        select(Activity).order_by(Activity.start_date.desc())
+    )
+    all_acts = act_result.scalars().all()
+    current_phase_ids = []
+    if all_acts:
+        current_phase_ids.append(all_acts[0].id)
+        for i in range(1, len(all_acts)):
+            if all_acts[i - 1].start_date and all_acts[i].start_date:
+                gap = (all_acts[i - 1].start_date - all_acts[i].start_date).days
+                if gap <= 14:
+                    current_phase_ids.append(all_acts[i].id)
+                else:
+                    break
+
     # Get all best efforts for percentile calc
     insights = []
     for target in TARGET_DISTANCES:
@@ -527,6 +543,22 @@ async def activity_analysis(activity_id: int, session: AsyncSession = Depends(ge
         all_time_best = at_result.scalar_one_or_none()
         is_pr = all_time_best and my_effort.time_seconds <= all_time_best.time_seconds
 
+        # Current phase best (excluding this activity)
+        phase_best_time = None
+        if current_phase_ids:
+            phase_result = await session.execute(
+                select(BestEffort)
+                .where(
+                    BestEffort.distance_target == target,
+                    BestEffort.activity_id.in_(current_phase_ids),
+                    BestEffort.activity_id != activity_id,
+                )
+                .order_by(BestEffort.time_seconds.asc())
+                .limit(1)
+            )
+            phase_best = phase_result.scalar_one_or_none()
+            phase_best_time = phase_best.time_seconds if phase_best else None
+
         insight = {
             "distance": target,
             "time_seconds": my_effort.time_seconds,
@@ -535,6 +567,8 @@ async def activity_analysis(activity_id: int, session: AsyncSession = Depends(ge
             "is_pr": is_pr,
             "all_time_best": all_time_best.time_seconds if all_time_best else None,
             "diff_from_best": round(my_effort.time_seconds - all_time_best.time_seconds, 1) if all_time_best else None,
+            "phase_best": phase_best_time,
+            "diff_from_phase": round(my_effort.time_seconds - phase_best_time, 1) if phase_best_time else None,
         }
         insights.append(insight)
 

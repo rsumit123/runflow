@@ -345,68 +345,71 @@ function ActivityDetail() {
             Best Efforts
           </div>
 
-          {/* Table header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '70px 1fr 1fr 1fr 80px',
-            gap: '8px',
-            padding: '8px 12px',
-            fontSize: '10px',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-            color: '#666',
-            borderBottom: '1px solid #252540',
-          }}>
-            <div>Distance</div>
-            <div>Time</div>
-            <div>Pace</div>
-            <div>Percentile</div>
-            <div style={{ textAlign: 'right' }}>vs Best</div>
-          </div>
-
-          {/* Table rows */}
-          {analysis.best_efforts.map((effort) => (
-            <div key={effort.distance} style={{
+          {/* Table */}
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <div style={{
               display: 'grid',
-              gridTemplateColumns: '70px 1fr 1fr 1fr 80px',
-              gap: '8px',
-              padding: '10px 12px',
-              alignItems: 'center',
-              borderBottom: '1px solid #1e1e35',
-              fontSize: '14px',
+              gridTemplateColumns: '60px 1fr 1fr 1fr 80px 80px',
+              gap: '6px',
+              padding: '8px 10px',
+              fontSize: '10px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              color: '#666',
+              borderBottom: '1px solid #252540',
+              minWidth: '480px',
             }}>
-              <div style={{ color: '#e0e0e0', fontWeight: 600, fontSize: '13px' }}>
-                {formatDistanceLabel(effort.distance)}
-              </div>
-              <div style={{ color: '#e0e0e0' }}>
-                {formatTime(effort.time_seconds)}
-              </div>
-              <div style={{ color: '#a0a0b0' }}>
-                {formatPaceSeconds(effort.pace_sec_per_km)}/km
-              </div>
-              <div style={{ color: '#a0a0b0', fontSize: '12px' }}>
-                Faster than {Math.round(effort.percentile)}%
-              </div>
-              <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
-                {effort.is_pr ? (
-                  <span style={{
-                    backgroundColor: '#4ade80',
-                    color: '#0a2a0a',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    letterSpacing: '0.5px',
-                  }}>PR!</span>
-                ) : (
-                  <span style={{ color: '#ff6b6b', fontSize: '13px' }}>
-                    +{Math.round(effort.diff_from_best)}s
-                  </span>
-                )}
-              </div>
+              <div>Dist</div>
+              <div>Time</div>
+              <div>Pace</div>
+              <div>Percentile</div>
+              <div>vs Best</div>
+              <div>vs Phase</div>
             </div>
-          ))}
+
+            {analysis.best_efforts.map((effort) => (
+              <div key={effort.distance} style={{
+                display: 'grid',
+                gridTemplateColumns: '60px 1fr 1fr 1fr 80px 80px',
+                gap: '6px',
+                padding: '8px 10px',
+                alignItems: 'center',
+                borderBottom: '1px solid #1e1e35',
+                fontSize: '13px',
+                minWidth: '480px',
+              }}>
+                <div style={{ color: '#e0e0e0', fontWeight: 600 }}>
+                  {formatDistanceLabel(effort.distance)}
+                </div>
+                <div style={{ color: '#e0e0e0' }}>
+                  {formatTime(effort.time_seconds)}
+                </div>
+                <div style={{ color: '#a0a0b0', fontSize: '12px' }}>
+                  {formatPaceSeconds(effort.pace_sec_per_km)}/km
+                </div>
+                <div style={{ color: '#a0a0b0', fontSize: '11px' }}>
+                  Top {100 - Math.round(effort.percentile)}%
+                </div>
+                <div>
+                  {effort.is_pr ? (
+                    <span style={{ backgroundColor: '#4ade80', color: '#0a2a0a', fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px' }}>PR!</span>
+                  ) : effort.diff_from_best != null ? (
+                    <span style={{ color: '#ff6b6b', fontSize: '12px' }}>+{Math.round(effort.diff_from_best)}s</span>
+                  ) : '-'}
+                </div>
+                <div>
+                  {effort.diff_from_phase != null ? (
+                    effort.diff_from_phase <= 0 ? (
+                      <span style={{ color: '#4ade80', fontSize: '10px', fontWeight: 700 }}>Phase best!</span>
+                    ) : (
+                      <span style={{ color: effort.diff_from_phase <= 5 ? '#fbbf24' : '#ff6b6b', fontSize: '12px' }}>+{Math.round(effort.diff_from_phase)}s</span>
+                    )
+                  ) : <span style={{ color: '#555', fontSize: '11px' }}>1st in phase</span>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
