@@ -219,6 +219,11 @@ def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Sort by date
         sorted_runs = sorted(route, key=lambda a: a.get("start_date") or "")
 
+        # Generate stable route key from start coords + distance bucket
+        ref_start = route[0]["start_latlng"]
+        avg_dist = sum(a["distance"] for a in route if a.get("distance")) / len(route)
+        route_key = f"{round(ref_start[0], 3)}_{round(ref_start[1], 3)}_{round(avg_dist / 100) * 100}"
+
         # Most common name
         names = {}
         for a in route:
@@ -263,6 +268,7 @@ def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         result.append({
             "route_id": route_id,
+            "route_key": route_key,
             "name": route_name,
             "run_count": len(route),
             "avg_distance_km": round(avg_distance / 1000, 2),
@@ -272,6 +278,7 @@ def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "best_pace_id": best_pace_id,
             "start_latlng": route[0]["start_latlng"],
             "activities": run_summaries,
+            "activity_ids": [a["id"] for a in route],
         })
 
     # Sort by run count descending

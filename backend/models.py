@@ -70,3 +70,11 @@ class BestEffort(Base):
     end_index = Column(Integer, nullable=True)
 
     activity = relationship("Activity", back_populates="best_efforts")
+
+
+class RouteLabel(Base):
+    __tablename__ = "route_labels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    route_key = Column(String, unique=True, nullable=False, index=True)  # stable key for the route
+    name = Column(String, nullable=False)
