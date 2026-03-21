@@ -42,6 +42,10 @@ input[type="date"] {
   display: none !important;
 }
 
+.mobile-dropdown {
+  z-index: 9999 !important;
+}
+
 @media (max-width: 640px) {
   .desktop-nav {
     display: none !important;
@@ -58,4 +62,9 @@ input[type="date"] {
   .show-mobile {
     display: block !important;
   }
+}
+
+/* Leaflet maps should not overlap nav */
+.leaflet-container {
+  z-index: 1 !important;
 }

@@ -388,6 +388,8 @@ async def get_activity(activity_id: int, session: AsyncSession = Depends(get_ses
             "distance_target": be.distance_target,
             "time_seconds": be.time_seconds,
             "pace_sec_per_km": be.pace_sec_per_km,
+            "start_index": be.start_index,
+            "end_index": be.end_index,
         }
         for be in sorted(act.best_efforts, key=lambda x: x.distance_target)
     ]

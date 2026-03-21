@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Polyline, Marker, useMap } from 'react-leaflet
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Fix default marker icons (leaflet CSS issue with webpack)
+// Fix default marker icons
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
@@ -35,17 +35,27 @@ function FitBounds({ bounds }) {
   return null;
 }
 
-function RouteMap({ latlng, polyline, height = 300 }) {
-  // Decode polyline if no latlng stream
+/**
+ * RouteMap component
+ * @param {Array} latlng - Full GPS track [[lat,lng], ...]
+ * @param {string} polyline - Encoded polyline (fallback if no latlng)
+ * @param {number} height - Map height in px
+ * @param {Object} highlight - { startIndex, endIndex } to highlight a segment
+ */
+function RouteMap({ latlng, polyline, height = 300, highlight }) {
   const positions = useMemo(() => {
-    if (latlng && latlng.length > 0) {
-      return latlng;
-    }
-    if (polyline) {
-      return decodePolyline(polyline);
-    }
+    if (latlng && latlng.length > 0) return latlng;
+    if (polyline) return decodePolyline(polyline);
     return [];
   }, [latlng, polyline]);
+
+  const highlightPositions = useMemo(() => {
+    if (!highlight || !positions || positions.length === 0) return null;
+    const { startIndex, endIndex } = highlight;
+    if (startIndex == null || endIndex == null) return null;
+    if (startIndex >= positions.length || endIndex >= positions.length) return null;
+    return positions.slice(startIndex, endIndex + 1);
+  }, [highlight, positions]);
 
   if (!positions || positions.length < 2) {
     return (
@@ -81,19 +91,30 @@ function RouteMap({ latlng, polyline, height = 300 }) {
           attribution='&copy; <a href="https://carto.com/">CARTO</a>'
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
+        {/* Base route - dimmed when highlight is active */}
         <Polyline
           positions={positions}
-          pathOptions={{ color: '#fc5200', weight: 3, opacity: 0.9 }}
+          pathOptions={{
+            color: highlightPositions ? '#666' : '#fc5200',
+            weight: highlightPositions ? 2 : 3,
+            opacity: highlightPositions ? 0.4 : 0.9,
+          }}
         />
+        {/* Highlighted segment */}
+        {highlightPositions && highlightPositions.length >= 2 && (
+          <Polyline
+            positions={highlightPositions}
+            pathOptions={{ color: '#4ade80', weight: 5, opacity: 1 }}
+          />
+        )}
         <Marker position={startPos} icon={startIcon} />
         <Marker position={endPos} icon={endIcon} />
-        <FitBounds bounds={positions} />
+        <FitBounds bounds={highlightPositions || positions} />
       </MapContainer>
     </div>
   );
 }
 
-// Decode Google-encoded polyline string
 function decodePolyline(encoded) {
   const points = [];
   let index = 0;
