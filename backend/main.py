@@ -17,7 +17,7 @@ import config
 from database import init_db, get_session, async_session
 from models import Activity, Split, Stream, BestEffort
 from strava_client import StravaClient, STREAM_TYPES
-from bulk_import import import_from_export
+from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
 from route_matching import group_routes
 
@@ -207,6 +207,7 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
         await session.delete(old)
 
     # streams_resp is a list of stream objects from the API
+    latlng_data = None
     if isinstance(streams_resp, list):
         for stream_obj in streams_resp:
             stream_type = stream_obj.get("type")
@@ -217,6 +218,12 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
                     data=stream_obj.get("data"),
                 )
                 session.add(stream)
+                if stream_type == "latlng":
+                    latlng_data = stream_obj.get("data")
+
+    # Generate summary polyline from latlng stream if not already set
+    if latlng_data and not act.map_summary_polyline:
+        act.map_summary_polyline = encode_polyline(latlng_data)
 
     act.has_detailed_data = True
 
