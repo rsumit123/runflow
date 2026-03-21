@@ -214,7 +214,7 @@ function Dashboard() {
 
       {/* Stats */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', marginBottom: '20px' }}>
           <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Streak</div>
             <div style={{ fontSize: '22px', fontWeight: 700, color: stats.streak > 0 ? '#4ade80' : '#666' }}>{stats.streak}</div>

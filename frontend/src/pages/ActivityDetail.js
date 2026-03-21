@@ -165,6 +165,10 @@ const deleteButtonStyle = {
   marginLeft: '16px',
 };
 
+function formatDistLabel(m) {
+  return m >= 1000 ? `${m / 1000}km` : `${m}m`;
+}
+
 function ActivityDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -173,6 +177,7 @@ function ActivityDetail() {
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+  const [highlightDist, setHighlightDist] = useState(null);
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this activity from your local database? (This does NOT delete from Strava)')) return;
@@ -421,13 +426,54 @@ function ActivityDetail() {
         </div>
       )}
 
-      <h2 style={sectionTitle}>Route Map</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+        <h2 style={{ ...sectionTitle, marginBottom: 0 }}>Route Map</h2>
+        {activity.best_efforts && activity.best_efforts.length > 0 && (
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setHighlightDist(null)}
+              style={{
+                padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                backgroundColor: highlightDist === null ? '#fc5200' : '#16213e',
+                color: highlightDist === null ? '#fff' : '#a0a0b0',
+              }}>
+              Full
+            </button>
+            {activity.best_efforts.map(be => (
+              <button
+                key={be.distance_target}
+                onClick={() => setHighlightDist(highlightDist === be.distance_target ? null : be.distance_target)}
+                style={{
+                  padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                  backgroundColor: highlightDist === be.distance_target ? '#4ade80' : '#16213e',
+                  color: highlightDist === be.distance_target ? '#0a2a0a' : '#a0a0b0',
+                }}>
+                {formatDistLabel(be.distance_target)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <div style={{ marginBottom: '32px' }}>
         <RouteMap
           latlng={activity.streams?.find(s => s.stream_type === 'latlng')?.data}
           polyline={activity.map_summary_polyline}
           height={350}
+          highlight={highlightDist && activity.best_efforts ? (() => {
+            const be = activity.best_efforts.find(e => e.distance_target === highlightDist);
+            return be && be.start_index != null ? { startIndex: be.start_index, endIndex: be.end_index } : null;
+          })() : null}
         />
+        {highlightDist && activity.best_efforts && (() => {
+          const be = activity.best_efforts.find(e => e.distance_target === highlightDist);
+          if (!be) return null;
+          return (
+            <div style={{ marginTop: '8px', fontSize: '13px', color: '#a0a0b0', textAlign: 'center' }}>
+              Fastest {formatDistLabel(highlightDist)}: <span style={{ color: '#4ade80', fontWeight: 600 }}>{formatTime(be.time_seconds)}</span>
+              <span style={{ marginLeft: '8px', color: '#666' }}>({formatPaceSeconds(be.pace_sec_per_km)}/km)</span>
+            </div>
+          );
+        })()}
       </div>
 
       {activity.splits && activity.splits.length > 0 && (
