@@ -130,6 +130,7 @@ function Stats() {
 
   // Best efforts data
   const allTime = bestEfforts?.all_time || {};
+  const allTimeSprint = bestEfforts?.all_time_sprint || {};
   const currentPhase = bestEfforts?.current_phase || {};
   const currentPhaseRuns = bestEfforts?.current_phase_runs || 0;
   const distanceKeys = Object.keys(allTime).sort((a, b) => parseInt(a) - parseInt(b));
@@ -152,28 +153,28 @@ function Stats() {
             {/* Header */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '70px 1fr 1fr 1fr 1fr 80px',
-              gap: '8px',
-              padding: '8px 12px',
+              gridTemplateColumns: '60px 1fr 1fr 1fr 80px',
+              gap: '6px',
+              padding: '8px 10px',
               fontSize: '10px',
               fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: '0.5px',
               color: '#666',
               borderBottom: '1px solid #252540',
-              minWidth: '520px',
+              minWidth: '460px',
             }}>
-              <div>Distance</div>
-              <div>All-Time Best</div>
-              <div>All-Time Pace</div>
+              <div>Dist</div>
+              <div>Segment Best</div>
+              <div>Sprint Best</div>
               <div>Phase Best</div>
-              <div>Phase Pace</div>
-              <div style={{ textAlign: 'right' }}>Diff</div>
+              <div style={{ textAlign: 'right' }}>vs Phase</div>
             </div>
 
             {/* Rows */}
             {distanceKeys.map((distKey) => {
               const at = allTime[distKey];
+              const sp = allTimeSprint[distKey];
               const cp = currentPhase[distKey];
               let diffSeconds = null;
               let diffColor = '#a0a0b0';
@@ -193,15 +194,15 @@ function Stats() {
               return (
                 <div key={distKey} style={{
                   display: 'grid',
-                  gridTemplateColumns: '70px 1fr 1fr 1fr 1fr 80px',
-                  gap: '8px',
-                  padding: '10px 12px',
+                  gridTemplateColumns: '60px 1fr 1fr 1fr 80px',
+                  gap: '6px',
+                  padding: '8px 10px',
                   alignItems: 'center',
                   borderBottom: '1px solid #1e1e35',
-                  fontSize: '14px',
-                  minWidth: '520px',
+                  fontSize: '13px',
+                  minWidth: '460px',
                 }}>
-                  <div style={{ color: '#e0e0e0', fontWeight: 600, fontSize: '13px' }}>
+                  <div style={{ color: '#e0e0e0', fontWeight: 600 }}>
                     {formatDistanceLabel(distKey)}
                   </div>
                   <div>
@@ -209,12 +210,16 @@ function Stats() {
                       <Link to={`/activity/${at.activity_id}`} style={{ color: '#fc5200', textDecoration: 'none', fontWeight: 600 }}>
                         {formatTime(at.time_seconds)}
                       </Link>
-                    ) : (
-                      <span style={{ color: '#555' }}>-</span>
-                    )}
+                    ) : <span style={{ color: '#555' }}>-</span>}
+                    {at && <div style={{ color: '#666', fontSize: '10px' }}>{formatPace(at.pace_sec_per_km)}/km</div>}
                   </div>
-                  <div style={{ color: '#a0a0b0' }}>
-                    {at ? `${formatPace(at.pace_sec_per_km)}/km` : '-'}
+                  <div>
+                    {sp ? (
+                      <Link to={`/activity/${sp.activity_id}`} style={{ color: '#4ade80', textDecoration: 'none', fontWeight: 600 }}>
+                        {formatTime(sp.time_seconds)}
+                      </Link>
+                    ) : <span style={{ color: '#555' }}>-</span>}
+                    {sp && <div style={{ color: '#666', fontSize: '10px' }}>{formatPace(sp.pace_sec_per_km)}/km</div>}
                   </div>
                   <div>
                     {cp ? (
@@ -222,24 +227,18 @@ function Stats() {
                         <Link to={`/activity/${cp.activity_id}`} style={{ color: '#60a5fa', textDecoration: 'none', fontWeight: 600 }}>
                           {formatTime(cp.time_seconds)}
                         </Link>
-                      ) : (
-                        <span style={{ color: '#e0e0e0' }}>{formatTime(cp.time_seconds)}</span>
-                      )
+                      ) : <span style={{ color: '#e0e0e0' }}>{formatTime(cp.time_seconds)}</span>
                     ) : <span style={{ color: '#555' }}>-</span>}
-                  </div>
-                  <div style={{ color: '#a0a0b0' }}>
-                    {cp ? `${formatPace(cp.pace_sec_per_km)}/km` : '-'}
+                    {cp && <div style={{ color: '#666', fontSize: '10px' }}>{formatPace(cp.pace_sec_per_km)}/km</div>}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     {at && cp ? (
                       diffSeconds <= 0 ? (
-                        <span style={{ color: '#4ade80', fontWeight: 700, fontSize: '12px' }}>PR!</span>
+                        <span style={{ color: '#4ade80', fontWeight: 700, fontSize: '11px' }}>PR!</span>
                       ) : (
-                        <span style={{ color: diffColor, fontSize: '13px' }}>+{Math.round(diffSeconds)}s</span>
+                        <span style={{ color: diffColor, fontSize: '12px' }}>+{Math.round(diffSeconds)}s</span>
                       )
-                    ) : (
-                      <span style={{ color: '#555' }}>-</span>
-                    )}
+                    ) : <span style={{ color: '#555' }}>-</span>}
                   </div>
                 </div>
               );

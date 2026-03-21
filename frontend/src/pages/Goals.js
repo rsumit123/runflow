@@ -114,7 +114,7 @@ function GoalCard({ goal, onDelete }) {
                 backgroundColor: (goal.mode || progress?.mode) === 'sprint' ? '#4ade8018' : '#fc520018',
                 color: (goal.mode || progress?.mode) === 'sprint' ? '#4ade80' : '#fc5200',
               }}>
-                {(goal.mode || progress?.mode) === 'sprint' ? 'SPRINT' : 'ANY RUN'}
+                {(goal.mode || progress?.mode) === 'sprint' ? 'SPRINT' : 'SEGMENT'}
               </span>
             </span>
             {achieved && (
@@ -125,7 +125,7 @@ function GoalCard({ goal, onDelete }) {
           </div>
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '8px' }}>
             <div>
-              <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>Best ({(goal.mode || progress?.mode) === 'sprint' ? 'sprint' : 'any'})</div>
+              <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>Best ({(goal.mode || progress?.mode) === 'sprint' ? 'sprint' : 'segment'})</div>
               <div style={{ color: '#fff', fontSize: '16px', fontWeight: 600 }}>
                 {currentBest != null ? formatTime(currentBest) : '-'}
               </div>
@@ -143,7 +143,7 @@ function GoalCard({ goal, onDelete }) {
             {progress?.other_mode_best && (
               <div>
                 <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>
-                  {(goal.mode || progress?.mode) === 'sprint' ? 'In-run best' : 'Sprint best'}
+                  {(goal.mode || progress?.mode) === 'sprint' ? 'Segment best' : 'Sprint best'}
                 </div>
                 <div style={{ color: '#a0a0b0', fontSize: '16px', fontWeight: 600 }}>{formatTime(progress.other_mode_best)}</div>
               </div>
@@ -507,7 +507,7 @@ function AddGoalFlow({ onGoalCreated }) {
                   padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
                   backgroundColor: goalMode === 'any' ? '#fc5200' : '#16213e', color: goalMode === 'any' ? '#fff' : '#a0a0b0',
                 }}>
-                  Any Run
+                  Segment
                 </button>
                 <button onClick={() => {
                   setGoalMode('sprint');
@@ -522,12 +522,12 @@ function AddGoalFlow({ onGoalCreated }) {
               <div style={{ fontSize: '11px', color: '#666', marginBottom: '10px' }}>
                 {goalMode === 'sprint'
                   ? 'Only counts dedicated short runs (total distance < 2x target)'
-                  : 'Counts best segment from any run length'}
+                  : 'Best segment found within any run (e.g. fastest 500m inside a 3km run)'}
               </div>
 
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.8 }}>
                 <span>
-                  Best ({goalMode === 'sprint' ? 'sprint' : 'any'}): <strong style={{ color: '#fff' }}>
+                  Best ({goalMode === 'sprint' ? 'sprint' : 'segment'}): <strong style={{ color: '#fff' }}>
                     {formatTime(goalMode === 'sprint' ? recommendation.sprint_best : recommendation.all_time_best)}
                   </strong>
                   {goalMode === 'sprint' && !recommendation.sprint_best && <span style={{ color: '#666' }}> (no sprint runs)</span>}

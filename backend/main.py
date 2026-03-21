@@ -506,8 +506,28 @@ async def best_effort_records(session: AsyncSession = Depends(get_session)):
                     "date": act.start_date.isoformat() if act and act.start_date else None,
                 }
 
+    # Sprint-only bests (all-time)
+    all_time_sprint = {}
+    for target in TARGET_DISTANCES:
+        result = await session.execute(
+            select(BestEffort)
+            .where(BestEffort.distance_target == target, BestEffort.is_dedicated.is_(True))
+            .order_by(BestEffort.time_seconds.asc())
+            .limit(1)
+        )
+        best = result.scalar_one_or_none()
+        if best:
+            act = await session.get(Activity, best.activity_id)
+            all_time_sprint[target] = {
+                "time_seconds": best.time_seconds,
+                "pace_sec_per_km": best.pace_sec_per_km,
+                "activity_id": best.activity_id,
+                "date": act.start_date.isoformat() if act and act.start_date else None,
+            }
+
     return {
         "all_time": {str(k): v for k, v in all_time.items()},
+        "all_time_sprint": {str(k): v for k, v in all_time_sprint.items()},
         "current_phase": {str(k): v for k, v in current_phase.items()},
         "current_phase_runs": len(current_phase_ids),
     }
