@@ -37,8 +37,21 @@ input[type="date"] {
   min-width: 500px;
 }
 
-/* Mobile activity cards (shown instead of table on small screens) */
+/* Navigation: hamburger on mobile, inline on desktop */
+.mobile-menu-btn {
+  display: none !important;
+}
+
 @media (max-width: 640px) {
+  .desktop-nav {
+    display: none !important;
+  }
+  .mobile-menu-btn {
+    display: block !important;
+  }
+  .mobile-dropdown {
+    display: block !important;
+  }
   .hide-mobile {
     display: none !important;
   }

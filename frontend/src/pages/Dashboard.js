@@ -35,28 +35,52 @@ function formatPaceFromSpeed(avgSpeed) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function computeStats(activities) {
-  if (!activities || activities.length === 0) return null;
-  const valid = activities.filter((a) => a.distance > 0);
+function computeStats(activities, allActivities) {
+  // allActivities is the full list from current page (for display stats)
+  const valid = (allActivities || activities || []).filter((a) => a.distance > 0);
   if (valid.length === 0) return null;
 
-  const totalDistance = valid.reduce((s, a) => s + (a.distance || 0), 0);
-  const totalElevation = valid.reduce((s, a) => s + (a.total_elevation_gain || 0), 0);
-  const longestRun = valid.reduce((m, a) => (a.distance > m.distance ? a : m), valid[0]);
-  const fastestRun = valid.reduce((b, a) => (a.average_speed > (b.average_speed || 0) ? a : b), valid[0]);
+  // Current streak: count consecutive days with runs from most recent
+  let streak = 0;
+  if (valid.length > 0) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let checkDate = new Date(today);
+    for (const a of valid) {
+      const runDate = new Date(a.start_date);
+      runDate.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((checkDate - runDate) / 86400000);
+      if (diffDays <= 1) {
+        streak++;
+        checkDate = runDate;
+      } else {
+        break;
+      }
+    }
+  }
 
+  // This week's distance
+  const now = new Date();
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - now.getDay());
+  weekStart.setHours(0, 0, 0, 0);
+  const thisWeekRuns = valid.filter(a => new Date(a.start_date) >= weekStart);
+  const thisWeekKm = thisWeekRuns.reduce((s, a) => s + (a.distance || 0), 0) / 1000;
+
+  // Last 5 avg pace
   const last5 = valid.slice(0, 5);
   const l5Time = last5.reduce((s, a) => s + (a.moving_time || 0), 0);
   const l5Dist = last5.reduce((s, a) => s + (a.distance || 0), 0);
 
+  // Fastest run
+  const fastestRun = valid.reduce((b, a) => (a.average_speed > (b.average_speed || 0) ? a : b), valid[0]);
+
   return {
-    totalDistanceKm: (totalDistance / 1000).toFixed(1),
-    totalElevation: Math.round(totalElevation),
-    longestRunKm: (longestRun.distance / 1000).toFixed(2),
-    longestRunId: longestRun.id,
+    streak,
+    thisWeekKm: thisWeekKm.toFixed(1),
+    thisWeekRuns: thisWeekRuns.length,
     fastestRunPace: formatPaceFromSpeed(fastestRun.average_speed),
     fastestRunId: fastestRun.id,
-    avgDistanceKm: (totalDistance / 1000 / valid.length).toFixed(2),
     last5AvgPace: l5Dist > 0 ? formatPace(l5Time, l5Dist) : '-',
   };
 }
@@ -68,7 +92,7 @@ function getDefaultDates() {
   return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
 }
 
-const PER_PAGE = 20;
+const PER_PAGE = 10;
 
 function Dashboard() {
   const [activities, setActivities] = useState([]);
@@ -190,29 +214,29 @@ function Dashboard() {
 
       {/* Stats */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '24px' }}>
-          {[
-            { label: 'Last 5 Avg Pace', value: stats.last5AvgPace, unit: 'min/km' },
-            { label: 'Total Distance', value: stats.totalDistanceKm, unit: 'km' },
-            { label: 'Total Elevation', value: stats.totalElevation, unit: 'm' },
-            { label: 'Longest Run', value: stats.longestRunKm, unit: 'km', linkId: stats.longestRunId },
-            { label: 'Avg Distance', value: stats.avgDistanceKm, unit: 'km/run' },
-            { label: 'Fastest Run', value: stats.fastestRunPace, unit: 'min/km', linkId: stats.fastestRunId },
-          ].map((s, i) => {
-            const card = (
-              <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center', cursor: s.linkId ? 'pointer' : 'default' }}>
-                <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>{s.label}</div>
-                <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{s.value}</div>
-                <div style={{ fontSize: '12px', color: '#a0a0b0' }}>{s.unit}</div>
-                {s.linkId && <div style={{ fontSize: '9px', color: '#fc520088', marginTop: '4px' }}>view run &rarr;</div>}
-              </div>
-            );
-            return s.linkId ? (
-              <Link key={i} to={`/activity/${s.linkId}`} style={{ textDecoration: 'none' }}>{card}</Link>
-            ) : (
-              <div key={i}>{card}</div>
-            );
-          })}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Streak</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: stats.streak > 0 ? '#4ade80' : '#666' }}>{stats.streak}</div>
+            <div style={{ fontSize: '11px', color: '#a0a0b0' }}>days</div>
+          </div>
+          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>This Week</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{stats.thisWeekKm}</div>
+            <div style={{ fontSize: '11px', color: '#a0a0b0' }}>km ({stats.thisWeekRuns} runs)</div>
+          </div>
+          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Last 5 Pace</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{stats.last5AvgPace}</div>
+            <div style={{ fontSize: '11px', color: '#a0a0b0' }}>min/km</div>
+          </div>
+          <Link to={`/activity/${stats.fastestRunId}`} style={{ textDecoration: 'none' }}>
+            <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center', cursor: 'pointer' }}>
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Fastest</div>
+              <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{stats.fastestRunPace}</div>
+              <div style={{ fontSize: '11px', color: '#a0a0b0' }}>min/km</div>
+            </div>
+          </Link>
         </div>
       )}
 
