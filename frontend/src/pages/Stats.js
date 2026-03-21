@@ -26,7 +26,9 @@ function formatDate(dateString) {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-const cardStyle = { backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' };
+const cardStyle = { backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '20px', overflow: 'hidden' };
+const chartWrap = { width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' };
+const chartInner = (minW) => ({ minWidth: minW ? `${minW}px` : undefined, width: '100%' });
 const sectionTitle = { fontSize: '18px', fontWeight: 600, color: '#fff', marginBottom: '16px' };
 
 const CustomTooltip = ({ active, payload, label, formatter }) => {
@@ -155,25 +157,24 @@ function Stats() {
         <div style={cardStyle}>
           <h2 style={sectionTitle}>Pace Across Phases</h2>
           <p style={{ fontSize: '13px', color: '#666', marginBottom: '16px' }}>Only phases with 3+ runs shown. Lower = faster.</p>
-          <ResponsiveContainer width="100%" height={280}>
-            <ComposedChart data={phasePaceData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
-              <XAxis dataKey="name" tick={{ fill: '#666', fontSize: 11 }} />
-              <YAxis
-                tick={{ fill: '#666', fontSize: 11 }}
-                domain={['auto', 'auto']}
-                tickFormatter={(v) => formatPace(v)}
-                reversed
-              />
-              <Tooltip content={<CustomTooltip formatter={(v, name) => {
-                if (name === 'Avg Pace' || name === 'Best Pace') return formatPace(v);
-                if (name === 'Distance') return `${v} km`;
-                return v;
-              }} />} />
-              <Area type="monotone" dataKey="pace" name="Avg Pace" fill="#fc520015" stroke="#fc5200" strokeWidth={2} dot={{ fill: '#fc5200', r: 4 }} />
-              <Line type="monotone" dataKey="bestPace" name="Best Pace" stroke="#4ade80" strokeWidth={1.5} strokeDasharray="4 4" dot={{ fill: '#4ade80', r: 3 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <div style={chartWrap}>
+            <div style={chartInner(500)}>
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={phasePaceData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                  <XAxis dataKey="name" tick={{ fill: '#666', fontSize: 10 }} />
+                  <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} tickFormatter={(v) => formatPace(v)} reversed width={45} />
+                  <Tooltip content={<CustomTooltip formatter={(v, name) => {
+                    if (name === 'Avg Pace' || name === 'Best Pace') return formatPace(v);
+                    if (name === 'Distance') return `${v} km`;
+                    return v;
+                  }} />} />
+                  <Area type="monotone" dataKey="pace" name="Avg Pace" fill="#fc520015" stroke="#fc5200" strokeWidth={2} dot={{ fill: '#fc5200', r: 3 }} />
+                  <Line type="monotone" dataKey="bestPace" name="Best Pace" stroke="#4ade80" strokeWidth={1.5} strokeDasharray="4 4" dot={{ fill: '#4ade80', r: 2 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
 
@@ -181,21 +182,25 @@ function Stats() {
       {monthlyChart.length > 0 && (
         <div style={cardStyle}>
           <h2 style={sectionTitle}>Monthly Volume</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <ComposedChart data={monthlyChart} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
-              <XAxis dataKey="month" tick={{ fill: '#666', fontSize: 10 }} interval={2} angle={-45} textAnchor="end" height={50} />
-              <YAxis yAxisId="km" tick={{ fill: '#666', fontSize: 11 }} />
-              <YAxis yAxisId="runs" orientation="right" tick={{ fill: '#666', fontSize: 11 }} />
-              <Tooltip content={<CustomTooltip formatter={(v, name) => {
-                if (name === 'Distance') return `${v} km`;
-                if (name === 'Pace') return formatPace(v);
-                return v;
-              }} />} />
-              <Bar yAxisId="km" dataKey="distance" name="Distance" fill="#fc520066" radius={[3, 3, 0, 0]} />
-              <Line yAxisId="runs" type="monotone" dataKey="runs" name="Runs" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <div style={chartWrap}>
+            <div style={chartInner(600)}>
+              <ResponsiveContainer width="100%" height={240}>
+                <ComposedChart data={monthlyChart} margin={{ top: 5, right: 5, left: -10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                  <XAxis dataKey="month" tick={{ fill: '#666', fontSize: 9 }} interval={2} angle={-45} textAnchor="end" height={45} />
+                  <YAxis yAxisId="km" tick={{ fill: '#666', fontSize: 10 }} width={35} />
+                  <YAxis yAxisId="runs" orientation="right" tick={{ fill: '#666', fontSize: 10 }} width={30} />
+                  <Tooltip content={<CustomTooltip formatter={(v, name) => {
+                    if (name === 'Distance') return `${v} km`;
+                    if (name === 'Pace') return formatPace(v);
+                    return v;
+                  }} />} />
+                  <Bar yAxisId="km" dataKey="distance" name="Distance" fill="#fc520066" radius={[3, 3, 0, 0]} />
+                  <Line yAxisId="runs" type="monotone" dataKey="runs" name="Runs" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
 
@@ -203,20 +208,19 @@ function Stats() {
       {monthlyChart.length > 0 && (
         <div style={cardStyle}>
           <h2 style={sectionTitle}>Monthly Avg Pace</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={monthlyChart.filter(m => m.pace)} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
-              <XAxis dataKey="month" tick={{ fill: '#666', fontSize: 10 }} interval={3} angle={-45} textAnchor="end" height={50} />
-              <YAxis
-                tick={{ fill: '#666', fontSize: 11 }}
-                domain={['auto', 'auto']}
-                tickFormatter={(v) => formatPace(v)}
-                reversed
-              />
-              <Tooltip content={<CustomTooltip formatter={(v) => formatPace(v)} />} />
-              <Line type="monotone" dataKey="pace" name="Avg Pace" stroke="#fc5200" strokeWidth={2} dot={{ r: 3, fill: '#fc5200' }} />
-            </LineChart>
-          </ResponsiveContainer>
+          <div style={chartWrap}>
+            <div style={chartInner(500)}>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={monthlyChart.filter(m => m.pace)} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                  <XAxis dataKey="month" tick={{ fill: '#666', fontSize: 9 }} interval={3} angle={-45} textAnchor="end" height={45} />
+                  <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} tickFormatter={(v) => formatPace(v)} reversed width={45} />
+                  <Tooltip content={<CustomTooltip formatter={(v) => formatPace(v)} />} />
+                  <Line type="monotone" dataKey="pace" name="Avg Pace" stroke="#fc5200" strokeWidth={2} dot={{ r: 2, fill: '#fc5200' }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
 
