@@ -4,7 +4,7 @@
 - [x] Route Maps - Show GPS route on activity detail page (Leaflet + OpenStreetMap)
 - [ ] Route Matching - Detect same routes, compare pace across attempts
 - [ ] Route-based Stats - Best time per route, improvement tracking
-- [ ] Strava Webhook - Auto-push new activities instead of manual pull
+- [x] Strava Webhook - Auto-push new activities instead of manual pull (subscription ID: 336241)
 - [ ] Weekly Summary - This week vs last week vs phase average
 
 ## Medium Priority
