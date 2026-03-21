@@ -659,38 +659,46 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
     merge_result = await session.execute(select(RouteMerge))
     merges = merge_result.scalars().all()
     if merges:
-        # Build a mapping: from_key -> to_key (follow chains)
-        merge_map = {}
+        # Build mapping: from_key -> to_key. Multiple from_keys can map to same to_key.
+        merge_map: dict[str, str] = {}
         for m in merges:
             merge_map[m.from_key] = m.to_key
-        # Follow chains (A->B, B->C => A->C)
-        def resolve(key):
+
+        # Resolve chains: if A->B and B->C, then A->C
+        def resolve(key: str) -> str:
             visited = set()
             while key in merge_map and key not in visited:
                 visited.add(key)
                 key = merge_map[key]
             return key
+
         # Group routes by their resolved key
-        resolved_routes = {}
+        resolved_routes: dict[str, dict] = {}
         for route in routes:
             target_key = resolve(route["route_key"])
             if target_key not in resolved_routes:
+                route["route_key"] = target_key
                 resolved_routes[target_key] = route
             else:
-                # Merge this route into the target
+                # Merge this route's data into the target
                 target = resolved_routes[target_key]
                 target["activities"].extend(route["activities"])
-                target["activity_ids"].extend(route["activity_ids"])
+                target["activity_ids"].extend(route.get("activity_ids", []))
                 target["run_count"] += route["run_count"]
+
         # Re-sort activities and recompute stats for merged routes
-        for key, route in resolved_routes.items():
+        for route in resolved_routes.values():
             route["activities"].sort(key=lambda a: a.get("date") or "")
             paces = [a["pace_sec_per_km"] for a in route["activities"] if a.get("pace_sec_per_km")]
             if paces:
                 route["best_pace_sec_per_km"] = round(min(paces), 1)
+            times = [a["moving_time"] for a in route["activities"] if a.get("moving_time")]
+            if times:
+                route["best_time"] = min(times)
             distances = [a["distance"] for a in route["activities"] if a.get("distance")]
             if distances:
                 route["avg_distance_km"] = round(sum(distances) / len(distances) / 1000, 2)
+
         routes = sorted(resolved_routes.values(), key=lambda r: r["run_count"], reverse=True)
 
     # Attach a polyline to each route for map preview

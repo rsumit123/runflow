@@ -261,11 +261,19 @@ function Routes() {
           const routeBadges = badges[route.route_key] || [];
           const isMerging = mergingRoute === route.route_key;
 
+          // Color border based on highlight
+          const highlightBorder = routeBadges.includes('Fastest') ? '2px solid #4ade80'
+            : routeBadges.includes('Most Improved') ? '2px solid #60a5fa'
+            : routeBadges.includes('Hilliest') ? '2px solid #fb923c'
+            : routeBadges.includes('Most Consistent') ? '2px solid #c084fc'
+            : '1px solid #252540';
+
           return (
             <div key={route.route_id} style={{
               backgroundColor: '#1a1a2e',
               borderRadius: '8px',
               overflow: 'hidden',
+              border: highlightBorder,
             }}>
               {/* Route header - clickable */}
               <div
@@ -280,43 +288,12 @@ function Routes() {
               >
                 {route.polyline && <MiniRouteMap polyline={route.polyline} />}
                 <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    {editingRoute === route.route_key ? (
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleRename(route.route_key)}
-                          placeholder="Route name..."
-                          autoFocus
-                          style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#fff', fontSize: '14px', width: '160px' }}
-                        />
-                        <button onClick={() => handleRename(route.route_key)}
-                          style={{ padding: '4px 10px', borderRadius: '4px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>
-                          Save
-                        </button>
-                        <button onClick={() => { setEditingRoute(null); setEditName(''); }}
-                          style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '12px', cursor: 'pointer' }}>
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <span style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
-                          {route.custom_name || `~${route.avg_distance_km} km route`}
-                        </span>
-                        {route.custom_name && (
-                          <span style={{ fontSize: '12px', color: '#666' }}>~{route.avg_distance_km} km</span>
-                        )}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setEditingRoute(route.route_key); setEditName(route.custom_name || ''); }}
-                          style={{ padding: '2px 6px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '11px', cursor: 'pointer' }}
-                          title="Rename route"
-                        >
-                          &#9998;
-                        </button>
-                      </>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
+                      {route.custom_name || `~${route.avg_distance_km} km route`}
+                    </span>
+                    {route.custom_name && (
+                      <span style={{ fontSize: '12px', color: '#666' }}>~{route.avg_distance_km} km</span>
                     )}
                     <span style={{ fontSize: '12px', color: '#fc5200', backgroundColor: '#fc520015', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>
                       {route.run_count} runs
@@ -360,6 +337,44 @@ function Routes() {
               {/* Expanded: pace chart + run list */}
               {isExpanded && (
                 <div style={{ padding: '0 16px 16px' }}>
+                  {/* Actions toolbar */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #252540' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditingRoute(route.route_key); setEditName(route.custom_name || ''); }}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', cursor: 'pointer' }}>
+                      Rename
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMergingRoute(isMerging ? null : route.route_key); }}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', cursor: 'pointer' }}>
+                      {isMerging ? 'Cancel Merge' : 'Merge Routes'}
+                    </button>
+                    {editingRoute === route.route_key && (
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%' }} onClick={(e) => e.stopPropagation()}>
+                        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleRename(route.route_key)}
+                          placeholder="e.g. Park Loop, Hill Sprint..." autoFocus
+                          style={{ padding: '6px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#0f0f1a', color: '#fff', fontSize: '13px', flex: 1 }} />
+                        <button onClick={() => handleRename(route.route_key)}
+                          style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>Save</button>
+                        <button onClick={() => { setEditingRoute(null); setEditName(''); }}
+                          style={{ padding: '6px 8px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '12px', cursor: 'pointer' }}>X</button>
+                      </div>
+                    )}
+                    {isMerging && (
+                      <div style={{ width: '100%', maxHeight: '150px', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+                        <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>Select route to merge into this one:</div>
+                        {routes.filter(r => r.route_key !== route.route_key).map(r => (
+                          <button key={r.route_key} disabled={mergeLoading}
+                            onClick={() => handleMerge(r.route_key, route.route_key)}
+                            style={{ display: 'block', width: '100%', padding: '6px 10px', marginBottom: '4px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#0f0f1a', color: '#e0e0e0', fontSize: '12px', cursor: 'pointer', textAlign: 'left' }}>
+                            {r.custom_name || `~${r.avg_distance_km}km`} ({r.run_count} runs)
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Pace trend chart */}
                   {chartData.length > 2 && (
                     <div style={{ marginBottom: '16px' }}>
@@ -435,72 +450,7 @@ function Routes() {
                     })}
                   </div>
 
-                  {/* Merge button */}
-                  <div style={{ marginTop: '16px', borderTop: '1px solid #252540', paddingTop: '12px' }}>
-                    {!isMerging ? (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setMergingRoute(route.route_key); }}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: '6px',
-                          border: '1px solid #333',
-                          backgroundColor: 'transparent',
-                          color: '#a0a0b0',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                        }}
-                      >
-                        Merge with another route...
-                      </button>
-                    ) : (
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '8px', fontWeight: 600 }}>
-                          Select a route to merge into this one:
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
-                          {routes.filter(r => r.route_key !== route.route_key).map(r => (
-                            <button
-                              key={r.route_key}
-                              disabled={mergeLoading}
-                              onClick={() => handleMerge(r.route_key, route.route_key)}
-                              style={{
-                                padding: '8px 12px',
-                                borderRadius: '6px',
-                                border: '1px solid #333',
-                                backgroundColor: '#16213e',
-                                color: '#e0e0e0',
-                                fontSize: '13px',
-                                cursor: mergeLoading ? 'wait' : 'pointer',
-                                textAlign: 'left',
-                                opacity: mergeLoading ? 0.5 : 1,
-                              }}
-                            >
-                              {r.custom_name || `~${r.avg_distance_km} km route`}
-                              <span style={{ color: '#666', marginLeft: '8px', fontSize: '11px' }}>
-                                {r.avg_distance_km} km · {r.run_count} runs
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                        <button
-                          onClick={() => setMergingRoute(null)}
-                          style={{
-                            marginTop: '8px',
-                            padding: '4px 10px',
-                            borderRadius: '4px',
-                            border: '1px solid #333',
-                            backgroundColor: 'transparent',
-                            color: '#666',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  {/* Bottom spacer */}
                 </div>
               )}
             </div>
