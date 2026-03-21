@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 
 import config
 from database import init_db, get_session, async_session
-from models import Activity, Split, Stream, BestEffort
+from models import Activity, Split, Stream, BestEffort, RouteLabel
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
@@ -391,6 +391,30 @@ async def get_activity(activity_id: int, session: AsyncSession = Depends(get_ses
         }
         for be in sorted(act.best_efforts, key=lambda x: x.distance_target)
     ]
+
+    # Look up route name: check all labels against this activity's coords
+    data["route_name"] = None
+    if act.start_latlng and act.distance:
+        label_result = await session.execute(select(RouteLabel))
+        for label in label_result.scalars().all():
+            # Parse route_key: "lat_lng_dist"
+            parts = label.route_key.split("_")
+            if len(parts) >= 3:
+                try:
+                    key_lat = float(parts[0])
+                    key_lng = float(parts[1])
+                    key_dist = float(parts[2])
+                    act_lat = round(act.start_latlng[0], 3)
+                    act_lng = round(act.start_latlng[1], 3)
+                    act_dist = round(act.distance / 100) * 100
+                    if (abs(act_lat - key_lat) < 0.005
+                            and abs(act_lng - key_lng) < 0.005
+                            and abs(act_dist - key_dist) / max(key_dist, 1) < 0.2):
+                        data["route_name"] = label.name
+                        break
+                except (ValueError, IndexError):
+                    continue
+
     return data
 
 
@@ -646,7 +670,44 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
                     break
         route["polyline"] = polyline
 
+    # Attach custom route labels
+    label_result = await session.execute(select(RouteLabel))
+    labels = {l.route_key: l.name for l in label_result.scalars().all()}
+    for route in routes:
+        custom_name = labels.get(route["route_key"])
+        if custom_name:
+            route["custom_name"] = custom_name
+
     return {"routes": routes, "total_routes": len(routes)}
+
+
+class RouteLabelRequest(BaseModel):
+    route_key: str
+    name: str
+
+
+@app.post("/api/routes/label")
+async def label_route(req: RouteLabelRequest, session: AsyncSession = Depends(get_session)):
+    """Set a custom name for a route."""
+    result = await session.execute(
+        select(RouteLabel).where(RouteLabel.route_key == req.route_key)
+    )
+    label = result.scalar_one_or_none()
+    if label:
+        label.name = req.name
+    else:
+        label = RouteLabel(route_key=req.route_key, name=req.name)
+        session.add(label)
+    await session.commit()
+    return {"route_key": req.route_key, "name": req.name}
+
+
+@app.get("/api/routes/labels")
+async def get_route_labels(session: AsyncSession = Depends(get_session)):
+    """Get all route labels (for use on activity detail pages)."""
+    result = await session.execute(select(RouteLabel))
+    labels = {l.route_key: l.name for l in result.scalars().all()}
+    return {"labels": labels}
 
 
 @app.get("/api/phases")

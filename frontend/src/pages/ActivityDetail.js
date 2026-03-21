@@ -261,7 +261,14 @@ function ActivityDetail() {
           {deleting ? 'Deleting...' : 'Delete'}
         </button>
       </div>
-      <p style={dateStyle}>{formatDate(activity.start_date)}</p>
+      <div style={dateStyle}>
+        {formatDate(activity.start_date)}
+        {activity.route_name && (
+          <span style={{ marginLeft: '12px', color: '#fc5200', backgroundColor: '#fc520015', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
+            {activity.route_name}
+          </span>
+        )}
+      </div>
 
       <div style={statsGrid}>
         <div style={statCard}>

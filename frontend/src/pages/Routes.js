@@ -95,6 +95,8 @@ function Routes() {
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedRoute, setExpandedRoute] = useState(null);
+  const [editingRoute, setEditingRoute] = useState(null);
+  const [editName, setEditName] = useState('');
 
   useEffect(() => {
     api.get('/routes')
@@ -104,6 +106,20 @@ function Routes() {
       })
       .catch(() => setLoading(false));
   }, []);
+
+  const handleRename = async (routeKey) => {
+    if (!editName.trim()) return;
+    try {
+      await api.post('/routes/label', { route_key: routeKey, name: editName.trim() });
+      setRoutes(routes.map(r =>
+        r.route_key === routeKey ? { ...r, custom_name: editName.trim() } : r
+      ));
+      setEditingRoute(null);
+      setEditName('');
+    } catch (err) {
+      alert('Failed to save name');
+    }
+  };
 
   if (loading) {
     return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0' }}>Analyzing routes...</div>;
@@ -165,9 +181,43 @@ function Routes() {
                 {route.polyline && <MiniRouteMap polyline={route.polyline} />}
                 <div style={{ flex: '1 1 auto', minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
-                      ~{route.avg_distance_km} km route
-                    </span>
+                    {editingRoute === route.route_key ? (
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleRename(route.route_key)}
+                          placeholder="Route name..."
+                          autoFocus
+                          style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#fff', fontSize: '14px', width: '160px' }}
+                        />
+                        <button onClick={() => handleRename(route.route_key)}
+                          style={{ padding: '4px 10px', borderRadius: '4px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>
+                          Save
+                        </button>
+                        <button onClick={() => { setEditingRoute(null); setEditName(''); }}
+                          style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '12px', cursor: 'pointer' }}>
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
+                          {route.custom_name || `~${route.avg_distance_km} km route`}
+                        </span>
+                        {route.custom_name && (
+                          <span style={{ fontSize: '12px', color: '#666' }}>~{route.avg_distance_km} km</span>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditingRoute(route.route_key); setEditName(route.custom_name || ''); }}
+                          style={{ padding: '2px 6px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '11px', cursor: 'pointer' }}
+                          title="Rename route"
+                        >
+                          &#9998;
+                        </button>
+                      </>
+                    )}
                     <span style={{ fontSize: '12px', color: '#fc5200', backgroundColor: '#fc520015', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>
                       {route.run_count} runs
                     </span>
