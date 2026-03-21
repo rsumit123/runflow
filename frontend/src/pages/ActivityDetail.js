@@ -1,0 +1,322 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import api from '../api';
+import SplitsTable from '../components/SplitsTable';
+
+const backLink = {
+  display: 'inline-block',
+  marginBottom: '20px',
+  color: '#a0a0b0',
+  fontSize: '14px',
+};
+
+const titleStyle = {
+  fontSize: '22px',
+  fontWeight: 700,
+  color: '#ffffff',
+  marginBottom: '8px',
+  wordBreak: 'break-word',
+};
+
+const dateStyle = {
+  fontSize: '14px',
+  color: '#a0a0b0',
+  marginBottom: '24px',
+};
+
+const statsGrid = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+  gap: '12px',
+  marginBottom: '24px',
+};
+
+const statCard = {
+  backgroundColor: '#1a1a2e',
+  borderRadius: '8px',
+  padding: '20px',
+  textAlign: 'center',
+};
+
+const statLabel = {
+  fontSize: '11px',
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: '1px',
+  color: '#a0a0b0',
+  marginBottom: '6px',
+};
+
+const statValue = {
+  fontSize: '24px',
+  fontWeight: 700,
+  color: '#fc5200',
+};
+
+const statUnit = {
+  fontSize: '13px',
+  color: '#a0a0b0',
+  marginTop: '2px',
+};
+
+const sectionTitle = {
+  fontSize: '20px',
+  fontWeight: 600,
+  color: '#ffffff',
+  marginBottom: '16px',
+  marginTop: '8px',
+};
+
+const mapPlaceholder = {
+  backgroundColor: '#1a1a2e',
+  borderRadius: '8px',
+  height: '300px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: '#555',
+  fontSize: '15px',
+  border: '1px dashed #333',
+  marginBottom: '32px',
+};
+
+const loadingStyle = {
+  textAlign: 'center',
+  padding: '60px',
+  color: '#a0a0b0',
+  fontSize: '16px',
+};
+
+const errorStyle = {
+  padding: '16px',
+  backgroundColor: '#3d1515',
+  border: '1px solid #6b2020',
+  borderRadius: '8px',
+  color: '#ff6b6b',
+};
+
+const bestSplitCard = {
+  backgroundColor: '#1a1a2e',
+  borderRadius: '8px',
+  padding: '20px',
+  textAlign: 'center',
+  border: '1px solid #fc5200',
+  marginBottom: '24px',
+};
+
+function formatDate(dateString) {
+  if (!dateString) return '-';
+  const d = new Date(dateString);
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+function formatTime(seconds) {
+  if (!seconds) return '-';
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.round(seconds % 60);
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function metersToKm(meters) {
+  if (!meters) return '0.00';
+  return (meters / 1000).toFixed(2);
+}
+
+function formatPace(movingTimeSeconds, distanceMeters) {
+  if (!movingTimeSeconds || !distanceMeters) return '-';
+  const km = distanceMeters / 1000;
+  const paceSeconds = movingTimeSeconds / km;
+  const mins = Math.floor(paceSeconds / 60);
+  const secs = Math.round(paceSeconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatPaceSeconds(totalSeconds) {
+  if (!totalSeconds || totalSeconds === Infinity) return '-';
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.round(totalSeconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+const deleteButtonStyle = {
+  padding: '8px 20px',
+  borderRadius: '6px',
+  border: '1px solid #6b2020',
+  backgroundColor: 'transparent',
+  color: '#ff6b6b',
+  fontSize: '13px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  marginLeft: '16px',
+};
+
+function ActivityDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [activity, setActivity] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!window.confirm('Delete this activity from your local database? (This does NOT delete from Strava)')) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/activities/${id}`);
+      navigate('/');
+    } catch (err) {
+      alert('Failed to delete: ' + (err.response?.data?.detail || err.message));
+      setDeleting(false);
+    }
+  };
+
+  useEffect(() => {
+    api
+      .get(`/activities/${id}`)
+      .then((res) => {
+        setActivity(res.data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.response?.data?.detail || 'Failed to load activity');
+        setLoading(false);
+      });
+  }, [id]);
+
+  const best1kmSplit = useMemo(() => {
+    if (!activity || !activity.splits || activity.splits.length === 0) return null;
+    let bestPace = Infinity;
+    let bestSplit = null;
+    activity.splits.forEach((split) => {
+      const dist = split.distance || 0;
+      const time = split.moving_time || split.elapsed_time || 0;
+      if (dist > 0 && time > 0) {
+        const km = dist / 1000;
+        const paceSeconds = time / km;
+        if (paceSeconds < bestPace) {
+          bestPace = paceSeconds;
+          bestSplit = { ...split, paceSeconds: paceSeconds };
+        }
+      }
+    });
+    return bestSplit;
+  }, [activity]);
+
+  if (loading) {
+    return <div style={loadingStyle}>Loading activity...</div>;
+  }
+
+  if (error) {
+    return (
+      <div>
+        <Link to="/" style={backLink}>
+          &larr; Back to Dashboard
+        </Link>
+        <div style={errorStyle}>{error}</div>
+      </div>
+    );
+  }
+
+  if (!activity) return null;
+
+  const elevationM = activity.total_elevation_gain
+    ? Math.round(activity.total_elevation_gain)
+    : 0;
+
+  return (
+    <div>
+      <Link to="/" style={backLink}>
+        &larr; Back to Dashboard
+      </Link>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+        <h1 style={{ ...titleStyle, marginBottom: 0, flex: '1 1 auto', minWidth: 0 }}>{activity.name || 'Untitled Activity'}</h1>
+        <button style={{ ...deleteButtonStyle, marginLeft: 0, whiteSpace: 'nowrap', flexShrink: 0 }} onClick={handleDelete} disabled={deleting}>
+          {deleting ? 'Deleting...' : 'Delete'}
+        </button>
+      </div>
+      <p style={dateStyle}>{formatDate(activity.start_date)}</p>
+
+      <div style={statsGrid}>
+        <div style={statCard}>
+          <div style={statLabel}>Distance</div>
+          <div style={statValue}>{metersToKm(activity.distance)}</div>
+          <div style={statUnit}>km</div>
+        </div>
+        <div style={statCard}>
+          <div style={statLabel}>Pace</div>
+          <div style={statValue}>{formatPace(activity.moving_time, activity.distance)}</div>
+          <div style={statUnit}>min/km</div>
+        </div>
+        <div style={statCard}>
+          <div style={statLabel}>Moving Time</div>
+          <div style={statValue}>{formatTime(activity.moving_time)}</div>
+          <div style={statUnit}>h:m:s</div>
+        </div>
+        <div style={statCard}>
+          <div style={statLabel}>Elapsed Time</div>
+          <div style={statValue}>{formatTime(activity.elapsed_time)}</div>
+          <div style={statUnit}>h:m:s</div>
+        </div>
+        <div style={statCard}>
+          <div style={statLabel}>Elevation Gain</div>
+          <div style={statValue}>{elevationM}</div>
+          <div style={statUnit}>m</div>
+        </div>
+        {activity.average_heartrate && (
+          <div style={statCard}>
+            <div style={statLabel}>Avg Heart Rate</div>
+            <div style={statValue}>{Math.round(activity.average_heartrate)}</div>
+            <div style={statUnit}>bpm</div>
+          </div>
+        )}
+        {activity.max_heartrate && (
+          <div style={statCard}>
+            <div style={statLabel}>Max Heart Rate</div>
+            <div style={statValue}>{Math.round(activity.max_heartrate)}</div>
+            <div style={statUnit}>bpm</div>
+          </div>
+        )}
+        {activity.average_cadence && (
+          <div style={statCard}>
+            <div style={statLabel}>Avg Cadence</div>
+            <div style={statValue}>{Math.round(activity.average_cadence * 2)}</div>
+            <div style={statUnit}>spm</div>
+          </div>
+        )}
+      </div>
+
+      {best1kmSplit && (
+        <div style={bestSplitCard}>
+          <div style={statLabel}>Best 1km Split</div>
+          <div style={statValue}>{formatPaceSeconds(best1kmSplit.paceSeconds)}</div>
+          <div style={statUnit}>
+            min/km (Split #{best1kmSplit.split_number || best1kmSplit.split || '?'})
+          </div>
+        </div>
+      )}
+
+      <h2 style={sectionTitle}>Route Map</h2>
+      <div style={mapPlaceholder} id="activity-map">
+        Map placeholder - GPS route will be displayed here
+      </div>
+
+      {activity.splits && activity.splits.length > 0 && (
+        <>
+          <h2 style={sectionTitle}>Splits</h2>
+          <SplitsTable splits={activity.splits} />
+        </>
+      )}
+    </div>
+  );
+}
+
+export default ActivityDetail;

@@ -1,0 +1,48 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #0f0f1a;
+  color: #e0e0e0;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+a {
+  color: #fc5200;
+  text-decoration: none;
+}
+
+a:hover {
+  color: #ff7733;
+}
+
+/* Dark theme date inputs for mobile */
+input[type="date"] {
+  color-scheme: dark;
+}
+
+/* Scrollable tables on mobile */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+}
+
+.table-scroll table {
+  min-width: 500px;
+}
+
+/* Mobile activity cards (shown instead of table on small screens) */
+@media (max-width: 640px) {
+  .hide-mobile {
+    display: none !important;
+  }
+  .show-mobile {
+    display: block !important;
+  }
+}

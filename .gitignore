@@ -1,0 +1,23 @@
+# Environment
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Node/React
+node_modules/
+build/
+dist/
+.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
