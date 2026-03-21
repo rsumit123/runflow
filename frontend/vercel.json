@@ -1,0 +1,7 @@
+{
+  "buildCommand": "REACT_APP_API_URL=https://runflow-api.skdev.one/api npm run build",
+  "outputDirectory": "build",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

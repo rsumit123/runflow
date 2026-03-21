@@ -2,8 +2,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from the project root (one level up from backend/)
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+# Load .env — check ENV_PATH env var first, then project root (one level up from backend/)
+ENV_PATH = Path(os.getenv("ENV_PATH", Path(__file__).resolve().parent.parent / ".env"))
 load_dotenv(dotenv_path=ENV_PATH)
 
 STRAVA_CLIENT_ID = os.getenv("strava_client_id", "")
