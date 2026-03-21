@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete as sa_delete
@@ -781,6 +781,75 @@ async def get_route_labels(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(RouteLabel))
     labels = {l.route_key: l.name for l in result.scalars().all()}
     return {"labels": labels}
+
+
+# ---------------------------------------------------------------------------
+# Strava Webhook
+# ---------------------------------------------------------------------------
+
+@app.get("/api/webhook")
+async def webhook_verify(
+    mode: str = Query(None, alias="hub.mode"),
+    token: str = Query(None, alias="hub.verify_token"),
+    challenge: str = Query(None, alias="hub.challenge"),
+):
+    """Strava webhook subscription verification."""
+    if mode == "subscribe" and token == config.STRAVA_WEBHOOK_VERIFY_TOKEN:
+        logger.info("Webhook verified successfully")
+        return {"hub.challenge": challenge}
+    raise HTTPException(status_code=403, detail="Verification failed")
+
+
+@app.post("/api/webhook")
+async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
+    """
+    Receive Strava webhook events.
+    Strava sends: { aspect_type, event_time, object_id, object_type, owner_id, subscription_id }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return {"status": "ok"}
+
+    object_type = body.get("object_type")
+    aspect_type = body.get("aspect_type")
+    activity_id = body.get("object_id")
+
+    logger.info("Webhook received: type=%s, aspect=%s, id=%s", object_type, aspect_type, activity_id)
+
+    # Only process activity creates/updates
+    if object_type != "activity" or aspect_type not in ("create", "update"):
+        return {"status": "ok"}
+
+    if not activity_id:
+        return {"status": "ok"}
+
+    # Process in background
+    background_tasks.add_task(_webhook_import_activity, activity_id)
+
+    return {"status": "ok"}
+
+
+async def _webhook_import_activity(activity_id: int):
+    """Background task: fetch and import a single activity from webhook."""
+    try:
+        async with async_session() as session:
+            # Fetch activity from Strava API
+            act_data = await strava.get_activity_detail(activity_id)
+
+            sport = act_data.get("sport_type") or act_data.get("type") or ""
+            if not _is_running(sport):
+                logger.info("Webhook: skipping non-running activity %s (type=%s)", activity_id, sport)
+                return
+
+            # Upsert activity
+            act = await _upsert_activity_summary(session, act_data)
+            await _import_detail_and_streams(session, act)
+            await session.commit()
+
+            logger.info("Webhook: imported activity %s (%s)", activity_id, act.name)
+    except Exception as exc:
+        logger.error("Webhook: failed to import activity %s: %s", activity_id, exc)
 
 
 @app.get("/api/phases")

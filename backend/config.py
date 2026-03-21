@@ -19,6 +19,9 @@ STRAVA_API_BASE = "https://www.strava.com/api/v3"
 # OAuth redirect
 OAUTH_REDIRECT_URI = "http://localhost:8000/api/auth/callback"
 
+# Webhook
+STRAVA_WEBHOOK_VERIFY_TOKEN = os.getenv("strava_webhook_verify_token", "runflow_webhook_2024")
+
 
 def update_env_tokens(access_token: str, refresh_token: str) -> None:
     """Update the .env file with new tokens."""
