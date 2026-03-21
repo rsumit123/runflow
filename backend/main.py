@@ -1,7 +1,7 @@
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -365,6 +365,88 @@ async def get_activity(activity_id: int, session: AsyncSession = Depends(get_ses
     data["splits"] = [_split_to_dict(s) for s in act.splits]
     data["streams"] = [_stream_to_dict(s) for s in act.streams]
     return data
+
+
+@app.get("/api/phases")
+async def get_phases(
+    gap_days: int = Query(14, ge=3, le=90),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Detect running phases by finding gaps > gap_days between consecutive runs.
+    Returns phases with stats: date range, run count, distance, pace, elevation, frequency.
+    """
+    result = await session.execute(
+        select(Activity).order_by(Activity.start_date.asc())
+    )
+    activities = result.scalars().all()
+
+    if not activities:
+        return {"phases": [], "gap_days": gap_days}
+
+    gap_threshold = timedelta(days=gap_days)
+    phases = []
+    current_phase: list[Activity] = [activities[0]]
+
+    for i in range(1, len(activities)):
+        prev_date = activities[i - 1].start_date
+        curr_date = activities[i].start_date
+        if prev_date and curr_date and (curr_date - prev_date) > gap_threshold:
+            phases.append(current_phase)
+            current_phase = []
+        current_phase.append(activities[i])
+
+    if current_phase:
+        phases.append(current_phase)
+
+    phase_stats = []
+    for idx, phase in enumerate(phases):
+        valid = [a for a in phase if a.distance and a.distance > 0]
+        total_distance = sum(a.distance or 0 for a in valid)
+        total_time = sum(a.moving_time or 0 for a in valid)
+        total_elevation = sum(a.total_elevation_gain or 0 for a in valid)
+
+        start_date = phase[0].start_date
+        end_date = phase[-1].start_date
+        duration_days = (end_date - start_date).days + 1 if start_date and end_date else 1
+        runs_per_week = len(phase) / max(duration_days / 7, 1)
+
+        avg_pace_sec_per_km = None
+        if total_distance > 0 and total_time > 0:
+            avg_pace_sec_per_km = total_time / (total_distance / 1000)
+
+        longest_run = max((a.distance or 0 for a in valid), default=0)
+        best_pace = None
+        if valid:
+            fastest = max(valid, key=lambda a: a.average_speed or 0)
+            if fastest.average_speed and fastest.average_speed > 0:
+                best_pace = 1000 / fastest.average_speed
+
+        # Break before this phase (gap from previous phase end)
+        break_days = None
+        if idx > 0:
+            prev_end = phases[idx - 1][-1].start_date
+            if prev_end and start_date:
+                break_days = (start_date - prev_end).days
+
+        phase_stats.append({
+            "phase_number": idx + 1,
+            "start_date": start_date.isoformat() if start_date else None,
+            "end_date": end_date.isoformat() if end_date else None,
+            "duration_days": duration_days,
+            "break_before_days": break_days,
+            "total_runs": len(phase),
+            "total_distance_km": round(total_distance / 1000, 2),
+            "total_elevation_m": round(total_elevation, 1),
+            "avg_distance_km": round(total_distance / 1000 / len(valid), 2) if valid else 0,
+            "avg_pace_sec_per_km": round(avg_pace_sec_per_km, 1) if avg_pace_sec_per_km else None,
+            "longest_run_km": round(longest_run / 1000, 2),
+            "best_pace_sec_per_km": round(best_pace, 1) if best_pace else None,
+            "runs_per_week": round(runs_per_week, 1),
+            "total_time_seconds": total_time,
+        })
+
+    return {"phases": phase_stats, "gap_days": gap_days, "total_phases": len(phase_stats)}
 
 
 @app.delete("/api/activities/{activity_id}")
