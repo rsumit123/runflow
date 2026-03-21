@@ -22,9 +22,9 @@ async def recommend_speed_goal(
 ) -> dict[str, Any]:
     """
     Recommend a speed goal for a given distance.
-    Analyzes all-time best, current phase best, and improvement trend.
+    Returns recommendations for both sprint and any-run modes.
     """
-    # All-time best
+    # All-time best (any run)
     at_result = await session.execute(
         select(BestEffort)
         .where(BestEffort.distance_target == distance)
@@ -39,6 +39,15 @@ async def recommend_speed_goal(
             "has_data": False,
             "message": f"No {distance}m efforts recorded yet. Run more to get a recommendation!",
         }
+
+    # All-time best (sprint only)
+    at_sprint_result = await session.execute(
+        select(BestEffort)
+        .where(BestEffort.distance_target == distance, BestEffort.is_dedicated.is_(True))
+        .order_by(BestEffort.time_seconds.asc())
+        .limit(1)
+    )
+    all_time_sprint_best = at_sprint_result.scalar_one_or_none()
 
     # Get all efforts for this distance, sorted by date
     efforts_result = await session.execute(
@@ -103,6 +112,18 @@ async def recommend_speed_goal(
     faster_count = sum(1 for t in all_times if t <= current_best)
     current_percentile = round((faster_count / total) * 100) if total > 0 else 0
 
+    # Sprint-specific recommendation
+    sprint_best_time = all_time_sprint_best.time_seconds if all_time_sprint_best else None
+    sprint_recommended = None
+    if sprint_best_time:
+        if trend_sec_per_phase > 2:
+            sprint_recommended = round(sprint_best_time - max(2, min(round(trend_sec_per_phase * 0.6), 8)), 1)
+        else:
+            sprint_recommended = round(sprint_best_time * 0.96, 1)
+
+    # Count sprint vs in-run efforts
+    sprint_count = sum(1 for be, _ in all_efforts if be.is_dedicated)
+
     # Recent 5 efforts
     recent_5 = []
     for be, date in all_efforts[-5:]:
@@ -110,6 +131,7 @@ async def recommend_speed_goal(
             "time_seconds": be.time_seconds,
             "date": date.isoformat() if date else None,
             "activity_id": be.activity_id,
+            "is_dedicated": be.is_dedicated,
         })
 
     return {
@@ -117,6 +139,10 @@ async def recommend_speed_goal(
         "has_data": True,
         "all_time_best": at_best,
         "all_time_best_id": all_time_best.activity_id,
+        "sprint_best": sprint_best_time,
+        "sprint_best_id": all_time_sprint_best.activity_id if all_time_sprint_best else None,
+        "sprint_recommended": sprint_recommended,
+        "sprint_count": sprint_count,
         "current_phase_best": phase_best.time_seconds if phase_best else None,
         "trend_per_phase": trend_sec_per_phase,
         "trend_direction": "improving" if trend_sec_per_phase > 2 else "declining" if trend_sec_per_phase < -2 else "steady",

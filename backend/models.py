@@ -68,6 +68,7 @@ class BestEffort(Base):
     pace_sec_per_km = Column(Float, nullable=True)
     start_index = Column(Integer, nullable=True)  # index in the stream where this segment starts
     end_index = Column(Integer, nullable=True)
+    is_dedicated = Column(Boolean, default=False)  # True if total run distance < 2x effort distance
 
     activity = relationship("Activity", back_populates="best_efforts")
 
@@ -89,6 +90,7 @@ class Goal(Base):
     time_target = Column(Float, nullable=True)  # seconds (for speed goals)
     weekly_runs_target = Column(Integer, nullable=True)  # for consistency goals
     weekly_km_target = Column(Float, nullable=True)  # for volume goals
+    mode = Column(String, nullable=True)  # "sprint" or "any" (for speed goals)
     created_at = Column(DateTime, nullable=True)
     active = Column(Boolean, default=True)
 

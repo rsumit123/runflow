@@ -12,6 +12,7 @@ from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Activity, Stream, BestEffort
+from sqlalchemy import select as sa_select
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,9 @@ async def compute_and_store_best_efforts(
     if not efforts:
         return []
 
+    # Get total run distance to determine if effort is "dedicated"
+    total_distance = distance_stream[-1] if distance_stream else 0
+
     # Delete old efforts for this activity
     await session.execute(
         sa_delete(BestEffort).where(BestEffort.activity_id == activity_id)
@@ -115,6 +119,8 @@ async def compute_and_store_best_efforts(
 
     # Store new efforts
     for e in efforts:
+        # Dedicated = total run distance < 2x the effort target distance
+        is_dedicated = total_distance < (e["distance_target"] * 2) if total_distance > 0 else False
         be = BestEffort(
             activity_id=activity_id,
             distance_target=e["distance_target"],
@@ -122,8 +128,10 @@ async def compute_and_store_best_efforts(
             pace_sec_per_km=e["pace_sec_per_km"],
             start_index=e["start_index"],
             end_index=e["end_index"],
+            is_dedicated=is_dedicated,
         )
         session.add(be)
+        e["is_dedicated"] = is_dedicated
 
     return efforts
 

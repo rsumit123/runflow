@@ -814,6 +814,7 @@ class GoalCreateRequest(BaseModel):
     time_target: float | None = None
     weekly_runs_target: int | None = None
     weekly_km_target: float | None = None
+    mode: str | None = None  # "sprint" or "any" (for speed goals)
 
 
 @app.post("/api/goals")
@@ -825,6 +826,7 @@ async def create_goal(req: GoalCreateRequest, session: AsyncSession = Depends(ge
         time_target=req.time_target,
         weekly_runs_target=req.weekly_runs_target,
         weekly_km_target=req.weekly_km_target,
+        mode=req.mode,
         created_at=datetime.now(),
         active=True,
     )
@@ -845,19 +847,33 @@ async def list_goals(session: AsyncSession = Depends(get_session)):
     for g in goals:
         progress = {}
         if g.goal_type == "speed" and g.distance_target and g.time_target:
-            # Get current best for this distance
+            # Get current best for this distance, filtered by mode
+            query = select(BestEffort).where(BestEffort.distance_target == g.distance_target)
+            if g.mode == "sprint":
+                query = query.where(BestEffort.is_dedicated.is_(True))
             be_result = await session.execute(
-                select(BestEffort)
-                .where(BestEffort.distance_target == g.distance_target)
-                .order_by(BestEffort.time_seconds.asc())
-                .limit(1)
+                query.order_by(BestEffort.time_seconds.asc()).limit(1)
             )
             best = be_result.scalar_one_or_none()
+
+            # Also get the other mode's best for context
+            other_query = select(BestEffort).where(BestEffort.distance_target == g.distance_target)
+            if g.mode == "sprint":
+                other_query = other_query.where(BestEffort.is_dedicated.isnot(True))
+            else:
+                other_query = other_query.where(BestEffort.is_dedicated.is_(True))
+            other_result = await session.execute(
+                other_query.order_by(BestEffort.time_seconds.asc()).limit(1)
+            )
+            other_best = other_result.scalar_one_or_none()
+
             progress = {
                 "current_best": best.time_seconds if best else None,
                 "target": g.time_target,
                 "gap": round(best.time_seconds - g.time_target, 1) if best else None,
                 "achieved": best.time_seconds <= g.time_target if best else False,
+                "other_mode_best": other_best.time_seconds if other_best else None,
+                "mode": g.mode or "any",
             }
         elif g.goal_type == "consistency" and g.weekly_runs_target:
             # Count this week's runs
@@ -895,6 +911,7 @@ async def list_goals(session: AsyncSession = Depends(get_session)):
             "time_target": g.time_target,
             "weekly_runs_target": g.weekly_runs_target,
             "weekly_km_target": g.weekly_km_target,
+            "mode": g.mode,
             "created_at": g.created_at.isoformat() if g.created_at else None,
             "progress": progress,
         })

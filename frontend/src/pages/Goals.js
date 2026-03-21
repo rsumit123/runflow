@@ -108,7 +108,14 @@ function GoalCard({ goal, onDelete }) {
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
             <span style={{ color: '#a0a0b0', fontSize: '13px' }}>
-              Speed Goal — {formatDistanceLabel(goal.distance_target)}
+              {formatDistanceLabel(goal.distance_target)}
+              <span style={{
+                marginLeft: '8px', fontSize: '10px', fontWeight: 600, padding: '1px 6px', borderRadius: '4px',
+                backgroundColor: (goal.mode || progress?.mode) === 'sprint' ? '#4ade8018' : '#fc520018',
+                color: (goal.mode || progress?.mode) === 'sprint' ? '#4ade80' : '#fc5200',
+              }}>
+                {(goal.mode || progress?.mode) === 'sprint' ? 'SPRINT' : 'ANY RUN'}
+              </span>
             </span>
             {achieved && (
               <span style={{ backgroundColor: '#4ade80', color: '#0f0f1a', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>
@@ -118,15 +125,9 @@ function GoalCard({ goal, onDelete }) {
           </div>
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '8px' }}>
             <div>
-              <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>Current Best</div>
+              <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>Best ({(goal.mode || progress?.mode) === 'sprint' ? 'sprint' : 'any'})</div>
               <div style={{ color: '#fff', fontSize: '16px', fontWeight: 600 }}>
-                {currentBest != null ? (
-                  progress.activity_id ? (
-                    <Link to={`/activity/${progress.activity_id}`} style={{ color: '#fc5200', textDecoration: 'none' }}>
-                      {formatTime(currentBest)}
-                    </Link>
-                  ) : formatTime(currentBest)
-                ) : '-'}
+                {currentBest != null ? formatTime(currentBest) : '-'}
               </div>
             </div>
             <div>
@@ -137,6 +138,14 @@ function GoalCard({ goal, onDelete }) {
               <div>
                 <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>Gap</div>
                 <div style={{ color: '#fc5200', fontSize: '16px', fontWeight: 600 }}>+{gap.toFixed(1)}s</div>
+              </div>
+            )}
+            {progress?.other_mode_best && (
+              <div>
+                <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>
+                  {(goal.mode || progress?.mode) === 'sprint' ? 'In-run best' : 'Sprint best'}
+                </div>
+                <div style={{ color: '#a0a0b0', fontSize: '16px', fontWeight: 600 }}>{formatTime(progress.other_mode_best)}</div>
               </div>
             )}
           </div>
@@ -284,6 +293,7 @@ function AddGoalFlow({ onGoalCreated }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [goalMode, setGoalMode] = useState('any'); // 'sprint' or 'any'
 
   const reset = () => {
     setStep(1);
@@ -293,6 +303,7 @@ function AddGoalFlow({ onGoalCreated }) {
     setTargetSeconds(null);
     setTargetRuns(null);
     setTargetKm(null);
+    setGoalMode('any');
     setError(null);
   };
 
@@ -342,6 +353,7 @@ function AddGoalFlow({ onGoalCreated }) {
       if (goalType === 'speed') {
         body.distance_target = distance;
         body.time_target = targetSeconds;
+        body.mode = goalMode;
       } else if (goalType === 'consistency') {
         body.weekly_runs_target = targetRuns;
       } else if (goalType === 'volume') {
@@ -486,27 +498,58 @@ function AddGoalFlow({ onGoalCreated }) {
         <div>
           {goalType === 'speed' && (
             <div style={{ backgroundColor: '#0f0f1a', borderRadius: '6px', padding: '14px', marginBottom: '12px' }}>
+              {/* Mode toggle */}
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+                <button onClick={() => {
+                  setGoalMode('any');
+                  setTargetSeconds(recommendation.recommended_target);
+                }} style={{
+                  padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                  backgroundColor: goalMode === 'any' ? '#fc5200' : '#16213e', color: goalMode === 'any' ? '#fff' : '#a0a0b0',
+                }}>
+                  Any Run
+                </button>
+                <button onClick={() => {
+                  setGoalMode('sprint');
+                  setTargetSeconds(recommendation.sprint_recommended || recommendation.recommended_target);
+                }} style={{
+                  padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                  backgroundColor: goalMode === 'sprint' ? '#4ade80' : '#16213e', color: goalMode === 'sprint' ? '#0a2a0a' : '#a0a0b0',
+                }}>
+                  Sprint Only
+                </button>
+              </div>
+              <div style={{ fontSize: '11px', color: '#666', marginBottom: '10px' }}>
+                {goalMode === 'sprint'
+                  ? 'Only counts dedicated short runs (total distance < 2x target)'
+                  : 'Counts best segment from any run length'}
+              </div>
+
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.8 }}>
                 <span>
-                  Current best: <strong style={{ color: '#fff' }}>{formatTime(recommendation.current_phase_best)}</strong>
+                  Best ({goalMode === 'sprint' ? 'sprint' : 'any'}): <strong style={{ color: '#fff' }}>
+                    {formatTime(goalMode === 'sprint' ? recommendation.sprint_best : recommendation.all_time_best)}
+                  </strong>
+                  {goalMode === 'sprint' && !recommendation.sprint_best && <span style={{ color: '#666' }}> (no sprint runs)</span>}
                 </span>
                 <span>
-                  All-time best: <strong style={{ color: '#fff' }}>{formatTime(recommendation.all_time_best)}</strong>
+                  Phase best: <strong style={{ color: '#fff' }}>{formatTime(recommendation.current_phase_best)}</strong>
                 </span>
                 {recommendation.trend_direction && (
                   <span>
                     Trend: <strong style={{ color: recommendation.trend_direction === 'improving' ? '#4ade80' : '#fc5200' }}>
                       {recommendation.trend_direction}
-                      {recommendation.trend_per_phase != null && ` (${recommendation.trend_per_phase > 0 ? '+' : ''}${recommendation.trend_per_phase.toFixed(1)}s/phase)`}
                     </strong>
                   </span>
                 )}
-                <span>
-                  Recommended: <strong style={{ color: '#fc5200' }}>{formatTime(recommendation.recommended_target)}</strong>
-                </span>
+              </div>
+              <div style={{ marginTop: '6px', fontSize: '13px', color: '#a0a0b0' }}>
+                Recommended: <strong style={{ color: '#fc5200' }}>
+                  {formatTime(goalMode === 'sprint' ? (recommendation.sprint_recommended || recommendation.recommended_target) : recommendation.recommended_target)}
+                </strong>
               </div>
               <div style={{ fontSize: '11px', color: '#555', marginTop: '4px' }}>
-                Based on {recommendation.total_efforts} total efforts
+                {recommendation.total_efforts} total efforts ({recommendation.sprint_count || 0} sprint)
               </div>
               <EffortTimeline efforts={recommendation.recent_efforts} />
             </div>
