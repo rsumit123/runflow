@@ -224,7 +224,29 @@ function Stats() {
       <div style={cardStyle}>
         <h2 style={sectionTitle}>Running Heatmap (Last 12 Months)</h2>
         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {/* Month labels row */}
+          <div style={{ display: 'flex', gap: '2px', minWidth: '600px', marginBottom: '4px', paddingLeft: '18px' }}>
+            {weeks.map((week, wi) => {
+              const monthStr = week[0]?.date?.substring(0, 7) || '';
+              const prevMonthStr = wi > 0 ? (weeks[wi - 1][0]?.date?.substring(0, 7) || '') : '';
+              const showLabel = monthStr !== prevMonthStr;
+              const label = showLabel ? new Date(monthStr + '-15').toLocaleDateString('en-US', { month: 'short' }) : '';
+              return (
+                <div key={wi} style={{ width: '10px', fontSize: '9px', color: '#666', whiteSpace: 'nowrap', overflow: 'visible' }}>
+                  {label}
+                </div>
+              );
+            })}
+          </div>
           <div style={{ display: 'flex', gap: '2px', minWidth: '600px' }}>
+            {/* Day labels */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginRight: '4px', justifyContent: 'flex-start' }}>
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                <div key={i} style={{ width: '14px', height: '10px', fontSize: '9px', color: '#666', lineHeight: '10px', textAlign: 'right' }}>
+                  {i % 2 === 1 ? d : ''}
+                </div>
+              ))}
+            </div>
             {weeks.map((week, wi) => (
               <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 {week.map((day, di) => {
@@ -242,7 +264,7 @@ function Stats() {
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', fontSize: '11px', color: '#666' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', fontSize: '11px', color: '#666', marginLeft: '32px' }}>
             <span>Less</span>
             <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#16213e' }} />
             <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#fc520055' }} />
