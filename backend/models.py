@@ -80,6 +80,19 @@ class RouteLabel(Base):
     name = Column(String, nullable=False)
 
 
+class Goal(Base):
+    __tablename__ = "goals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    goal_type = Column(String, nullable=False)  # "speed", "consistency", "volume"
+    distance_target = Column(Integer, nullable=True)  # meters (for speed goals)
+    time_target = Column(Float, nullable=True)  # seconds (for speed goals)
+    weekly_runs_target = Column(Integer, nullable=True)  # for consistency goals
+    weekly_km_target = Column(Float, nullable=True)  # for volume goals
+    created_at = Column(DateTime, nullable=True)
+    active = Column(Boolean, default=True)
+
+
 class RouteMerge(Base):
     __tablename__ = "route_merges"
 
