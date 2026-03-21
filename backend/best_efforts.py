@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 TARGET_DISTANCES = [100, 200, 400, 500, 1000, 2000]
 
 # Minimum realistic times (seconds) to filter GPS glitches.
-# Based on ~2:30/km pace (very fast amateur sprint) as floor.
-MIN_TIMES = {100: 12, 200: 25, 400: 55, 500: 70, 1000: 150, 2000: 300}
+# Based on world records (rounded down slightly to avoid filtering genuine fast efforts).
+# 100m: 9.58s (Bolt), 200m: 19.19s, 400m: 43.03s, 500m: ~55s, 1000m: 2:11, 2000m: 4:44
+MIN_TIMES = {100: 9, 200: 18, 400: 42, 500: 54, 1000: 130, 2000: 280}
 
 
 def compute_best_efforts_from_streams(
