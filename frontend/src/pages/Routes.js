@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { MapContainer, TileLayer, Polyline } from 'react-leaflet';
@@ -91,21 +91,104 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
+// Compute route highlight badges
+function computeBadges(routes) {
+  if (!routes || routes.length === 0) return {};
+
+  const badges = {};
+
+  // Fastest: route with the best pace (lowest best_pace_sec_per_km)
+  const withPace = routes.filter(r => r.best_pace_sec_per_km);
+  if (withPace.length > 0) {
+    const fastest = withPace.reduce((a, b) => a.best_pace_sec_per_km < b.best_pace_sec_per_km ? a : b);
+    badges[fastest.route_key] = badges[fastest.route_key] || [];
+    badges[fastest.route_key].push({ label: 'Fastest', color: '#4ade80', bg: '#4ade8018' });
+  }
+
+  // Most Improved: biggest pace decrease between first half and second half of attempts
+  let bestImprovement = -Infinity;
+  let mostImprovedKey = null;
+  for (const route of routes) {
+    const acts = (route.activities || []).filter(a => a.pace_sec_per_km);
+    if (acts.length < 4) continue;
+    const mid = Math.floor(acts.length / 2);
+    const firstHalf = acts.slice(0, mid);
+    const secondHalf = acts.slice(mid);
+    const firstAvg = firstHalf.reduce((s, a) => s + a.pace_sec_per_km, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((s, a) => s + a.pace_sec_per_km, 0) / secondHalf.length;
+    const improvement = firstAvg - secondAvg; // positive = improved (lower pace = faster)
+    if (improvement > bestImprovement) {
+      bestImprovement = improvement;
+      mostImprovedKey = route.route_key;
+    }
+  }
+  if (mostImprovedKey && bestImprovement > 0) {
+    badges[mostImprovedKey] = badges[mostImprovedKey] || [];
+    badges[mostImprovedKey].push({ label: 'Most Improved', color: '#60a5fa', bg: '#60a5fa18' });
+  }
+
+  // Hilliest: highest average elevation gain across activities
+  let bestElev = -Infinity;
+  let hilliestKey = null;
+  for (const route of routes) {
+    const acts = (route.activities || []).filter(a => a.elevation_gain && a.elevation_gain > 0);
+    if (acts.length === 0) continue;
+    const avgElev = acts.reduce((s, a) => s + a.elevation_gain, 0) / acts.length;
+    if (avgElev > bestElev) {
+      bestElev = avgElev;
+      hilliestKey = route.route_key;
+    }
+  }
+  if (hilliestKey && bestElev > 0) {
+    badges[hilliestKey] = badges[hilliestKey] || [];
+    badges[hilliestKey].push({ label: 'Hilliest', color: '#fb923c', bg: '#fb923c18' });
+  }
+
+  // Most Consistent: lowest pace variance
+  let bestVariance = Infinity;
+  let consistentKey = null;
+  for (const route of routes) {
+    const paces = (route.activities || []).filter(a => a.pace_sec_per_km).map(a => a.pace_sec_per_km);
+    if (paces.length < 3) continue;
+    const mean = paces.reduce((s, v) => s + v, 0) / paces.length;
+    const variance = paces.reduce((s, v) => s + (v - mean) ** 2, 0) / paces.length;
+    if (variance < bestVariance) {
+      bestVariance = variance;
+      consistentKey = route.route_key;
+    }
+  }
+  if (consistentKey && bestVariance < Infinity) {
+    badges[consistentKey] = badges[consistentKey] || [];
+    badges[consistentKey].push({ label: 'Most Consistent', color: '#c084fc', bg: '#c084fc18' });
+  }
+
+  return badges;
+}
+
 function Routes() {
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedRoute, setExpandedRoute] = useState(null);
   const [editingRoute, setEditingRoute] = useState(null);
   const [editName, setEditName] = useState('');
+  const [mergingRoute, setMergingRoute] = useState(null); // route_key of route being merged
+  const [mergeLoading, setMergeLoading] = useState(false);
 
-  useEffect(() => {
+  const loadRoutes = () => {
+    setLoading(true);
     api.get('/routes')
       .then((res) => {
         setRoutes(res.data.routes || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadRoutes();
   }, []);
+
+  const badges = useMemo(() => computeBadges(routes), [routes]);
 
   const handleRename = async (routeKey) => {
     if (!editName.trim()) return;
@@ -118,6 +201,20 @@ function Routes() {
       setEditName('');
     } catch (err) {
       alert('Failed to save name');
+    }
+  };
+
+  const handleMerge = async (sourceKey, targetKey) => {
+    setMergeLoading(true);
+    try {
+      await api.post('/routes/merge', { source_route_key: sourceKey, target_route_key: targetKey });
+      setMergingRoute(null);
+      setExpandedRoute(null);
+      loadRoutes();
+    } catch (err) {
+      alert('Failed to merge routes');
+    } finally {
+      setMergeLoading(false);
     }
   };
 
@@ -160,6 +257,9 @@ function Routes() {
             else if (diff < -3) trend = { dir: 'slowing', diff: Math.round(Math.abs(diff)) };
             else trend = { dir: 'steady', diff: 0 };
           }
+
+          const routeBadges = badges[route.route_key] || [];
+          const isMerging = mergingRoute === route.route_key;
 
           return (
             <div key={route.route_id} style={{
@@ -221,6 +321,18 @@ function Routes() {
                     <span style={{ fontSize: '12px', color: '#fc5200', backgroundColor: '#fc520015', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>
                       {route.run_count} runs
                     </span>
+                    {routeBadges.map((badge, i) => (
+                      <span key={i} style={{
+                        fontSize: '11px',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        fontWeight: 600,
+                        color: badge.color,
+                        backgroundColor: badge.bg,
+                      }}>
+                        {badge.label}
+                      </span>
+                    ))}
                     {trend && (
                       <span style={{
                         fontSize: '11px',
@@ -273,7 +385,7 @@ function Routes() {
                   <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     <div style={{
                       display: 'grid',
-                      gridTemplateColumns: '1fr 80px 70px 70px',
+                      gridTemplateColumns: '1fr 80px 70px 90px',
                       gap: '4px',
                       padding: '6px 10px',
                       fontSize: '10px',
@@ -281,12 +393,12 @@ function Routes() {
                       textTransform: 'uppercase',
                       color: '#555',
                       borderBottom: '1px solid #252540',
-                      minWidth: '340px',
+                      minWidth: '360px',
                     }}>
                       <div>Date</div>
                       <div>Time</div>
                       <div>Pace</div>
-                      <div>vs Best</div>
+                      <div>vs Route PR</div>
                     </div>
                     {[...activities].reverse().map((a) => {
                       const isBest = a.pace_sec_per_km && bestPace && Math.abs(a.pace_sec_per_km - bestPace) < 0.5;
@@ -296,14 +408,14 @@ function Routes() {
                         <Link to={`/activity/${a.id}`} key={a.id} style={{ textDecoration: 'none' }}>
                           <div style={{
                             display: 'grid',
-                            gridTemplateColumns: '1fr 80px 70px 70px',
+                            gridTemplateColumns: '1fr 80px 70px 90px',
                             gap: '4px',
                             padding: '8px 10px',
                             borderBottom: '1px solid #1e1e35',
                             fontSize: '13px',
                             alignItems: 'center',
                             backgroundColor: isBest ? 'rgba(74,222,128,0.05)' : 'transparent',
-                            minWidth: '340px',
+                            minWidth: '360px',
                           }}>
                             <div style={{ color: '#e0e0e0' }}>{formatDate(a.date)}</div>
                             <div style={{ color: '#e0e0e0' }}>{formatTime(a.moving_time)}</div>
@@ -312,15 +424,82 @@ function Routes() {
                             </div>
                             <div>
                               {isBest ? (
-                                <span style={{ color: '#4ade80', fontSize: '11px', fontWeight: 700 }}>Best</span>
+                                <span style={{ color: '#4ade80', fontSize: '11px', fontWeight: 700 }}>Route PR!</span>
                               ) : diff != null ? (
-                                <span style={{ color: diff <= 10 ? '#fbbf24' : '#ff6b6b', fontSize: '12px' }}>+{Math.round(diff)}s</span>
+                                <span style={{ color: diff <= 10 ? '#fbbf24' : '#ff6b6b', fontSize: '12px' }}>+{Math.round(diff)}s from PR</span>
                               ) : '-'}
                             </div>
                           </div>
                         </Link>
                       );
                     })}
+                  </div>
+
+                  {/* Merge button */}
+                  <div style={{ marginTop: '16px', borderTop: '1px solid #252540', paddingTop: '12px' }}>
+                    {!isMerging ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setMergingRoute(route.route_key); }}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '6px',
+                          border: '1px solid #333',
+                          backgroundColor: 'transparent',
+                          color: '#a0a0b0',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Merge with another route...
+                      </button>
+                    ) : (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '8px', fontWeight: 600 }}>
+                          Select a route to merge into this one:
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                          {routes.filter(r => r.route_key !== route.route_key).map(r => (
+                            <button
+                              key={r.route_key}
+                              disabled={mergeLoading}
+                              onClick={() => handleMerge(r.route_key, route.route_key)}
+                              style={{
+                                padding: '8px 12px',
+                                borderRadius: '6px',
+                                border: '1px solid #333',
+                                backgroundColor: '#16213e',
+                                color: '#e0e0e0',
+                                fontSize: '13px',
+                                cursor: mergeLoading ? 'wait' : 'pointer',
+                                textAlign: 'left',
+                                opacity: mergeLoading ? 0.5 : 1,
+                              }}
+                            >
+                              {r.custom_name || `~${r.avg_distance_km} km route`}
+                              <span style={{ color: '#666', marginLeft: '8px', fontSize: '11px' }}>
+                                {r.avg_distance_km} km · {r.run_count} runs
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => setMergingRoute(null)}
+                          style={{
+                            marginTop: '8px',
+                            padding: '4px 10px',
+                            borderRadius: '4px',
+                            border: '1px solid #333',
+                            backgroundColor: 'transparent',
+                            color: '#666',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

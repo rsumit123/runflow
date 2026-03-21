@@ -78,3 +78,11 @@ class RouteLabel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     route_key = Column(String, unique=True, nullable=False, index=True)  # stable key for the route
     name = Column(String, nullable=False)
+
+
+class RouteMerge(Base):
+    __tablename__ = "route_merges"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    from_key = Column(String, nullable=False, index=True)  # route key being merged away
+    to_key = Column(String, nullable=False)  # route key to merge into

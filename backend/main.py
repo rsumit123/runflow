@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 
 import config
 from database import init_db, get_session, async_session
-from models import Activity, Split, Stream, BestEffort, RouteLabel
+from models import Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
@@ -655,6 +655,44 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
 
     routes = group_routes(act_dicts)
 
+    # Apply route merges: combine routes that have been manually merged
+    merge_result = await session.execute(select(RouteMerge))
+    merges = merge_result.scalars().all()
+    if merges:
+        # Build a mapping: from_key -> to_key (follow chains)
+        merge_map = {}
+        for m in merges:
+            merge_map[m.from_key] = m.to_key
+        # Follow chains (A->B, B->C => A->C)
+        def resolve(key):
+            visited = set()
+            while key in merge_map and key not in visited:
+                visited.add(key)
+                key = merge_map[key]
+            return key
+        # Group routes by their resolved key
+        resolved_routes = {}
+        for route in routes:
+            target_key = resolve(route["route_key"])
+            if target_key not in resolved_routes:
+                resolved_routes[target_key] = route
+            else:
+                # Merge this route into the target
+                target = resolved_routes[target_key]
+                target["activities"].extend(route["activities"])
+                target["activity_ids"].extend(route["activity_ids"])
+                target["run_count"] += route["run_count"]
+        # Re-sort activities and recompute stats for merged routes
+        for key, route in resolved_routes.items():
+            route["activities"].sort(key=lambda a: a.get("date") or "")
+            paces = [a["pace_sec_per_km"] for a in route["activities"] if a.get("pace_sec_per_km")]
+            if paces:
+                route["best_pace_sec_per_km"] = round(min(paces), 1)
+            distances = [a["distance"] for a in route["activities"] if a.get("distance")]
+            if distances:
+                route["avg_distance_km"] = round(sum(distances) / len(distances) / 1000, 2)
+        routes = sorted(resolved_routes.values(), key=lambda r: r["run_count"], reverse=True)
+
     # Attach a polyline to each route for map preview
     for route in routes:
         polyline = None
@@ -700,6 +738,31 @@ async def label_route(req: RouteLabelRequest, session: AsyncSession = Depends(ge
         session.add(label)
     await session.commit()
     return {"route_key": req.route_key, "name": req.name}
+
+
+class RouteMergeRequest(BaseModel):
+    source_route_key: str
+    target_route_key: str
+
+
+@app.post("/api/routes/merge")
+async def merge_routes(req: RouteMergeRequest, session: AsyncSession = Depends(get_session)):
+    """Merge one route into another. All activities from source will appear under target."""
+    if req.source_route_key == req.target_route_key:
+        raise HTTPException(status_code=400, detail="Cannot merge a route with itself")
+    # Check if this merge already exists
+    existing = await session.execute(
+        select(RouteMerge).where(
+            RouteMerge.from_key == req.source_route_key,
+            RouteMerge.to_key == req.target_route_key,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"status": "already_merged"}
+    merge = RouteMerge(from_key=req.source_route_key, to_key=req.target_route_key)
+    session.add(merge)
+    await session.commit()
+    return {"status": "merged", "from_key": req.source_route_key, "to_key": req.target_route_key}
 
 
 @app.get("/api/routes/labels")
