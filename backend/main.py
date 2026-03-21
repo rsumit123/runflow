@@ -449,6 +449,135 @@ async def get_phases(
     return {"phases": phase_stats, "gap_days": gap_days, "total_phases": len(phase_stats)}
 
 
+@app.get("/api/stats/monthly")
+async def monthly_stats(session: AsyncSession = Depends(get_session)):
+    """Monthly aggregated stats for charts."""
+    result = await session.execute(
+        select(Activity).order_by(Activity.start_date.asc())
+    )
+    activities = result.scalars().all()
+
+    months: dict[str, dict[str, Any]] = {}
+    for act in activities:
+        if not act.start_date:
+            continue
+        key = act.start_date.strftime("%Y-%m")
+        if key not in months:
+            months[key] = {
+                "month": key,
+                "runs": 0,
+                "total_distance": 0,
+                "total_time": 0,
+                "total_elevation": 0,
+            }
+        m = months[key]
+        m["runs"] += 1
+        m["total_distance"] += act.distance or 0
+        m["total_time"] += act.moving_time or 0
+        m["total_elevation"] += act.total_elevation_gain or 0
+
+    result_list = []
+    for m in sorted(months.values(), key=lambda x: x["month"]):
+        dist_km = m["total_distance"] / 1000
+        avg_pace = (m["total_time"] / dist_km) if dist_km > 0 else None
+        result_list.append({
+            "month": m["month"],
+            "runs": m["runs"],
+            "distance_km": round(dist_km, 2),
+            "avg_pace_sec_per_km": round(avg_pace, 1) if avg_pace else None,
+            "elevation_m": round(m["total_elevation"], 1),
+        })
+
+    return {"months": result_list}
+
+
+@app.get("/api/stats/personal-records")
+async def personal_records(session: AsyncSession = Depends(get_session)):
+    """Best split times across all activities."""
+    result = await session.execute(
+        select(Split).order_by(Split.moving_time.asc())
+    )
+    all_splits = result.scalars().all()
+
+    # Group by approximate distance (1km splits)
+    # Find best single 1km split
+    best_1km = None
+    for s in all_splits:
+        if s.distance and 900 < s.distance < 1100 and s.moving_time:
+            if best_1km is None or s.moving_time < best_1km["time"]:
+                best_1km = {
+                    "time": s.moving_time,
+                    "activity_id": s.activity_id,
+                    "split_number": s.split_number,
+                }
+
+    # Best activity paces (from activities table)
+    act_result = await session.execute(
+        select(Activity).where(Activity.average_speed.isnot(None)).order_by(Activity.average_speed.desc())
+    )
+    all_acts = act_result.scalars().all()
+
+    # Best pace for different distance ranges
+    prs = {}
+    ranges = [
+        ("1km", 800, 1200),
+        ("2km", 1800, 2200),
+        ("3km", 2800, 3200),
+        ("5km", 4500, 5500),
+        ("10km", 9000, 11000),
+    ]
+    for label, lo, hi in ranges:
+        candidates = [a for a in all_acts if a.distance and lo <= a.distance <= hi]
+        if candidates:
+            best = min(candidates, key=lambda a: (a.moving_time or float("inf")))
+            pace_sec = (best.moving_time / (best.distance / 1000)) if best.distance and best.moving_time else None
+            prs[label] = {
+                "distance_km": round(best.distance / 1000, 2) if best.distance else None,
+                "time_seconds": best.moving_time,
+                "pace_sec_per_km": round(pace_sec, 1) if pace_sec else None,
+                "activity_id": best.id,
+                "date": best.start_date.isoformat() if best.start_date else None,
+                "name": best.name,
+            }
+
+    return {
+        "best_1km_split": best_1km,
+        "personal_records": prs,
+    }
+
+
+@app.get("/api/stats/heatmap")
+async def activity_heatmap(session: AsyncSession = Depends(get_session)):
+    """Daily run data for the last 12 months (heatmap)."""
+    cutoff = datetime.now() - timedelta(days=365)
+    result = await session.execute(
+        select(Activity)
+        .where(Activity.start_date >= cutoff)
+        .order_by(Activity.start_date.asc())
+    )
+    activities = result.scalars().all()
+
+    days: dict[str, dict] = {}
+    for act in activities:
+        if not act.start_date:
+            continue
+        key = act.start_date.strftime("%Y-%m-%d")
+        if key not in days:
+            days[key] = {"date": key, "runs": 0, "distance": 0}
+        days[key]["runs"] += 1
+        days[key]["distance"] += act.distance or 0
+
+    day_list = []
+    for d in sorted(days.values(), key=lambda x: x["date"]):
+        day_list.append({
+            "date": d["date"],
+            "runs": d["runs"],
+            "distance_km": round(d["distance"] / 1000, 2),
+        })
+
+    return {"days": day_list}
+
+
 @app.delete("/api/activities/{activity_id}")
 async def delete_activity(activity_id: int, session: AsyncSession = Depends(get_session)):
     """Delete an activity from the local DB (does NOT delete from Strava)."""
