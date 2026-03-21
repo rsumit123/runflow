@@ -1,11 +1,13 @@
 """
 Route matching: detect when activities follow the same route.
 
-Groups activities by comparing start/end GPS coordinates and total distance.
-Two runs match if:
-  - Start points are within 200m of each other
-  - End points are within 200m of each other
-  - Total distance is within 15% of each other
+Groups activities by comparing GPS data. Two runs match if:
+  - Start points are within 300m of each other
+  - Distance is within 15% of each other
+  - AND one of:
+    a) End points are within 300m (point-to-point match)
+    b) Both are loops (start ≈ end within 500m) with start points close
+    c) Polyline overlap > 60% (shape similarity)
 """
 
 import math
@@ -25,11 +27,16 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _points_close(p1: list | None, p2: list | None, threshold_m: float = 200) -> bool:
+def _points_close(p1: list | None, p2: list | None, threshold_m: float = 300) -> bool:
     """Check if two [lat, lng] points are within threshold meters."""
     if not p1 or not p2 or len(p1) < 2 or len(p2) < 2:
         return False
     return _haversine(p1[0], p1[1], p2[0], p2[1]) <= threshold_m
+
+
+def _is_loop(start: list | None, end: list | None, threshold_m: float = 500) -> bool:
+    """Check if a run is a loop (start ≈ end)."""
+    return _points_close(start, end, threshold_m)
 
 
 def _distance_similar(d1: float | None, d2: float | None, tolerance: float = 0.15) -> bool:
@@ -38,6 +45,126 @@ def _distance_similar(d1: float | None, d2: float | None, tolerance: float = 0.1
         return False
     ratio = min(d1, d2) / max(d1, d2)
     return ratio >= (1 - tolerance)
+
+
+def _decode_polyline(encoded: str) -> list[list[float]]:
+    """Decode a Google-encoded polyline into [[lat, lng], ...]."""
+    if not encoded:
+        return []
+    points = []
+    index = 0
+    lat = 0
+    lng = 0
+    while index < encoded.length if hasattr(encoded, 'length') else index < len(encoded):
+        for val_ref in [None, None]:
+            shift = 0
+            result = 0
+            while True:
+                b = ord(encoded[index]) - 63
+                index += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            delta = ~(result >> 1) if (result & 1) else (result >> 1)
+            if val_ref is None:
+                lat += delta
+            else:
+                lng += delta
+            if val_ref is None:
+                val_ref = True  # first pass done
+                # Actually need to handle this differently
+                break
+        # Simpler approach:
+        pass
+    # Use a simpler decoder
+    return _simple_decode(encoded)
+
+
+def _simple_decode(encoded: str) -> list[list[float]]:
+    """Simple polyline decoder."""
+    points = []
+    index = 0
+    lat = 0
+    lng = 0
+    while index < len(encoded):
+        for _ in range(2):
+            shift = 0
+            result = 0
+            while True:
+                b = ord(encoded[index]) - 63
+                index += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            delta = ~(result >> 1) if (result & 1) else (result >> 1)
+            if _ == 0:
+                lat += delta
+            else:
+                lng += delta
+        points.append([lat / 1e5, lng / 1e5])
+    return points
+
+
+def _polyline_overlap(poly1: str | None, poly2: str | None, threshold_m: float = 100) -> float:
+    """
+    Calculate overlap percentage between two polylines.
+    Samples points from poly1 and checks how many are within threshold_m of any point in poly2.
+    Returns overlap ratio 0.0-1.0.
+    """
+    if not poly1 or not poly2:
+        return 0.0
+
+    pts1 = _simple_decode(poly1)
+    pts2 = _simple_decode(poly2)
+
+    if len(pts1) < 3 or len(pts2) < 3:
+        return 0.0
+
+    # Sample every few points to keep it fast
+    sample1 = pts1[::max(1, len(pts1) // 20)]
+    sample2 = pts2[::max(1, len(pts2) // 20)]
+
+    if not sample1 or not sample2:
+        return 0.0
+
+    matches = 0
+    for p1 in sample1:
+        for p2 in sample2:
+            if _haversine(p1[0], p1[1], p2[0], p2[1]) <= threshold_m:
+                matches += 1
+                break
+
+    return matches / len(sample1)
+
+
+def _routes_match(act: dict, ref: dict) -> bool:
+    """Check if two activities are on the same route."""
+    # Must have similar distance
+    if not _distance_similar(act["distance"], ref["distance"]):
+        return False
+
+    # Must start close to each other
+    if not _points_close(act["start_latlng"], ref["start_latlng"]):
+        return False
+
+    # Check end points match (covers point-to-point routes)
+    if _points_close(act.get("end_latlng"), ref.get("end_latlng")):
+        return True
+
+    # Both are loops → start point + distance match is enough
+    if (_is_loop(act["start_latlng"], act.get("end_latlng"))
+            and _is_loop(ref["start_latlng"], ref.get("end_latlng"))):
+        return True
+
+    # Fall back to polyline shape comparison if available
+    if act.get("polyline") and ref.get("polyline"):
+        overlap = _polyline_overlap(act["polyline"], ref["polyline"])
+        if overlap >= 0.6:
+            return True
+
+    return False
 
 
 def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -56,28 +183,23 @@ def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
     - best_pace: fastest avg pace
     - avg_distance: average distance
     """
-    # Filter to activities with GPS data
+    # Filter to activities with GPS data (end_latlng optional for loops)
     gps_activities = [
         a for a in activities
-        if a.get("start_latlng") and a.get("end_latlng") and a.get("distance")
+        if a.get("start_latlng") and a.get("distance")
     ]
 
     if not gps_activities:
         return []
 
-    # Group by matching start/end/distance
+    # Group by matching route
     routes: list[list[dict]] = []
 
     for act in gps_activities:
         matched = False
         for route in routes:
-            # Compare against the first activity in the route group
             ref = route[0]
-            if (
-                _points_close(act["start_latlng"], ref["start_latlng"])
-                and _points_close(act["end_latlng"], ref["end_latlng"])
-                and _distance_similar(act["distance"], ref["distance"])
-            ):
+            if _routes_match(act, ref):
                 route.append(act)
                 matched = True
                 break
