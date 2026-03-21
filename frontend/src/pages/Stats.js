@@ -216,8 +216,16 @@ function Stats() {
                   <div style={{ color: '#a0a0b0' }}>
                     {at ? `${formatPace(at.pace_sec_per_km)}/km` : '-'}
                   </div>
-                  <div style={{ color: '#e0e0e0' }}>
-                    {cp ? formatTime(cp.time_seconds) : <span style={{ color: '#555' }}>-</span>}
+                  <div>
+                    {cp ? (
+                      cp.activity_id ? (
+                        <Link to={`/activity/${cp.activity_id}`} style={{ color: '#60a5fa', textDecoration: 'none', fontWeight: 600 }}>
+                          {formatTime(cp.time_seconds)}
+                        </Link>
+                      ) : (
+                        <span style={{ color: '#e0e0e0' }}>{formatTime(cp.time_seconds)}</span>
+                      )
+                    ) : <span style={{ color: '#555' }}>-</span>}
                   </div>
                   <div style={{ color: '#a0a0b0' }}>
                     {cp ? `${formatPace(cp.pace_sec_per_km)}/km` : '-'}
