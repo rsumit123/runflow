@@ -429,7 +429,8 @@ function ActivityDetail() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
         <h2 style={{ ...sectionTitle, marginBottom: 0 }}>Route Map</h2>
         {activity.best_efforts && activity.best_efforts.length > 0 && (
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: '#666', marginRight: '4px' }}>Fastest:</span>
             <button
               onClick={() => setHighlightDist(null)}
               style={{
