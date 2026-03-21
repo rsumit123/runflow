@@ -75,10 +75,13 @@ async def recommend_speed_goal(
                     break
 
     phase_best = None
+    phase_best_sprint = None
     for be, date in all_efforts:
         if be.activity_id in phase_ids:
             if phase_best is None or be.time_seconds < phase_best.time_seconds:
                 phase_best = be
+            if be.is_dedicated and (phase_best_sprint is None or be.time_seconds < phase_best_sprint.time_seconds):
+                phase_best_sprint = be
 
     # Trend: compare recent half vs older half
     trend_sec_per_phase = 0
@@ -144,6 +147,7 @@ async def recommend_speed_goal(
         "sprint_recommended": sprint_recommended,
         "sprint_count": sprint_count,
         "current_phase_best": phase_best.time_seconds if phase_best else None,
+        "current_phase_best_sprint": phase_best_sprint.time_seconds if phase_best_sprint else None,
         "trend_per_phase": trend_sec_per_phase,
         "trend_direction": "improving" if trend_sec_per_phase > 2 else "declining" if trend_sec_per_phase < -2 else "steady",
         "recommended_target": recommended,
