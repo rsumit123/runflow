@@ -27,6 +27,34 @@ logger = logging.getLogger(__name__)
 
 RUNNING_ACTIVITY_TYPES = {"Run", "TrailRun", "VirtualRun"}
 
+
+def encode_polyline(coords: list, every_n: int = 5) -> str:
+    """Encode a list of [lat, lng] into a Google summary polyline, simplified."""
+    if len(coords) <= 20:
+        points = coords
+    else:
+        points = [coords[i] for i in range(0, len(coords), every_n)]
+        if points[-1] != coords[-1]:
+            points.append(coords[-1])
+
+    result = ''
+    prev_lat = 0
+    prev_lng = 0
+    for lat, lng in points:
+        lat_int = round(lat * 1e5)
+        lng_int = round(lng * 1e5)
+        d_lat = lat_int - prev_lat
+        d_lng = lng_int - prev_lng
+        prev_lat = lat_int
+        prev_lng = lng_int
+        for v in [d_lat, d_lng]:
+            v = ~(v << 1) if v < 0 else (v << 1)
+            while v >= 0x20:
+                result += chr((0x20 | (v & 0x1f)) + 63)
+                v >>= 5
+            result += chr(v + 63)
+    return result
+
 # ---------------------------------------------------------------------------
 # Haversine helper
 # ---------------------------------------------------------------------------
@@ -559,10 +587,11 @@ async def import_from_export(
                 logger.warning("Error parsing file for activity %s: %s", activity_id, exc)
 
         if parsed:
-            # Set start/end latlng
+            # Set start/end latlng and generate summary polyline
             if parsed["latlng"]:
                 act.start_latlng = parsed["latlng"][0]
                 act.end_latlng = parsed["latlng"][-1]
+                act.map_summary_polyline = encode_polyline(parsed["latlng"])
 
             # Remove old splits
             existing_splits = await session.execute(
