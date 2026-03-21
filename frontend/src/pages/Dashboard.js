@@ -53,7 +53,9 @@ function computeStats(activities) {
     totalDistanceKm: (totalDistance / 1000).toFixed(1),
     totalElevation: Math.round(totalElevation),
     longestRunKm: (longestRun.distance / 1000).toFixed(2),
+    longestRunId: longestRun.id,
     fastestRunPace: formatPaceFromSpeed(fastestRun.average_speed),
+    fastestRunId: fastestRun.id,
     avgDistanceKm: (totalDistance / 1000 / valid.length).toFixed(2),
     last5AvgPace: l5Dist > 0 ? formatPace(l5Time, l5Dist) : '-',
   };
@@ -176,16 +178,24 @@ function Dashboard() {
             { label: 'Last 5 Avg Pace', value: stats.last5AvgPace, unit: 'min/km' },
             { label: 'Total Distance', value: stats.totalDistanceKm, unit: 'km' },
             { label: 'Total Elevation', value: stats.totalElevation, unit: 'm' },
-            { label: 'Longest Run', value: stats.longestRunKm, unit: 'km' },
+            { label: 'Longest Run', value: stats.longestRunKm, unit: 'km', linkId: stats.longestRunId },
             { label: 'Avg Distance', value: stats.avgDistanceKm, unit: 'km/run' },
-            { label: 'Fastest Run', value: stats.fastestRunPace, unit: 'min/km' },
-          ].map((s, i) => (
-            <div key={i} style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>{s.label}</div>
-              <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{s.value}</div>
-              <div style={{ fontSize: '12px', color: '#a0a0b0' }}>{s.unit}</div>
-            </div>
-          ))}
+            { label: 'Fastest Run', value: stats.fastestRunPace, unit: 'min/km', linkId: stats.fastestRunId },
+          ].map((s, i) => {
+            const card = (
+              <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center', cursor: s.linkId ? 'pointer' : 'default' }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>{s.label}</div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{s.value}</div>
+                <div style={{ fontSize: '12px', color: '#a0a0b0' }}>{s.unit}</div>
+                {s.linkId && <div style={{ fontSize: '9px', color: '#fc520088', marginTop: '4px' }}>view run &rarr;</div>}
+              </div>
+            );
+            return s.linkId ? (
+              <Link key={i} to={`/activity/${s.linkId}`} style={{ textDecoration: 'none' }}>{card}</Link>
+            ) : (
+              <div key={i}>{card}</div>
+            );
+          })}
         </div>
       )}
 

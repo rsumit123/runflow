@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../api';
 
 function formatPace(secPerKm) {
@@ -199,10 +200,20 @@ function Phases() {
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Avg Pace</div>
                   <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{formatPace(phase.avg_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
                 </div>
-                <div>
-                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Best Pace</div>
-                  <div style={{ fontSize: '18px', fontWeight: 700, color: '#4ade80' }}>{formatPace(phase.best_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
-                </div>
+                {phase.fastest_run_id ? (
+                  <Link to={`/activity/${phase.fastest_run_id}`} style={{ textDecoration: 'none' }}>
+                    <div style={{ cursor: 'pointer' }}>
+                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Best Pace</div>
+                      <div style={{ fontSize: '18px', fontWeight: 700, color: '#4ade80' }}>{formatPace(phase.best_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
+                      <div style={{ fontSize: '9px', color: '#4ade8088' }}>view run &rarr;</div>
+                    </div>
+                  </Link>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Best Pace</div>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#4ade80' }}>{formatPace(phase.best_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
+                  </div>
+                )}
                 <div>
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Frequency</div>
                   <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{phase.runs_per_week} <span style={{ fontSize: '12px', color: '#666' }}>/wk</span></div>
@@ -212,6 +223,18 @@ function Phases() {
                   <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{Math.round(phase.total_elevation_m)} <span style={{ fontSize: '12px', color: '#666' }}>m</span></div>
                 </div>
               </div>
+              {phase.fastest_run_id && (
+                <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <Link to={`/activity/${phase.fastest_run_id}`} style={{ fontSize: '12px', color: '#4ade80' }}>
+                    Fastest run &rarr;
+                  </Link>
+                  {phase.longest_run_id && phase.longest_run_id !== phase.fastest_run_id && (
+                    <Link to={`/activity/${phase.longest_run_id}`} style={{ fontSize: '12px', color: '#60a5fa' }}>
+                      Longest run &rarr;
+                    </Link>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

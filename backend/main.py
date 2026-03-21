@@ -415,12 +415,14 @@ async def get_phases(
         if total_distance > 0 and total_time > 0:
             avg_pace_sec_per_km = total_time / (total_distance / 1000)
 
-        longest_run = max((a.distance or 0 for a in valid), default=0)
+        longest_act = max(valid, key=lambda a: a.distance or 0) if valid else None
+        longest_run = longest_act.distance if longest_act else 0
+        fastest_act = None
         best_pace = None
         if valid:
-            fastest = max(valid, key=lambda a: a.average_speed or 0)
-            if fastest.average_speed and fastest.average_speed > 0:
-                best_pace = 1000 / fastest.average_speed
+            fastest_act = max(valid, key=lambda a: a.average_speed or 0)
+            if fastest_act.average_speed and fastest_act.average_speed > 0:
+                best_pace = 1000 / fastest_act.average_speed
 
         # Break before this phase (gap from previous phase end)
         break_days = None
@@ -428,6 +430,9 @@ async def get_phases(
             prev_end = phases[idx - 1][-1].start_date
             if prev_end and start_date:
                 break_days = (start_date - prev_end).days
+
+        # Activity IDs list for this phase
+        activity_ids = [a.id for a in phase]
 
         phase_stats.append({
             "phase_number": idx + 1,
@@ -441,9 +446,12 @@ async def get_phases(
             "avg_distance_km": round(total_distance / 1000 / len(valid), 2) if valid else 0,
             "avg_pace_sec_per_km": round(avg_pace_sec_per_km, 1) if avg_pace_sec_per_km else None,
             "longest_run_km": round(longest_run / 1000, 2),
+            "longest_run_id": longest_act.id if longest_act else None,
             "best_pace_sec_per_km": round(best_pace, 1) if best_pace else None,
+            "fastest_run_id": fastest_act.id if fastest_act else None,
             "runs_per_week": round(runs_per_week, 1),
             "total_time_seconds": total_time,
+            "activity_ids": activity_ids,
         })
 
     return {"phases": phase_stats, "gap_days": gap_days, "total_phases": len(phase_stats)}
