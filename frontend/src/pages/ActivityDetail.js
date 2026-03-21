@@ -147,6 +147,11 @@ function formatPaceSeconds(totalSeconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+function formatDistanceLabel(meters) {
+  if (meters >= 1000) return `${meters / 1000}km`;
+  return `${meters}m`;
+}
+
 const deleteButtonStyle = {
   padding: '8px 20px',
   borderRadius: '6px',
@@ -166,6 +171,7 @@ function ActivityDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this activity from your local database? (This does NOT delete from Strava)')) return;
@@ -189,6 +195,15 @@ function ActivityDetail() {
       .catch((err) => {
         setError(err.response?.data?.detail || 'Failed to load activity');
         setLoading(false);
+      });
+
+    api
+      .get(`/activities/${id}/analysis`)
+      .then((res) => {
+        setAnalysis(res.data);
+      })
+      .catch(() => {
+        // No analysis available (no GPS streams) - that's fine
       });
   }, [id]);
 
@@ -231,6 +246,8 @@ function ActivityDetail() {
   const elevationM = activity.total_elevation_gain
     ? Math.round(activity.total_elevation_gain)
     : 0;
+
+  const hasBestEfforts = analysis && analysis.best_efforts && analysis.best_efforts.length > 0;
 
   return (
     <div>
@@ -301,6 +318,95 @@ function ActivityDetail() {
           <div style={statUnit}>
             min/km (Split #{best1kmSplit.split_number || best1kmSplit.split || '?'})
           </div>
+        </div>
+      )}
+
+      {/* Run Analysis - Best Efforts */}
+      {hasBestEfforts && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+          <h2 style={{ ...sectionTitle, marginTop: 0 }}>Run Analysis</h2>
+
+          {analysis.pace_percentile != null && (
+            <div style={{
+              backgroundColor: '#16213e',
+              borderRadius: '8px',
+              padding: '14px 18px',
+              marginBottom: '18px',
+              border: '1px solid #fc520033',
+              fontSize: '15px',
+              color: '#e0e0e0',
+              textAlign: 'center',
+            }}>
+              This run was faster than <span style={{ color: '#fc5200', fontWeight: 700 }}>{Math.round(analysis.pace_percentile)}%</span> of all your runs
+            </div>
+          )}
+
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#a0a0b0', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Best Efforts
+          </div>
+
+          {/* Table header */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '70px 1fr 1fr 1fr 80px',
+            gap: '8px',
+            padding: '8px 12px',
+            fontSize: '10px',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+            color: '#666',
+            borderBottom: '1px solid #252540',
+          }}>
+            <div>Distance</div>
+            <div>Time</div>
+            <div>Pace</div>
+            <div>Percentile</div>
+            <div style={{ textAlign: 'right' }}>vs Best</div>
+          </div>
+
+          {/* Table rows */}
+          {analysis.best_efforts.map((effort) => (
+            <div key={effort.distance} style={{
+              display: 'grid',
+              gridTemplateColumns: '70px 1fr 1fr 1fr 80px',
+              gap: '8px',
+              padding: '10px 12px',
+              alignItems: 'center',
+              borderBottom: '1px solid #1e1e35',
+              fontSize: '14px',
+            }}>
+              <div style={{ color: '#e0e0e0', fontWeight: 600, fontSize: '13px' }}>
+                {formatDistanceLabel(effort.distance)}
+              </div>
+              <div style={{ color: '#e0e0e0' }}>
+                {formatTime(effort.time_seconds)}
+              </div>
+              <div style={{ color: '#a0a0b0' }}>
+                {formatPaceSeconds(effort.pace_sec_per_km)}/km
+              </div>
+              <div style={{ color: '#a0a0b0', fontSize: '12px' }}>
+                Faster than {Math.round(effort.percentile)}%
+              </div>
+              <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                {effort.is_pr ? (
+                  <span style={{
+                    backgroundColor: '#4ade80',
+                    color: '#0a2a0a',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    letterSpacing: '0.5px',
+                  }}>PR!</span>
+                ) : (
+                  <span style={{ color: '#ff6b6b', fontSize: '13px' }}>
+                    +{Math.round(effort.diff_from_best)}s
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

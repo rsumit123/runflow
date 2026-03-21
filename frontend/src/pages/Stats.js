@@ -26,6 +26,12 @@ function formatDate(dateString) {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+function formatDistanceLabel(meters) {
+  const m = parseInt(meters, 10);
+  if (m >= 1000) return `${m / 1000}km`;
+  return `${m}m`;
+}
+
 const cardStyle = { backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '20px', overflow: 'hidden' };
 const chartWrap = { width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' };
 const chartInner = (minW) => ({ minWidth: minW ? `${minW}px` : undefined, width: '100%' });
@@ -50,6 +56,7 @@ function Stats() {
   const [phases, setPhases] = useState([]);
   const [prs, setPrs] = useState(null);
   const [heatmap, setHeatmap] = useState([]);
+  const [bestEfforts, setBestEfforts] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -58,11 +65,13 @@ function Stats() {
       api.get('/phases?gap_days=14'),
       api.get('/stats/personal-records'),
       api.get('/stats/heatmap'),
-    ]).then(([monthlyRes, phasesRes, prsRes, heatmapRes]) => {
+      api.get('/best-efforts/records'),
+    ]).then(([monthlyRes, phasesRes, prsRes, heatmapRes, bestEffortsRes]) => {
       setMonthly(monthlyRes.data.months || []);
       setPhases(phasesRes.data.phases || []);
       setPrs(prsRes.data);
       setHeatmap(heatmapRes.data.days || []);
+      setBestEfforts(bestEffortsRes.data);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
@@ -119,9 +128,117 @@ function Stats() {
 
   const prEntries = prs?.personal_records ? Object.entries(prs.personal_records) : [];
 
+  // Best efforts data
+  const allTime = bestEfforts?.all_time || {};
+  const currentPhase = bestEfforts?.current_phase || {};
+  const currentPhaseRuns = bestEfforts?.current_phase_runs || 0;
+  const distanceKeys = Object.keys(allTime).sort((a, b) => parseInt(a) - parseInt(b));
+  const hasSpeedTracker = distanceKeys.length > 0;
+
   return (
     <div>
       <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '24px' }}>Statistics</h1>
+
+      {/* Speed Tracker - Best Efforts Comparison */}
+      {hasSpeedTracker && (
+        <div style={cardStyle}>
+          <h2 style={sectionTitle}>Speed Tracker</h2>
+          <p style={{ fontSize: '13px', color: '#666', marginBottom: '18px' }}>
+            Current phase: {currentPhaseRuns} run{currentPhaseRuns !== 1 ? 's' : ''}
+          </p>
+
+          {/* Desktop table view */}
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            {/* Header */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '70px 1fr 1fr 1fr 1fr 80px',
+              gap: '8px',
+              padding: '8px 12px',
+              fontSize: '10px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              color: '#666',
+              borderBottom: '1px solid #252540',
+              minWidth: '520px',
+            }}>
+              <div>Distance</div>
+              <div>All-Time Best</div>
+              <div>All-Time Pace</div>
+              <div>Phase Best</div>
+              <div>Phase Pace</div>
+              <div style={{ textAlign: 'right' }}>Diff</div>
+            </div>
+
+            {/* Rows */}
+            {distanceKeys.map((distKey) => {
+              const at = allTime[distKey];
+              const cp = currentPhase[distKey];
+              let diffSeconds = null;
+              let diffColor = '#a0a0b0';
+              if (at && cp) {
+                diffSeconds = cp.time_seconds - at.time_seconds;
+                if (diffSeconds <= 0) {
+                  diffColor = '#4ade80'; // green - current phase matches or beats all-time
+                } else if (diffSeconds <= 5) {
+                  diffColor = '#4ade80'; // green - very close
+                } else if (diffSeconds <= 15) {
+                  diffColor = '#fbbf24'; // yellow - moderate gap
+                } else {
+                  diffColor = '#ff6b6b'; // red - far off
+                }
+              }
+
+              return (
+                <div key={distKey} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '70px 1fr 1fr 1fr 1fr 80px',
+                  gap: '8px',
+                  padding: '10px 12px',
+                  alignItems: 'center',
+                  borderBottom: '1px solid #1e1e35',
+                  fontSize: '14px',
+                  minWidth: '520px',
+                }}>
+                  <div style={{ color: '#e0e0e0', fontWeight: 600, fontSize: '13px' }}>
+                    {formatDistanceLabel(distKey)}
+                  </div>
+                  <div>
+                    {at ? (
+                      <Link to={`/activity/${at.activity_id}`} style={{ color: '#fc5200', textDecoration: 'none', fontWeight: 600 }}>
+                        {formatTime(at.time_seconds)}
+                      </Link>
+                    ) : (
+                      <span style={{ color: '#555' }}>-</span>
+                    )}
+                  </div>
+                  <div style={{ color: '#a0a0b0' }}>
+                    {at ? `${formatPace(at.pace_sec_per_km)}/km` : '-'}
+                  </div>
+                  <div style={{ color: '#e0e0e0' }}>
+                    {cp ? formatTime(cp.time_seconds) : <span style={{ color: '#555' }}>-</span>}
+                  </div>
+                  <div style={{ color: '#a0a0b0' }}>
+                    {cp ? `${formatPace(cp.pace_sec_per_km)}/km` : '-'}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    {at && cp ? (
+                      diffSeconds <= 0 ? (
+                        <span style={{ color: '#4ade80', fontWeight: 700, fontSize: '12px' }}>PR!</span>
+                      ) : (
+                        <span style={{ color: diffColor, fontSize: '13px' }}>+{Math.round(diffSeconds)}s</span>
+                      )
+                    ) : (
+                      <span style={{ color: '#555' }}>-</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Personal Records */}
       {(prEntries.length > 0 || prs?.best_1km_split) && (

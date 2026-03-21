@@ -27,6 +27,7 @@ class Activity(Base):
 
     splits = relationship("Split", back_populates="activity", cascade="all, delete-orphan")
     streams = relationship("Stream", back_populates="activity", cascade="all, delete-orphan")
+    best_efforts = relationship("BestEffort", back_populates="activity", cascade="all, delete-orphan")
 
 
 class Split(Base):
@@ -55,3 +56,17 @@ class Stream(Base):
     data = Column(JSON, nullable=True)
 
     activity = relationship("Activity", back_populates="streams")
+
+
+class BestEffort(Base):
+    __tablename__ = "best_efforts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    activity_id = Column(BigInteger, ForeignKey("activities.id", ondelete="CASCADE"), nullable=False, index=True)
+    distance_target = Column(Integer, nullable=False)  # target distance in meters (200, 400, 500, 1000)
+    time_seconds = Column(Float, nullable=False)  # best time for that distance
+    pace_sec_per_km = Column(Float, nullable=True)
+    start_index = Column(Integer, nullable=True)  # index in the stream where this segment starts
+    end_index = Column(Integer, nullable=True)
+
+    activity = relationship("Activity", back_populates="best_efforts")

@@ -15,9 +15,10 @@ from sqlalchemy.orm import selectinload
 
 import config
 from database import init_db, get_session, async_session
-from models import Activity, Split, Stream
+from models import Activity, Split, Stream, BestEffort
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export
+from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -355,7 +356,11 @@ async def get_activity(activity_id: int, session: AsyncSession = Depends(get_ses
     result = await session.execute(
         select(Activity)
         .where(Activity.id == activity_id)
-        .options(selectinload(Activity.splits), selectinload(Activity.streams))
+        .options(
+            selectinload(Activity.splits),
+            selectinload(Activity.streams),
+            selectinload(Activity.best_efforts),
+        )
     )
     act = result.scalar_one_or_none()
     if act is None:
@@ -364,7 +369,190 @@ async def get_activity(activity_id: int, session: AsyncSession = Depends(get_ses
     data = _activity_to_dict(act)
     data["splits"] = [_split_to_dict(s) for s in act.splits]
     data["streams"] = [_stream_to_dict(s) for s in act.streams]
+    data["best_efforts"] = [
+        {
+            "distance_target": be.distance_target,
+            "time_seconds": be.time_seconds,
+            "pace_sec_per_km": be.pace_sec_per_km,
+        }
+        for be in sorted(act.best_efforts, key=lambda x: x.distance_target)
+    ]
     return data
+
+
+# ---------------------------------------------------------------------------
+# Best Efforts endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/best-efforts/compute-all")
+async def compute_all_efforts(session: AsyncSession = Depends(get_session)):
+    """Compute best efforts for all activities with streams. Runs synchronously."""
+    result = await compute_all_best_efforts(session)
+    return result
+
+
+@app.post("/api/best-efforts/compute/{activity_id}")
+async def compute_activity_efforts(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Compute best efforts for a single activity."""
+    efforts = await compute_and_store_best_efforts(session, activity_id)
+    await session.commit()
+    return {"activity_id": activity_id, "efforts": efforts}
+
+
+@app.get("/api/best-efforts/records")
+async def best_effort_records(session: AsyncSession = Depends(get_session)):
+    """
+    Get all-time and current-phase best efforts for each target distance.
+    Current phase = latest phase (most recent consecutive runs with no 14+ day gap).
+    """
+    # All-time bests
+    all_time = {}
+    for target in TARGET_DISTANCES:
+        result = await session.execute(
+            select(BestEffort)
+            .where(BestEffort.distance_target == target)
+            .order_by(BestEffort.time_seconds.asc())
+            .limit(1)
+        )
+        best = result.scalar_one_or_none()
+        if best:
+            # Get activity date
+            act = await session.get(Activity, best.activity_id)
+            all_time[target] = {
+                "time_seconds": best.time_seconds,
+                "pace_sec_per_km": best.pace_sec_per_km,
+                "activity_id": best.activity_id,
+                "date": act.start_date.isoformat() if act and act.start_date else None,
+                "activity_name": act.name if act else None,
+            }
+
+    # Current phase bests: find latest phase
+    act_result = await session.execute(
+        select(Activity).order_by(Activity.start_date.desc())
+    )
+    all_acts = act_result.scalars().all()
+
+    current_phase_ids = []
+    if all_acts:
+        current_phase_ids.append(all_acts[0].id)
+        for i in range(1, len(all_acts)):
+            if all_acts[i - 1].start_date and all_acts[i].start_date:
+                gap = (all_acts[i - 1].start_date - all_acts[i].start_date).days
+                if gap <= 14:
+                    current_phase_ids.append(all_acts[i].id)
+                else:
+                    break
+
+    current_phase = {}
+    if current_phase_ids:
+        for target in TARGET_DISTANCES:
+            result = await session.execute(
+                select(BestEffort)
+                .where(
+                    BestEffort.distance_target == target,
+                    BestEffort.activity_id.in_(current_phase_ids),
+                )
+                .order_by(BestEffort.time_seconds.asc())
+                .limit(1)
+            )
+            best = result.scalar_one_or_none()
+            if best:
+                act = await session.get(Activity, best.activity_id)
+                current_phase[target] = {
+                    "time_seconds": best.time_seconds,
+                    "pace_sec_per_km": best.pace_sec_per_km,
+                    "activity_id": best.activity_id,
+                    "date": act.start_date.isoformat() if act and act.start_date else None,
+                }
+
+    return {
+        "all_time": {str(k): v for k, v in all_time.items()},
+        "current_phase": {str(k): v for k, v in current_phase.items()},
+        "current_phase_runs": len(current_phase_ids),
+    }
+
+
+@app.get("/api/activities/{activity_id}/analysis")
+async def activity_analysis(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """
+    Run analysis: compare this activity's best efforts against all-time and current phase.
+    Returns insights like PR detection, percentile, phase comparison.
+    """
+    act = await session.get(Activity, activity_id)
+    if not act:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    # Get this activity's best efforts
+    be_result = await session.execute(
+        select(BestEffort).where(BestEffort.activity_id == activity_id)
+    )
+    activity_efforts = {be.distance_target: be for be in be_result.scalars().all()}
+
+    # Get all best efforts for percentile calc
+    insights = []
+    for target in TARGET_DISTANCES:
+        if target not in activity_efforts:
+            continue
+
+        my_effort = activity_efforts[target]
+
+        # Count how many are slower (for percentile)
+        count_result = await session.execute(
+            select(func.count(BestEffort.id)).where(BestEffort.distance_target == target)
+        )
+        total = count_result.scalar() or 0
+
+        slower_result = await session.execute(
+            select(func.count(BestEffort.id)).where(
+                BestEffort.distance_target == target,
+                BestEffort.time_seconds > my_effort.time_seconds,
+            )
+        )
+        slower = slower_result.scalar() or 0
+        percentile = round((slower / total) * 100) if total > 0 else 0
+
+        # All-time best
+        at_result = await session.execute(
+            select(BestEffort)
+            .where(BestEffort.distance_target == target)
+            .order_by(BestEffort.time_seconds.asc())
+            .limit(1)
+        )
+        all_time_best = at_result.scalar_one_or_none()
+        is_pr = all_time_best and my_effort.time_seconds <= all_time_best.time_seconds
+
+        insight = {
+            "distance": target,
+            "time_seconds": my_effort.time_seconds,
+            "pace_sec_per_km": my_effort.pace_sec_per_km,
+            "percentile": percentile,
+            "is_pr": is_pr,
+            "all_time_best": all_time_best.time_seconds if all_time_best else None,
+            "diff_from_best": round(my_effort.time_seconds - all_time_best.time_seconds, 1) if all_time_best else None,
+        }
+        insights.append(insight)
+
+    # Overall pace comparison
+    pace_percentile = None
+    if act.average_speed and act.average_speed > 0:
+        faster_result = await session.execute(
+            select(func.count(Activity.id)).where(
+                Activity.average_speed < act.average_speed,
+                Activity.distance > 0,
+            )
+        )
+        faster = faster_result.scalar() or 0
+        total_acts_result = await session.execute(
+            select(func.count(Activity.id)).where(Activity.distance > 0)
+        )
+        total_acts = total_acts_result.scalar() or 0
+        pace_percentile = round((faster / total_acts) * 100) if total_acts > 0 else 0
+
+    return {
+        "activity_id": activity_id,
+        "best_efforts": insights,
+        "pace_percentile": pace_percentile,
+    }
 
 
 @app.get("/api/phases")
