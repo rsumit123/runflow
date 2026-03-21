@@ -392,8 +392,15 @@ function ActivityDetail() {
                 fontSize: '13px',
                 minWidth: '480px',
               }}>
-                <div style={{ color: '#e0e0e0', fontWeight: 600 }}>
-                  {formatDistanceLabel(effort.distance)}
+                <div>
+                  <span style={{ color: '#e0e0e0', fontWeight: 600 }}>{formatDistanceLabel(effort.distance)}</span>
+                  <span style={{
+                    marginLeft: '4px', fontSize: '8px', fontWeight: 600, padding: '1px 5px', borderRadius: '3px', verticalAlign: 'middle',
+                    backgroundColor: effort.is_dedicated ? '#4ade8015' : '#fc520015',
+                    color: effort.is_dedicated ? '#4ade80' : '#fc5200',
+                  }}>
+                    {effort.is_dedicated ? 'Sprint' : 'Seg'}
+                  </span>
                 </div>
                 <div style={{ color: '#e0e0e0' }}>
                   {formatTime(effort.time_seconds)}
