@@ -3,6 +3,7 @@ import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import ActivityDetail from './pages/ActivityDetail';
 import Import from './pages/Import';
+import Phases from './pages/Phases';
 
 function App() {
   const location = useLocation();
@@ -36,6 +37,13 @@ function App() {
           }}>
             Dashboard
           </Link>
+          <Link to="/phases" style={{
+            color: isActive('/phases') ? '#fc5200' : '#a0a0b0',
+            fontWeight: isActive('/phases') ? 600 : 400,
+            fontSize: '14px',
+          }}>
+            Phases
+          </Link>
           <Link to="/import" style={{
             color: isActive('/import') ? '#fc5200' : '#a0a0b0',
             fontWeight: isActive('/import') ? 600 : 400,
@@ -53,6 +61,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/activity/:id" element={<ActivityDetail />} />
+          <Route path="/phases" element={<Phases />} />
           <Route path="/import" element={<Import />} />
         </Routes>
       </div>
