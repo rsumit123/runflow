@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../api';
 import SplitsTable from '../components/SplitsTable';
+import RouteMap from '../components/RouteMap';
 
 const backLink = {
   display: 'inline-block',
@@ -414,8 +415,12 @@ function ActivityDetail() {
       )}
 
       <h2 style={sectionTitle}>Route Map</h2>
-      <div style={mapPlaceholder} id="activity-map">
-        Map placeholder - GPS route will be displayed here
+      <div style={{ marginBottom: '32px' }}>
+        <RouteMap
+          latlng={activity.streams?.find(s => s.stream_type === 'latlng')?.data}
+          polyline={activity.map_summary_polyline}
+          height={350}
+        />
       </div>
 
       {activity.splits && activity.splits.length > 0 && (
