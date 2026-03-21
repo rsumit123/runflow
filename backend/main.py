@@ -624,6 +624,7 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
             "average_speed": a.average_speed,
             "start_date": a.start_date.isoformat() if a.start_date else None,
             "total_elevation_gain": a.total_elevation_gain,
+            "polyline": a.map_summary_polyline,
         })
         if a.map_summary_polyline:
             polyline_map[a.id] = a.map_summary_polyline
