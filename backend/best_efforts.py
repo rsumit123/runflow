@@ -15,7 +15,7 @@ from models import Activity, Stream, BestEffort
 
 logger = logging.getLogger(__name__)
 
-TARGET_DISTANCES = [200, 400, 500, 1000, 2000]
+TARGET_DISTANCES = [100, 200, 400, 500, 1000, 2000]
 
 
 def compute_best_efforts_from_streams(

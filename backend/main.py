@@ -219,6 +219,12 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
 
     act.has_detailed_data = True
 
+    # Auto-compute best efforts from streams
+    try:
+        await compute_and_store_best_efforts(session, act.id)
+    except Exception as exc:
+        logger.warning("Failed to compute best efforts for activity %s: %s", act.id, exc)
+
 
 # ---------------------------------------------------------------------------
 # Background task for API import
