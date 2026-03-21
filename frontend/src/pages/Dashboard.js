@@ -82,6 +82,7 @@ function Dashboard() {
   const [endDate, setEndDate] = useState(defaults.end);
   const [pulling, setPulling] = useState(false);
   const [pullResult, setPullResult] = useState(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const loadActivities = (p = page) => {
     setLoading(true);
@@ -151,25 +152,30 @@ function Dashboard() {
       </div>
 
       {/* Pull from Strava */}
-      <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+      <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button onClick={handlePullToday} disabled={pulling}
-            style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#fc5200', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+            style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#fc5200', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap', flex: '1 1 auto' }}>
             {pulling ? 'Pulling...' : "Pull Today's Runs"}
           </button>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginLeft: '4px' }}>
-            <span style={{ color: '#555', fontSize: '12px' }}>or by date:</span>
+          <button onClick={() => setShowDatePicker(!showDatePicker)}
+            style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            {showDatePicker ? 'Hide' : 'By Date'} {showDatePicker ? '\u25B2' : '\u25BC'}
+          </button>
+        </div>
+        {showDatePicker && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #252540' }}>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', width: '130px' }} />
-            <span style={{ color: '#444', fontSize: '12px' }}>to</span>
+              style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#e0e0e0', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
+            <span style={{ color: '#666', fontSize: '13px' }}>to</span>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', width: '130px' }} />
+              style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#e0e0e0', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
             <button onClick={() => handlePullByDate()} disabled={pulling}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', fontSize: '12px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#16213e', color: '#a0a0b0', opacity: pulling ? 0.6 : 1 }}>
+              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#fc5200', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap' }}>
               Pull
             </button>
           </div>
-        </div>
+        )}
         {pullResult && !pullResult.error && (
           <div style={{ color: '#4ade80', fontSize: '13px', marginTop: '10px' }}>
             Imported {pullResult.imported} new runs
