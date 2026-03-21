@@ -102,17 +102,22 @@ function Dashboard() {
 
   const totalPages = Math.ceil(total / PER_PAGE);
 
-  const handlePullByDate = async () => {
+  const handlePullByDate = async (start, end) => {
     setPulling(true);
     setPullResult(null);
     try {
-      const res = await api.post('/import/by-date', { start_date: startDate, end_date: endDate });
+      const res = await api.post('/import/by-date', { start_date: start || startDate, end_date: end || endDate });
       setPullResult(res.data);
       loadActivities(1);
     } catch (err) {
       setPullResult({ error: err.response?.data?.detail || 'Failed to pull' });
     }
     setPulling(false);
+  };
+
+  const handlePullToday = () => {
+    const today = new Date().toISOString().split('T')[0];
+    handlePullByDate(today, today);
   };
 
   const stats = computeStats(activities);
@@ -147,27 +152,33 @@ function Dashboard() {
 
       {/* Pull from Strava */}
       <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#a0a0b0', marginBottom: '10px' }}>Pull from Strava</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#e0e0e0', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
-          <span style={{ color: '#666', fontSize: '13px' }}>to</span>
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-            style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#e0e0e0', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
-          <button onClick={handlePullByDate} disabled={pulling}
-            style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#fc5200', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-            {pulling ? 'Pulling...' : 'Pull'}
+          <button onClick={handlePullToday} disabled={pulling}
+            style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#fc5200', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+            {pulling ? 'Pulling...' : "Pull Today's Runs"}
           </button>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginLeft: '4px' }}>
+            <span style={{ color: '#555', fontSize: '12px' }}>or by date:</span>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', width: '130px' }} />
+            <span style={{ color: '#444', fontSize: '12px' }}>to</span>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', width: '130px' }} />
+            <button onClick={() => handlePullByDate()} disabled={pulling}
+              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', fontSize: '12px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#16213e', color: '#a0a0b0', opacity: pulling ? 0.6 : 1 }}>
+              Pull
+            </button>
+          </div>
         </div>
         {pullResult && !pullResult.error && (
-          <div style={{ color: '#4ade80', fontSize: '13px', marginTop: '8px' }}>
+          <div style={{ color: '#4ade80', fontSize: '13px', marginTop: '10px' }}>
             Imported {pullResult.imported} new runs
             {pullResult.already_existed ? `, ${pullResult.already_existed} already in DB` : ''}
             {pullResult.skipped_non_running ? `, ${pullResult.skipped_non_running} non-running skipped` : ''}
           </div>
         )}
         {pullResult && pullResult.error && (
-          <div style={{ color: '#ff6b6b', fontSize: '13px', marginTop: '8px' }}>{pullResult.error}</div>
+          <div style={{ color: '#ff6b6b', fontSize: '13px', marginTop: '10px' }}>{pullResult.error}</div>
         )}
       </div>
 
