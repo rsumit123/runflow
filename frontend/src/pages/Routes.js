@@ -1,7 +1,55 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { MapContainer, TileLayer, Polyline } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import api from '../api';
+
+// Decode Google-encoded polyline
+function decodePolyline(encoded) {
+  if (!encoded) return [];
+  const points = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let b, shift = 0, result = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+  return points;
+}
+
+function MiniRouteMap({ polyline }) {
+  const positions = decodePolyline(polyline);
+  if (positions.length < 2) return null;
+
+  // Calculate center and bounds
+  const lats = positions.map(p => p[0]);
+  const lngs = positions.map(p => p[1]);
+  const center = [(Math.min(...lats) + Math.max(...lats)) / 2, (Math.min(...lngs) + Math.max(...lngs)) / 2];
+
+  return (
+    <div style={{ width: '100px', height: '80px', borderRadius: '6px', overflow: 'hidden', flexShrink: 0 }}>
+      <MapContainer
+        center={center}
+        bounds={[[Math.min(...lats) - 0.002, Math.min(...lngs) - 0.002], [Math.max(...lats) + 0.002, Math.max(...lngs) + 0.002]]}
+        style={{ height: '100%', width: '100%' }}
+        zoomControl={false}
+        attributionControl={false}
+        dragging={false}
+        scrollWheelZoom={false}
+        doubleClickZoom={false}
+        touchZoom={false}
+      >
+        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+        <Polyline positions={positions} pathOptions={{ color: '#fc5200', weight: 2, opacity: 0.9 }} />
+      </MapContainer>
+    </div>
+  );
+}
 
 function formatPace(secPerKm) {
   if (!secPerKm) return '-';
@@ -107,15 +155,14 @@ function Routes() {
               <div
                 onClick={() => setExpandedRoute(isExpanded ? null : route.route_id)}
                 style={{
-                  padding: '16px',
+                  padding: '14px',
                   cursor: 'pointer',
                   display: 'flex',
-                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '8px',
+                  gap: '12px',
                 }}
               >
+                {route.polyline && <MiniRouteMap polyline={route.polyline} />}
                 <div style={{ flex: '1 1 auto', minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>

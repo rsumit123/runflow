@@ -605,6 +605,7 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
     activities = result.scalars().all()
 
     act_dicts = []
+    polyline_map = {}  # activity_id -> polyline
     for a in activities:
         act_dicts.append({
             "id": a.id,
@@ -617,8 +618,26 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
             "start_date": a.start_date.isoformat() if a.start_date else None,
             "total_elevation_gain": a.total_elevation_gain,
         })
+        if a.map_summary_polyline:
+            polyline_map[a.id] = a.map_summary_polyline
 
     routes = group_routes(act_dicts)
+
+    # Attach a polyline to each route for map preview
+    for route in routes:
+        polyline = None
+        # Try best pace activity first, then first activity with a polyline
+        for aid_key in [route.get("best_pace_id"), route.get("best_time_id")]:
+            if aid_key and aid_key in polyline_map:
+                polyline = polyline_map[aid_key]
+                break
+        if not polyline:
+            for act in route.get("activities", []):
+                if act["id"] in polyline_map:
+                    polyline = polyline_map[act["id"]]
+                    break
+        route["polyline"] = polyline
+
     return {"routes": routes, "total_routes": len(routes)}
 
 
