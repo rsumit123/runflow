@@ -15,10 +15,11 @@ from sqlalchemy.orm import selectinload
 
 import config
 from database import init_db, get_session, async_session
-from models import Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge
+from models import Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
+from goals import recommend_speed_goal, recommend_consistency_goal, recommend_volume_goal
 from route_matching import group_routes
 
 logging.basicConfig(level=logging.INFO)
@@ -781,6 +782,135 @@ async def get_route_labels(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(RouteLabel))
     labels = {l.route_key: l.name for l in result.scalars().all()}
     return {"labels": labels}
+
+
+# ---------------------------------------------------------------------------
+# Goals
+# ---------------------------------------------------------------------------
+
+@app.get("/api/goals/recommend/speed/{distance}")
+async def recommend_speed(distance: int, session: AsyncSession = Depends(get_session)):
+    """Get speed goal recommendation for a distance."""
+    if distance not in TARGET_DISTANCES:
+        raise HTTPException(status_code=400, detail=f"Invalid distance. Use: {TARGET_DISTANCES}")
+    return await recommend_speed_goal(session, distance)
+
+
+@app.get("/api/goals/recommend/consistency")
+async def recommend_consistency(session: AsyncSession = Depends(get_session)):
+    """Get consistency goal recommendation."""
+    return await recommend_consistency_goal(session)
+
+
+@app.get("/api/goals/recommend/volume")
+async def recommend_volume(session: AsyncSession = Depends(get_session)):
+    """Get volume goal recommendation."""
+    return await recommend_volume_goal(session)
+
+
+class GoalCreateRequest(BaseModel):
+    goal_type: str  # "speed", "consistency", "volume"
+    distance_target: int | None = None
+    time_target: float | None = None
+    weekly_runs_target: int | None = None
+    weekly_km_target: float | None = None
+
+
+@app.post("/api/goals")
+async def create_goal(req: GoalCreateRequest, session: AsyncSession = Depends(get_session)):
+    """Create a new goal."""
+    goal = Goal(
+        goal_type=req.goal_type,
+        distance_target=req.distance_target,
+        time_target=req.time_target,
+        weekly_runs_target=req.weekly_runs_target,
+        weekly_km_target=req.weekly_km_target,
+        created_at=datetime.now(),
+        active=True,
+    )
+    session.add(goal)
+    await session.commit()
+    return {"id": goal.id, "status": "created"}
+
+
+@app.get("/api/goals")
+async def list_goals(session: AsyncSession = Depends(get_session)):
+    """List all active goals with current progress."""
+    result = await session.execute(
+        select(Goal).where(Goal.active.is_(True)).order_by(Goal.created_at.desc())
+    )
+    goals = result.scalars().all()
+
+    goal_list = []
+    for g in goals:
+        progress = {}
+        if g.goal_type == "speed" and g.distance_target and g.time_target:
+            # Get current best for this distance
+            be_result = await session.execute(
+                select(BestEffort)
+                .where(BestEffort.distance_target == g.distance_target)
+                .order_by(BestEffort.time_seconds.asc())
+                .limit(1)
+            )
+            best = be_result.scalar_one_or_none()
+            progress = {
+                "current_best": best.time_seconds if best else None,
+                "target": g.time_target,
+                "gap": round(best.time_seconds - g.time_target, 1) if best else None,
+                "achieved": best.time_seconds <= g.time_target if best else False,
+            }
+        elif g.goal_type == "consistency" and g.weekly_runs_target:
+            # Count this week's runs
+            now = datetime.now()
+            week_start = now - timedelta(days=now.weekday())
+            week_start = week_start.replace(hour=0, minute=0, second=0)
+            count_result = await session.execute(
+                select(func.count(Activity.id)).where(Activity.start_date >= week_start)
+            )
+            this_week = count_result.scalar() or 0
+            progress = {
+                "this_week": this_week,
+                "target": g.weekly_runs_target,
+                "achieved": this_week >= g.weekly_runs_target,
+            }
+        elif g.goal_type == "volume" and g.weekly_km_target:
+            now = datetime.now()
+            week_start = now - timedelta(days=now.weekday())
+            week_start = week_start.replace(hour=0, minute=0, second=0)
+            dist_result = await session.execute(
+                select(func.sum(Activity.distance)).where(Activity.start_date >= week_start)
+            )
+            this_week_m = dist_result.scalar() or 0
+            this_week_km = round(this_week_m / 1000, 2)
+            progress = {
+                "this_week_km": this_week_km,
+                "target": g.weekly_km_target,
+                "achieved": this_week_km >= g.weekly_km_target,
+            }
+
+        goal_list.append({
+            "id": g.id,
+            "goal_type": g.goal_type,
+            "distance_target": g.distance_target,
+            "time_target": g.time_target,
+            "weekly_runs_target": g.weekly_runs_target,
+            "weekly_km_target": g.weekly_km_target,
+            "created_at": g.created_at.isoformat() if g.created_at else None,
+            "progress": progress,
+        })
+
+    return {"goals": goal_list}
+
+
+@app.delete("/api/goals/{goal_id}")
+async def delete_goal(goal_id: int, session: AsyncSession = Depends(get_session)):
+    """Deactivate a goal."""
+    goal = await session.get(Goal, goal_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    goal.active = False
+    await session.commit()
+    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------
