@@ -23,6 +23,7 @@ from goals import recommend_speed_goal, recommend_consistency_goal, recommend_vo
 from route_matching import group_routes
 from intervals import analyze_intervals
 from laps import detect_laps
+from insights import generate_run_insight
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -706,6 +707,15 @@ async def get_laps(activity_id: int, session: AsyncSession = Depends(get_session
         return {"lap_count": 0}
 
     return laps
+
+
+@app.get("/api/activities/{activity_id}/insights")
+async def get_insights(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Generate narrative insights for a run."""
+    insight = await generate_run_insight(session, activity_id)
+    if not insight:
+        return {"narratives": [], "tips": []}
+    return insight
 
 
 @app.get("/api/routes")

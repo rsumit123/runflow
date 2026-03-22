@@ -184,6 +184,7 @@ function ActivityDetail() {
   const [repCount, setRepCount] = useState(3);
   const [repDistance, setRepDistance] = useState(400);
   const [laps, setLaps] = useState(null);
+  const [insight, setInsight] = useState(null);
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this activity from your local database? (This does NOT delete from Strava)')) return;
@@ -208,6 +209,10 @@ function ActivityDetail() {
         setError(err.response?.data?.detail || 'Failed to load activity');
         setLoading(false);
       });
+
+    api.get(`/activities/${id}/insights`)
+      .then((res) => { if (res.data.narratives?.length) setInsight(res.data); })
+      .catch(() => {});
 
     api.get(`/activities/${id}/laps`)
       .then((res) => { if (res.data.lap_count >= 2) setLaps(res.data); })
@@ -333,6 +338,52 @@ function ActivityDetail() {
           </div>
         )}
       </div>
+
+      {/* Run Insight */}
+      {insight && insight.narratives.length > 0 && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+          <h2 style={{ ...sectionTitle, marginBottom: '12px', fontSize: '16px' }}>Run Insight</h2>
+          {insight.narratives.map((n, i) => (
+            <p key={i} style={{ color: '#e0e0e0', fontSize: '13px', lineHeight: 1.6, marginBottom: '6px' }}>{n}</p>
+          ))}
+          {/* Pacing flow */}
+          {insight.pace_segments && insight.pace_segments.length > 0 && (
+            <div style={{ display: 'flex', gap: '2px', margin: '14px 0 10px', alignItems: 'flex-end' }}>
+              {insight.pace_segments.map((seg, i) => {
+                const allPaces = insight.pace_segments.map(s => s.pace);
+                const minPace = Math.min(...allPaces);
+                const maxPace = Math.max(...allPaces);
+                const range = maxPace - minPace || 1;
+                const height = 20 + ((maxPace - seg.pace) / range) * 30;
+                const isFastest = seg.pace === minPace;
+                const isSlowest = seg.pace === maxPace;
+                return (
+                  <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontSize: '11px', color: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b' : '#a0a0b0', fontWeight: 600, marginBottom: '4px' }}>
+                      {seg.pace_formatted}
+                    </div>
+                    <div style={{
+                      height: `${height}px`, borderRadius: '3px 3px 0 0',
+                      backgroundColor: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b33' : '#fc520066',
+                    }} />
+                    <div style={{ fontSize: '9px', color: '#555', marginTop: '4px' }}>{seg.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {insight.tips.length > 0 && (
+            <div style={{ marginTop: '12px', borderTop: '1px solid #252540', paddingTop: '10px' }}>
+              {insight.tips.map((t, i) => (
+                <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '6px', fontSize: '12px' }}>
+                  <span style={{ color: '#fbbf24', flexShrink: 0 }}>Tip:</span>
+                  <span style={{ color: '#a0a0b0' }}>{t}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {best1kmSplit && (
         <div style={bestSplitCard}>
