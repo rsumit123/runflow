@@ -1,18 +1,29 @@
 # RunFlow - Feature Ideas
 
-## High Priority
-- [x] Route Maps - Show GPS route on activity detail page (Leaflet + OpenStreetMap)
-- [ ] Route Matching - Detect same routes, compare pace across attempts
-- [ ] Route-based Stats - Best time per route, improvement tracking
-- [x] Strava Webhook - Auto-push new activities instead of manual pull (subscription ID: 336241)
-- [ ] Weekly Summary - This week vs last week vs phase average
+## Completed
+- [x] Route Maps - Leaflet + OpenStreetMap on activity detail
+- [x] Route Matching - Detect same routes, compare pace, mini map previews
+- [x] Route Naming + Merging - Custom names, manual merge
+- [x] Strava Webhook - Auto-sync new activities (subscription ID: 336241)
+- [x] Goal Tracker - Speed/consistency/volume goals with smart recommendations
+- [x] Sprint vs Segment - Dedicated run detection, separate tracking
+- [x] Best Efforts - 100m-2km fastest segments with map highlighting
+- [x] Phase Detection - Running phases with stats, trends, quality labels
+- [x] Lap Detection - Auto-detect loop laps from GPS
+- [x] Interval Analysis - User-defined rep count + distance analysis
+- [x] Run Analysis - Percentiles, PR detection, phase comparison
+
+## To Explore
+- [ ] Lap-Route Integration - Avg lap time per route, best lap records, lap consistency score across runs
+- [ ] Lap Time Trends - Chart of lap times across sessions on same route (getting faster?)
+- [ ] Weekly Summary - This week vs last week vs phase average on dashboard
+- [ ] Elevation Profile Chart - Show elevation along the route on activity detail
 
 ## Medium Priority
 - [ ] Pace Zones - Classify runs as Easy/Tempo/Speed based on personal distribution
 - [ ] Fatigue/Freshness - Training load (7d vs 28d) indicator
-- [ ] Goal Tracker - Set targets (e.g. "500m under 2:00", "4x/week") and track progress
+- [ ] All Routes Heatmap - Overlay all GPS routes on one map
 
 ## Nice to Have
-- [ ] All Routes Heatmap - Overlay all GPS routes on one map
 - [ ] Export/Share - Shareable image of stats or phase summary
-- [ ] Elevation Profile Chart - Show elevation along the route on activity detail
+- [ ] WearOS App - Direct recording without Strava (park for now)
