@@ -22,6 +22,7 @@ from best_efforts import compute_and_store_best_efforts, compute_all_best_effort
 from goals import recommend_speed_goal, recommend_consistency_goal, recommend_volume_goal
 from route_matching import group_routes
 from intervals import analyze_intervals
+from laps import detect_laps
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -680,6 +681,31 @@ async def get_intervals(
         return {"is_interval": False, "message": "Could not analyze intervals for this run"}
 
     return intervals
+
+
+@app.get("/api/activities/{activity_id}/laps")
+async def get_laps(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Detect laps from GPS data (loop runs)."""
+    result = await session.execute(
+        select(Stream).where(
+            Stream.activity_id == activity_id,
+            Stream.stream_type.in_(["latlng", "distance", "time"]),
+        )
+    )
+    streams = {s.stream_type: s.data for s in result.scalars().all()}
+
+    latlng = streams.get("latlng")
+    distance = streams.get("distance")
+    time = streams.get("time")
+
+    if not latlng or not distance or not time:
+        return {"lap_count": 0}
+
+    laps = detect_laps(latlng, distance, time)
+    if not laps:
+        return {"lap_count": 0}
+
+    return laps
 
 
 @app.get("/api/routes")
