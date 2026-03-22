@@ -21,7 +21,7 @@ from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
 from goals import recommend_speed_goal, recommend_consistency_goal, recommend_volume_goal
 from route_matching import group_routes
-from intervals import detect_intervals
+from intervals import analyze_intervals
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -653,9 +653,13 @@ async def activity_analysis(activity_id: int, session: AsyncSession = Depends(ge
 
 
 @app.get("/api/activities/{activity_id}/intervals")
-async def get_intervals(activity_id: int, session: AsyncSession = Depends(get_session)):
-    """Detect interval segments in an activity from GPS streams."""
-    # Get distance and time streams
+async def get_intervals(
+    activity_id: int,
+    reps: int = Query(..., ge=1, le=20),
+    distance: int = Query(..., ge=50, le=5000),
+    session: AsyncSession = Depends(get_session),
+):
+    """Analyze intervals: find N fastest non-overlapping segments of given distance."""
     result = await session.execute(
         select(Stream).where(
             Stream.activity_id == activity_id,
@@ -670,10 +674,10 @@ async def get_intervals(activity_id: int, session: AsyncSession = Depends(get_se
     if not distance_stream or not time_stream:
         raise HTTPException(status_code=404, detail="No GPS streams for this activity")
 
-    intervals = detect_intervals(distance_stream, time_stream)
+    intervals = analyze_intervals(distance_stream, time_stream, reps, distance)
 
     if not intervals:
-        return {"is_interval": False, "message": "No interval pattern detected — pace is too uniform"}
+        return {"is_interval": False, "message": "Could not analyze intervals for this run"}
 
     return intervals
 

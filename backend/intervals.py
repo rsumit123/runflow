@@ -1,7 +1,9 @@
 """
-Interval detection: analyze distance/time streams to find workout segments.
+Interval analysis: find N fastest non-overlapping segments of a given distance.
 
-Detects warmup, workout reps, rest periods, and cooldown from pace transitions.
+User specifies: rep count + rep distance.
+We find the N fastest windows, then label everything between as rest,
+before as warmup, after as cooldown.
 """
 
 import logging
@@ -9,199 +11,157 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Minimum segment length to count as a rep or rest
-MIN_SEGMENT_METERS = 30
-MIN_SEGMENT_SECONDS = 10
 
-
-def detect_intervals(
+def analyze_intervals(
     distance_stream: list[float],
     time_stream: list[int],
-    window_meters: float = 50,
+    rep_count: int,
+    rep_distance_m: int,
 ) -> dict[str, Any] | None:
     """
-    Detect interval segments from distance/time streams.
+    Find the N fastest non-overlapping segments of rep_distance_m meters.
 
-    Returns a dict with:
-    - segments: list of { type, start_dist, end_dist, start_time, end_time, distance, duration, pace_sec_per_km }
-    - summary: { warmup, reps, rests, cooldown counts and totals }
+    Returns structured breakdown: warmup, reps, rests, cooldown.
     """
-    if not distance_stream or not time_stream or len(distance_stream) < 20:
+    if not distance_stream or not time_stream or len(distance_stream) < 10:
         return None
 
     total_distance = distance_stream[-1]
-    if total_distance < 200:
+    if total_distance < rep_distance_m:
         return None
 
-    # Step 1: Compute rolling pace every ~window_meters
-    pace_points = []
+    # Step 1: Find ALL possible windows of rep_distance_m
+    # Each window: (time, start_idx, end_idx)
+    windows = []
     i = 0
     for j in range(1, len(distance_stream)):
         seg_dist = distance_stream[j] - distance_stream[i]
-        if seg_dist >= window_meters:
+
+        # Move start pointer forward while segment is longer than needed
+        while i < j and (distance_stream[j] - distance_stream[i + 1]) >= rep_distance_m:
+            i += 1
+            seg_dist = distance_stream[j] - distance_stream[i]
+
+        if seg_dist >= rep_distance_m:
             seg_time = time_stream[j] - time_stream[i]
             if seg_time > 0:
-                pace = seg_time / (seg_dist / 1000)  # sec per km
-                mid_dist = (distance_stream[i] + distance_stream[j]) / 2
-                mid_time = (time_stream[i] + time_stream[j]) / 2
-                pace_points.append({
-                    "pace": pace,
-                    "dist": mid_dist,
-                    "time": mid_time,
+                windows.append({
+                    "time": seg_time,
                     "start_idx": i,
                     "end_idx": j,
+                    "start_dist": distance_stream[i],
+                    "end_dist": distance_stream[j],
+                    "start_time": time_stream[i],
+                    "end_time": time_stream[j],
                 })
-            i = j
 
-    if len(pace_points) < 4:
+    if not windows:
         return None
 
-    # Step 2: Find fast and slow pace thresholds using clustering
-    # Sort paces to find natural break point
-    sorted_paces = sorted(p["pace"] for p in pace_points)
+    # Step 2: Find top N non-overlapping windows (greedy: pick fastest, remove overlaps, repeat)
+    windows.sort(key=lambda w: w["time"])
+    selected = []
 
-    # Use the gap between fastest 40% and slowest 40% as threshold
-    n = len(sorted_paces)
-    fast_paces = sorted_paces[:int(n * 0.4)]
-    slow_paces = sorted_paces[int(n * 0.6):]
+    for w in windows:
+        # Check if this window overlaps with any already selected
+        overlaps = False
+        for s in selected:
+            if not (w["end_idx"] <= s["start_idx"] or w["start_idx"] >= s["end_idx"]):
+                overlaps = True
+                break
+        if not overlaps:
+            selected.append(w)
+            if len(selected) == rep_count:
+                break
 
-    if not fast_paces or not slow_paces:
-        return None
+    if len(selected) < rep_count:
+        # Couldn't find enough non-overlapping reps
+        return {
+            "is_interval": False,
+            "message": f"Could only find {len(selected)} non-overlapping {rep_distance_m}m segments (requested {rep_count})",
+        }
 
-    fast_avg = sum(fast_paces) / len(fast_paces)
-    slow_avg = sum(slow_paces) / len(slow_paces)
+    # Step 3: Sort selected by position (start_dist)
+    selected.sort(key=lambda w: w["start_dist"])
 
-    # Need at least 20% pace difference between fast and slow
-    if slow_avg < fast_avg * 1.2:
-        return None  # Not an interval run — pace is too uniform
-
-    # Threshold = midpoint between fast and slow averages
-    threshold = (fast_avg + slow_avg) / 2
-
-    # Step 3: Label each pace point as fast or slow
-    for p in pace_points:
-        p["label"] = "fast" if p["pace"] < threshold else "slow"
-
-    # Step 4: Group consecutive same-label points into segments
-    raw_segments = []
-    current_label = pace_points[0]["label"]
-    seg_start = 0
-
-    for i in range(1, len(pace_points)):
-        if pace_points[i]["label"] != current_label:
-            raw_segments.append({
-                "label": current_label,
-                "points": pace_points[seg_start:i],
-            })
-            current_label = pace_points[i]["label"]
-            seg_start = i
-
-    raw_segments.append({
-        "label": current_label,
-        "points": pace_points[seg_start:],
-    })
-
-    # Step 5: Filter out tiny segments (merge into neighbors)
+    # Step 4: Build segments: warmup → [rep → rest]* → rep → cooldown
     segments = []
-    for seg in raw_segments:
-        pts = seg["points"]
-        start_dist = pts[0]["dist"] - window_meters / 2
-        end_dist = pts[-1]["dist"] + window_meters / 2
-        seg_distance = end_dist - start_dist
-        start_time = pts[0]["time"] - (pts[0]["pace"] * window_meters / 1000 / 2)
-        end_time = pts[-1]["time"] + (pts[-1]["pace"] * window_meters / 1000 / 2)
-        duration = end_time - start_time
 
-        if seg_distance < MIN_SEGMENT_METERS or duration < MIN_SEGMENT_SECONDS:
-            # Too short — merge with previous if possible
-            if segments:
-                segments[-1]["points"].extend(pts)
-            continue
+    for rep_num, rep in enumerate(selected):
+        # Before this rep: warmup (if first) or rest
+        if rep_num == 0:
+            # Warmup = start of run to start of first rep
+            if rep["start_dist"] > 50:  # Only show warmup if > 50m
+                warmup_time = rep["start_time"] - time_stream[0]
+                warmup_dist = rep["start_dist"]
+                warmup_pace = (warmup_time / (warmup_dist / 1000)) if warmup_dist > 0 else 0
+                segments.append({
+                    "type": "warmup",
+                    "distance_m": round(warmup_dist),
+                    "duration_s": round(warmup_time),
+                    "pace_sec_per_km": round(warmup_pace, 1) if warmup_pace > 0 else None,
+                })
+        else:
+            # Rest = end of previous rep to start of this rep
+            prev = selected[rep_num - 1]
+            rest_dist = rep["start_dist"] - prev["end_dist"]
+            rest_time = rep["start_time"] - prev["end_time"]
+            rest_pace = (rest_time / (rest_dist / 1000)) if rest_dist > 0 else 0
+            if rest_dist > 10:  # Only show rest if > 10m
+                segments.append({
+                    "type": "rest",
+                    "rest_number": rep_num,
+                    "distance_m": round(rest_dist),
+                    "duration_s": round(rest_time),
+                    "pace_sec_per_km": round(rest_pace, 1) if rest_pace > 0 else None,
+                })
 
-        avg_pace = sum(p["pace"] for p in pts) / len(pts)
+        # The rep itself
+        rep_dist = rep["end_dist"] - rep["start_dist"]
+        rep_time = rep["end_time"] - rep["start_time"]
+        rep_pace = (rep_time / (rep_dist / 1000)) if rep_dist > 0 else 0
         segments.append({
-            "label": seg["label"],
-            "points": pts,
-            "start_dist": max(0, round(start_dist)),
-            "end_dist": round(min(end_dist, total_distance)),
-            "start_time": max(0, round(start_time)),
-            "end_time": round(end_time),
-            "distance": round(seg_distance),
-            "duration": round(duration),
-            "pace_sec_per_km": round(avg_pace, 1),
+            "type": "rep",
+            "rep_number": rep_num + 1,
+            "distance_m": round(rep_dist),
+            "duration_s": round(rep_time),
+            "pace_sec_per_km": round(rep_pace, 1) if rep_pace > 0 else None,
         })
 
-    if len(segments) < 3:
-        return None  # Need at least warmup + rep + cooldown
-
-    # Step 6: Label as warmup/rep/rest/cooldown
-    result_segments = []
-    rep_count = 0
-    rest_count = 0
-    found_first_fast = False
-    last_fast_idx = -1
-
-    # Find last fast segment index
-    for i in range(len(segments) - 1, -1, -1):
-        if segments[i]["label"] == "fast":
-            last_fast_idx = i
-            break
-
-    for i, seg in enumerate(segments):
-        if not found_first_fast:
-            if seg["label"] == "fast":
-                found_first_fast = True
-                rep_count += 1
-                seg["type"] = "rep"
-                seg["rep_number"] = rep_count
-            else:
-                seg["type"] = "warmup"
-        elif i > last_fast_idx:
-            seg["type"] = "cooldown"
-        elif seg["label"] == "fast":
-            rep_count += 1
-            seg["type"] = "rep"
-            seg["rep_number"] = rep_count
-        else:
-            rest_count += 1
-            seg["type"] = "rest"
-            seg["rest_number"] = rest_count
-
-        result_segments.append({
-            "type": seg["type"],
-            "rep_number": seg.get("rep_number"),
-            "rest_number": seg.get("rest_number"),
-            "start_dist_m": seg["start_dist"],
-            "end_dist_m": seg["end_dist"],
-            "distance_m": seg["distance"],
-            "start_time_s": seg["start_time"],
-            "end_time_s": seg["end_time"],
-            "duration_s": seg["duration"],
-            "pace_sec_per_km": seg["pace_sec_per_km"],
+    # Cooldown = end of last rep to end of run
+    last_rep = selected[-1]
+    cooldown_dist = total_distance - last_rep["end_dist"]
+    cooldown_time = time_stream[-1] - last_rep["end_time"]
+    if cooldown_dist > 50:
+        cooldown_pace = (cooldown_time / (cooldown_dist / 1000)) if cooldown_dist > 0 else 0
+        segments.append({
+            "type": "cooldown",
+            "distance_m": round(cooldown_dist),
+            "duration_s": round(cooldown_time),
+            "pace_sec_per_km": round(cooldown_pace, 1) if cooldown_pace > 0 else None,
         })
 
     # Summary
-    reps = [s for s in result_segments if s["type"] == "rep"]
-    rests = [s for s in result_segments if s["type"] == "rest"]
-    warmups = [s for s in result_segments if s["type"] == "warmup"]
-    cooldowns = [s for s in result_segments if s["type"] == "cooldown"]
+    reps = [s for s in segments if s["type"] == "rep"]
+    rests = [s for s in segments if s["type"] == "rest"]
 
-    avg_rep_pace = sum(s["pace_sec_per_km"] for s in reps) / len(reps) if reps else None
-    avg_rest_pace = sum(s["pace_sec_per_km"] for s in rests) / len(rests) if rests else None
+    avg_rep_pace = sum(s["pace_sec_per_km"] for s in reps if s["pace_sec_per_km"]) / len(reps) if reps else None
+    avg_rest_duration = sum(s["duration_s"] for s in rests) / len(rests) if rests else 0
+    fastest_rep = min(reps, key=lambda s: s["pace_sec_per_km"] or float("inf")) if reps else None
+    slowest_rep = max(reps, key=lambda s: s["pace_sec_per_km"] or 0) if reps else None
 
     return {
         "is_interval": True,
-        "segments": result_segments,
+        "segments": segments,
         "summary": {
             "total_reps": len(reps),
             "total_rests": len(rests),
-            "avg_rep_distance_m": round(sum(s["distance_m"] for s in reps) / len(reps)) if reps else 0,
+            "rep_distance_m": rep_distance_m,
             "avg_rep_pace": round(avg_rep_pace, 1) if avg_rep_pace else None,
-            "avg_rest_pace": round(avg_rest_pace, 1) if avg_rest_pace else None,
-            "avg_rep_duration_s": round(sum(s["duration_s"] for s in reps) / len(reps)) if reps else 0,
-            "avg_rest_duration_s": round(sum(s["duration_s"] for s in rests) / len(rests)) if rests else 0,
-            "warmup_distance_m": sum(s["distance_m"] for s in warmups),
-            "cooldown_distance_m": sum(s["distance_m"] for s in cooldowns),
-            "fast_threshold": round(threshold, 1),
+            "avg_rest_duration_s": round(avg_rest_duration),
+            "fastest_rep": fastest_rep["rep_number"] if fastest_rep else None,
+            "fastest_rep_pace": fastest_rep["pace_sec_per_km"] if fastest_rep else None,
+            "slowest_rep": slowest_rep["rep_number"] if slowest_rep else None,
+            "slowest_rep_pace": slowest_rep["pace_sec_per_km"] if slowest_rep else None,
         },
     }
