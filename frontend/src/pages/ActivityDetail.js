@@ -346,30 +346,43 @@ function ActivityDetail() {
           {insight.narratives.map((n, i) => (
             <p key={i} style={{ color: '#e0e0e0', fontSize: '13px', lineHeight: 1.6, marginBottom: '6px' }}>{n}</p>
           ))}
-          {/* Pacing flow */}
+          {/* Pacing flow with history comparison */}
           {insight.pace_segments && insight.pace_segments.length > 0 && (
-            <div style={{ display: 'flex', gap: '2px', margin: '14px 0 10px', alignItems: 'flex-end' }}>
-              {insight.pace_segments.map((seg, i) => {
-                const allPaces = insight.pace_segments.map(s => s.pace);
-                const minPace = Math.min(...allPaces);
-                const maxPace = Math.max(...allPaces);
-                const range = maxPace - minPace || 1;
-                const height = 20 + ((maxPace - seg.pace) / range) * 30;
-                const isFastest = seg.pace === minPace;
-                const isSlowest = seg.pace === maxPace;
-                return (
-                  <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-                    <div style={{ fontSize: '11px', color: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b' : '#a0a0b0', fontWeight: 600, marginBottom: '4px' }}>
-                      {seg.pace_formatted}
+            <div>
+              <div style={{ display: 'flex', gap: '4px', margin: '14px 0 6px' }}>
+                {insight.pace_segments.map((seg, i) => {
+                  const allPaces = insight.pace_segments.map(s => s.pace);
+                  const allHistPaces = insight.pace_segments.filter(s => s.history_avg).map(s => s.history_avg);
+                  const allValues = [...allPaces, ...allHistPaces];
+                  const minPace = Math.min(...allValues);
+                  const maxPace = Math.max(...allValues);
+                  const range = maxPace - minPace || 1;
+                  const height = 24 + ((maxPace - seg.pace) / range) * 30;
+                  const histHeight = seg.history_avg ? 24 + ((maxPace - seg.history_avg) / range) * 30 : 0;
+                  const isFaster = seg.history_avg && seg.pace < seg.history_avg - 3;
+                  const isSlower = seg.history_avg && seg.pace > seg.history_avg + 3;
+                  return (
+                    <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                      <div style={{ fontSize: '11px', color: isFaster ? '#4ade80' : isSlower ? '#ff6b6b' : '#a0a0b0', fontWeight: 600, marginBottom: '3px' }}>
+                        {seg.pace_formatted}
+                      </div>
+                      <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'flex-end', height: '56px' }}>
+                        <div style={{ width: '40%', height: `${height}px`, borderRadius: '2px 2px 0 0', backgroundColor: isFaster ? '#4ade80' : isSlower ? '#ff6b6b55' : '#fc520077' }} />
+                        {seg.history_avg && (
+                          <div style={{ width: '40%', height: `${histHeight}px`, borderRadius: '2px 2px 0 0', backgroundColor: '#ffffff15', border: '1px solid #ffffff22' }} />
+                        )}
+                      </div>
+                      <div style={{ fontSize: '9px', color: '#555', marginTop: '3px' }}>{seg.label}</div>
                     </div>
-                    <div style={{
-                      height: `${height}px`, borderRadius: '3px 3px 0 0',
-                      backgroundColor: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b33' : '#fc520066',
-                    }} />
-                    <div style={{ fontSize: '9px', color: '#555', marginTop: '4px' }}>{seg.label}</div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+              {insight.pace_segments.some(s => s.history_avg) && (
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', fontSize: '10px', color: '#555', marginBottom: '4px' }}>
+                  <span><span style={{ display: 'inline-block', width: '8px', height: '8px', backgroundColor: '#fc520077', borderRadius: '2px', marginRight: '4px' }}/>Today</span>
+                  <span><span style={{ display: 'inline-block', width: '8px', height: '8px', backgroundColor: '#ffffff15', border: '1px solid #ffffff22', borderRadius: '2px', marginRight: '4px' }}/>Recent avg</span>
+                </div>
+              )}
             </div>
           )}
           {insight.tips.length > 0 && (
