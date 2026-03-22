@@ -21,6 +21,7 @@ from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
 from goals import recommend_speed_goal, recommend_consistency_goal, recommend_volume_goal
 from route_matching import group_routes
+from intervals import detect_intervals
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -651,6 +652,32 @@ async def activity_analysis(activity_id: int, session: AsyncSession = Depends(ge
     }
 
 
+@app.get("/api/activities/{activity_id}/intervals")
+async def get_intervals(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Detect interval segments in an activity from GPS streams."""
+    # Get distance and time streams
+    result = await session.execute(
+        select(Stream).where(
+            Stream.activity_id == activity_id,
+            Stream.stream_type.in_(["distance", "time"]),
+        )
+    )
+    streams = {s.stream_type: s.data for s in result.scalars().all()}
+
+    distance_stream = streams.get("distance")
+    time_stream = streams.get("time")
+
+    if not distance_stream or not time_stream:
+        raise HTTPException(status_code=404, detail="No GPS streams for this activity")
+
+    intervals = detect_intervals(distance_stream, time_stream)
+
+    if not intervals:
+        return {"is_interval": False, "message": "No interval pattern detected — pace is too uniform"}
+
+    return intervals
+
+
 @app.get("/api/routes")
 async def get_routes(session: AsyncSession = Depends(get_session)):
     """Group activities by route similarity and return route stats."""
@@ -1000,6 +1027,9 @@ async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
 
 async def _webhook_import_activity(activity_id: int):
     """Background task: fetch and import a single activity from webhook."""
+    import asyncio
+    # Wait a bit for Strava to finish processing streams
+    await asyncio.sleep(30)
     try:
         async with async_session() as session:
             # Fetch activity from Strava API
@@ -1304,9 +1334,16 @@ async def import_by_date(req: DateImportRequest, session: AsyncSession = Depends
             # Skip if already imported with detail
             activity_id = act_data["id"]
             existing = await session.get(Activity, activity_id)
+            # Skip only if it truly has streams (not just the flag)
             if existing and existing.has_detailed_data:
-                already_existed += 1
-                continue
+                # Verify it actually has streams
+                stream_check = await session.execute(
+                    select(func.count(Stream.id)).where(Stream.activity_id == activity_id)
+                )
+                has_streams = (stream_check.scalar() or 0) > 0
+                if has_streams:
+                    already_existed += 1
+                    continue
 
             act = await _upsert_activity_summary(session, act_data)
             await _import_detail_and_streams(session, act)
