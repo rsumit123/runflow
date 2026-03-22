@@ -183,6 +183,7 @@ function ActivityDetail() {
   const [showIntervalForm, setShowIntervalForm] = useState(false);
   const [repCount, setRepCount] = useState(3);
   const [repDistance, setRepDistance] = useState(400);
+  const [laps, setLaps] = useState(null);
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this activity from your local database? (This does NOT delete from Strava)')) return;
@@ -207,6 +208,10 @@ function ActivityDetail() {
         setError(err.response?.data?.detail || 'Failed to load activity');
         setLoading(false);
       });
+
+    api.get(`/activities/${id}/laps`)
+      .then((res) => { if (res.data.lap_count >= 2) setLaps(res.data); })
+      .catch(() => {});
 
     api
       .get(`/activities/${id}/analysis`)
@@ -488,6 +493,52 @@ function ActivityDetail() {
           );
         })()}
       </div>
+
+      {/* Laps */}
+      {laps && laps.lap_count >= 2 && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h2 style={{ ...sectionTitle, marginBottom: 0 }}>
+              Laps <span style={{ fontSize: '13px', color: '#666', fontWeight: 400, marginLeft: '8px' }}>~{laps.avg_lap_distance_m}m loop</span>
+            </h2>
+            <div style={{ fontSize: '12px', color: '#a0a0b0' }}>
+              Avg: <span style={{ color: '#fc5200', fontWeight: 600 }}>{formatTime(laps.stats.avg_lap_time)}</span>
+              <span style={{ color: '#555', margin: '0 4px' }}>|</span>
+              {formatPaceSeconds(laps.stats.avg_pace)}/km
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {laps.laps.map((lap) => {
+              const isFastest = lap.lap_number === laps.stats.fastest_lap;
+              const isSlowest = lap.lap_number === laps.stats.slowest_lap;
+              const diff = lap.duration_s - laps.stats.fastest_time;
+              return (
+                <div key={lap.lap_number} style={{
+                  backgroundColor: isFastest ? '#4ade8012' : isSlowest ? '#ff6b6b08' : '#16213e',
+                  border: isFastest ? '1px solid #4ade8033' : isSlowest ? '1px solid #ff6b6b22' : '1px solid #252540',
+                  borderRadius: '6px', padding: '8px 12px', textAlign: 'center',
+                  minWidth: '70px', flex: '0 0 auto',
+                }}>
+                  <div style={{ fontSize: '10px', color: '#666' }}>Lap {lap.lap_number}</div>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b' : '#e0e0e0' }}>
+                    {formatTime(lap.duration_s)}
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#555' }}>
+                    {diff === 0 ? 'Best' : `+${diff}s`}
+                  </div>
+                </div>
+              );
+            })}
+            {laps.partial_lap && (
+              <div style={{ backgroundColor: '#16213e', border: '1px solid #252540', borderRadius: '6px', padding: '8px 12px', textAlign: 'center', minWidth: '70px', opacity: 0.5 }}>
+                <div style={{ fontSize: '10px', color: '#666' }}>Partial</div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#666' }}>{formatTime(laps.partial_lap.duration_s)}</div>
+                <div style={{ fontSize: '10px', color: '#555' }}>{laps.partial_lap.distance_m}m</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Interval Analysis */}
       {activity.has_detailed_data && !intervals && (
