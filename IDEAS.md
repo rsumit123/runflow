@@ -12,8 +12,10 @@
 - [x] Lap Detection - Auto-detect loop laps from GPS
 - [x] Interval Analysis - User-defined rep count + distance analysis
 - [x] Run Analysis - Percentiles, PR detection, phase comparison
+- [x] Run Insights - Route-aware narrative with segment-by-segment comparison to recent runs
 
 ## To Explore
+- [ ] Insight Improvements - Compare to phase-specific history, detect training load trends, more specific tips based on goal progress
 - [ ] Lap-Route Integration - Avg lap time per route, best lap records, lap consistency score across runs
 - [ ] Lap Time Trends - Chart of lap times across sessions on same route (getting faster?)
 - [ ] Weekly Summary - This week vs last week vs phase average on dashboard
