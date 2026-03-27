@@ -277,6 +277,7 @@ function ActivityDetail() {
   const [restSec, setRestSec] = useState(180);
   const [laps, setLaps] = useState(null);
   const [insight, setInsight] = useState(null);
+  const [intervalInsight, setIntervalInsight] = useState(null);
   const [showMarkPrompt, setShowMarkPrompt] = useState(false);
   const [marking, setMarking] = useState(false);
 
@@ -373,6 +374,10 @@ function ActivityDetail() {
 
     api.get(`/activities/${id}/insights`)
       .then((res) => { if (res.data.narratives?.length) setInsight(res.data); })
+      .catch(() => {});
+
+    api.get(`/activities/${id}/interval-insights`)
+      .then((res) => { if (res.data.narratives?.length) setIntervalInsight(res.data); })
       .catch(() => {});
 
     api.get(`/activities/${id}/laps`)
@@ -522,6 +527,26 @@ function ActivityDetail() {
               <div style={statLabel}>Avg Cadence</div>
               <div style={statValue}>{Math.round(activity.average_cadence * 2)}</div>
               <div style={statUnit}>spm</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Interval Insight ── */}
+      {isInterval && intervalInsight && intervalInsight.narratives.length > 0 && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+          <h2 style={{ ...sectionTitle, marginBottom: '12px', fontSize: '16px' }}>Interval Insight</h2>
+          {intervalInsight.narratives.map((n, i) => (
+            <p key={i} style={{ color: '#e0e0e0', fontSize: '13px', lineHeight: 1.6, marginBottom: '6px' }}>{n}</p>
+          ))}
+          {intervalInsight.tips.length > 0 && (
+            <div style={{ marginTop: '12px', borderTop: '1px solid #252540', paddingTop: '10px' }}>
+              {intervalInsight.tips.map((t, i) => (
+                <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '6px', fontSize: '12px' }}>
+                  <span style={{ color: '#fbbf24', flexShrink: 0 }}>Tip:</span>
+                  <span style={{ color: '#a0a0b0' }}>{t}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>

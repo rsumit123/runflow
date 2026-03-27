@@ -706,6 +706,151 @@ async def get_intervals(
     return intervals
 
 
+@app.get("/api/activities/{activity_id}/interval-insights")
+async def get_interval_insights(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Generate insights for an interval run: rep analysis, vs previous sessions, vs phase."""
+    act = await session.get(Activity, activity_id)
+    if not act or not act.is_interval or not act.interval_config:
+        return {"narratives": [], "tips": []}
+
+    config = act.interval_config
+    result = config.get("result")
+    if not result or not result.get("is_interval"):
+        return {"narratives": [], "tips": []}
+
+    reps = [s for s in result.get("segments", []) if s.get("type") == "rep"]
+    if not reps:
+        return {"narratives": [], "tips": []}
+
+    rep_dist = config.get("distance", 0)
+    narratives = []
+    tips = []
+
+    # --- Within-run analysis ---
+    paces = [r["pace_sec_per_km"] for r in reps if r.get("pace_sec_per_km")]
+    if len(paces) >= 2:
+        spread = max(paces) - min(paces)
+        first_half = paces[:len(paces)//2]
+        second_half = paces[len(paces)//2:]
+        first_avg = sum(first_half) / len(first_half)
+        second_avg = sum(second_half) / len(second_half)
+        fade = second_avg - first_avg
+
+        if spread <= 10:
+            narratives.append(f"Very consistent reps — only {round(spread)}s/km spread across {len(paces)} reps.")
+        elif spread <= 25:
+            narratives.append(f"Good consistency — {round(spread)}s/km spread across {len(paces)} reps.")
+        else:
+            narratives.append(f"Wide pace variation — {round(spread)}s/km between fastest and slowest rep.")
+
+        if fade > 10:
+            narratives.append(f"You faded {round(fade)}s/km — first half averaged {round(first_avg)}s/km vs {round(second_avg)}s/km in the second half.")
+            tips.append(f"Try starting reps a bit slower. Target {round(min(paces) + spread * 0.3)}s/km to stay even.")
+        elif fade < -10:
+            narratives.append(f"Strong negative split — you got {round(abs(fade))}s/km faster in the second half.")
+            tips.append("Great execution — building pace through reps is excellent for training adaptation.")
+        else:
+            narratives.append("Even pacing across all reps — well-executed session.")
+
+    # --- vs Previous interval sessions ---
+    prev_result = await session.execute(
+        select(Activity)
+        .where(
+            Activity.id != activity_id,
+            Activity.is_interval.is_(True),
+            Activity.interval_config.isnot(None),
+        )
+        .order_by(Activity.start_date.desc())
+        .limit(5)
+    )
+    prev_intervals = prev_result.scalars().all()
+
+    # Find sessions with similar rep distance
+    similar_sessions = []
+    for prev in prev_intervals:
+        if not prev.interval_config:
+            continue
+        prev_dist = prev.interval_config.get("distance", 0)
+        if prev_dist and abs(prev_dist - rep_dist) / max(rep_dist, 1) < 0.3:
+            prev_res = prev.interval_config.get("result", {})
+            prev_reps = [s for s in prev_res.get("segments", []) if s.get("type") == "rep"]
+            if prev_reps:
+                prev_paces = [r["pace_sec_per_km"] for r in prev_reps if r.get("pace_sec_per_km")]
+                if prev_paces:
+                    similar_sessions.append({
+                        "date": prev.start_date,
+                        "avg_pace": sum(prev_paces) / len(prev_paces),
+                        "reps": len(prev_reps),
+                        "best_pace": min(prev_paces),
+                    })
+
+    if similar_sessions and paces:
+        last = similar_sessions[0]
+        this_avg = sum(paces) / len(paces)
+        diff = this_avg - last["avg_pace"]
+        date_str = last["date"].strftime("%b %d") if last["date"] else "previous"
+
+        if diff < -5:
+            narratives.append(f"Faster than last time! Your avg rep of {round(this_avg)}s/km beats your {date_str} session ({round(last['avg_pace'])}s/km) by {round(abs(diff))}s/km.")
+        elif diff > 5:
+            narratives.append(f"Slightly slower than your {date_str} session ({round(last['avg_pace'])}s/km vs {round(this_avg)}s/km today).")
+        else:
+            narratives.append(f"Matching your recent interval pace — {round(this_avg)}s/km vs {round(last['avg_pace'])}s/km on {date_str}.")
+
+        if len(reps) > last["reps"]:
+            narratives.append(f"More volume today — {len(reps)} reps vs {last['reps']} last time at similar pace.")
+
+    # --- vs Phase regular pace ---
+    phase_result = await session.execute(
+        select(Activity)
+        .where(
+            Activity.id != activity_id,
+            Activity.is_interval.isnot(True),
+            Activity.distance > 500,
+            Activity.average_speed > 0,
+        )
+        .order_by(Activity.start_date.desc())
+        .limit(10)
+    )
+    phase_runs = phase_result.scalars().all()
+
+    if phase_runs and paces:
+        phase_paces = [1000 / r.average_speed for r in phase_runs if r.average_speed and r.average_speed > 0]
+        if phase_paces:
+            phase_avg = sum(phase_paces) / len(phase_paces)
+            this_avg = sum(paces) / len(paces)
+            speed_diff = phase_avg - this_avg
+
+            if speed_diff > 30:
+                narratives.append(f"Your rep pace ({round(this_avg)}s/km) is {round(speed_diff)}s/km faster than your regular running pace ({round(phase_avg)}s/km).")
+            elif speed_diff > 10:
+                narratives.append(f"Solid speed work — reps are {round(speed_diff)}s/km faster than your easy pace.")
+
+    # --- Best effort connection ---
+    if rep_dist and paces:
+        be_result = await session.execute(
+            select(BestEffort)
+            .where(BestEffort.distance_target <= rep_dist)
+            .order_by(BestEffort.distance_target.desc(), BestEffort.time_seconds.asc())
+        )
+        best_efforts = {}
+        for be in be_result.scalars().all():
+            if be.distance_target not in best_efforts:
+                best_efforts[be.distance_target] = be.time_seconds
+
+        # Find closest best effort distance
+        closest_dist = max((d for d in best_efforts if d <= rep_dist), default=None)
+        if closest_dist and closest_dist >= rep_dist * 0.8:
+            be_time = best_efforts[closest_dist]
+            be_pace = be_time / (closest_dist / 1000)
+            this_best_rep = min(paces)
+            if abs(this_best_rep - be_pace) < 30:
+                label = f"{closest_dist}m" if closest_dist < 1000 else f"{closest_dist//1000}km"
+                narratives.append(f"Your fastest rep ({round(this_best_rep)}s/km) is close to your all-time best {label} pace ({round(be_pace)}s/km).")
+
+    return {"narratives": narratives, "tips": tips}
+
+
 @app.get("/api/activities/{activity_id}/laps")
 async def get_laps(activity_id: int, session: AsyncSession = Depends(get_session)):
     """Detect laps from GPS data (loop runs)."""
