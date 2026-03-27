@@ -649,8 +649,8 @@ function ActivityDetail() {
         </div>
       )}
 
-      {/* ── Interval config form (Case 1 expanded) ── */}
-      {!isInterval && showIntervalForm && !intervals && (
+      {/* ── Interval config form (Case 1 expanded or re-analyze) ── */}
+      {showIntervalForm && !intervals && (
         <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <IntervalForm
             repCount={repCount} setRepCount={setRepCount}
