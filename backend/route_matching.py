@@ -233,7 +233,9 @@ def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         # Stats
         times = [a["moving_time"] for a in route if a.get("moving_time")]
-        speeds = [a["average_speed"] for a in route if a.get("average_speed") and a["average_speed"] > 0]
+        # Exclude interval runs from pace calculations
+        non_interval = [a for a in route if not a.get("is_interval")]
+        speeds = [a["average_speed"] for a in non_interval if a.get("average_speed") and a["average_speed"] > 0]
         distances = [a["distance"] for a in route if a.get("distance")]
 
         best_time = min(times) if times else None
@@ -244,7 +246,7 @@ def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
         best_pace_sec = None
         best_pace_id = None
         if speeds:
-            fastest = max(route, key=lambda a: a.get("average_speed") or 0)
+            fastest = max(non_interval, key=lambda a: a.get("average_speed") or 0)
             best_pace_sec = 1000 / fastest["average_speed"] if fastest["average_speed"] else None
             best_pace_id = fastest["id"]
 
@@ -264,6 +266,7 @@ def group_routes(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "moving_time": a.get("moving_time"),
                 "pace_sec_per_km": round(pace, 1) if pace else None,
                 "elevation_gain": a.get("total_elevation_gain"),
+                "is_interval": a.get("is_interval", False),
             })
 
         result.append({

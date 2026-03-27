@@ -185,6 +185,7 @@ function ActivityDetail() {
   const [repDistance, setRepDistance] = useState(400);
   const [laps, setLaps] = useState(null);
   const [insight, setInsight] = useState(null);
+  const [isInterval, setIsInterval] = useState(false);
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this activity from your local database? (This does NOT delete from Strava)')) return;
@@ -203,6 +204,7 @@ function ActivityDetail() {
       .get(`/activities/${id}`)
       .then((res) => {
         setActivity(res.data);
+        setIsInterval(res.data.is_interval || false);
         setLoading(false);
       })
       .catch((err) => {
@@ -286,6 +288,11 @@ function ActivityDetail() {
         {activity.route_name && (
           <span style={{ marginLeft: '12px', color: '#fc5200', backgroundColor: '#fc520015', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
             {activity.route_name}
+          </span>
+        )}
+        {isInterval && (
+          <span style={{ marginLeft: '8px', color: '#fbbf24', backgroundColor: '#fbbf2415', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
+            Interval
           </span>
         )}
       </div>
@@ -618,12 +625,33 @@ function ActivityDetail() {
       {activity.has_detailed_data && !intervals && (
         <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           {!showIntervalForm ? (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: '#a0a0b0', fontSize: '14px' }}>Was this an interval run?</span>
-              <button onClick={() => setShowIntervalForm(true)}
-                style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-                Yes, analyze
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              {isInterval ? (
+                <>
+                  <span style={{ color: '#fbbf24', fontSize: '14px' }}>Tagged as interval run — excluded from pace averages</span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => setShowIntervalForm(true)}
+                      style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                      Analyze reps
+                    </button>
+                    <button onClick={async () => {
+                      await api.post(`/activities/${id}/toggle-interval`);
+                      setIsInterval(false);
+                    }}
+                      style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '12px', cursor: 'pointer' }}>
+                      Untag
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: '#a0a0b0', fontSize: '14px' }}>Was this an interval run?</span>
+                  <button onClick={() => setShowIntervalForm(true)}
+                    style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+                    Yes, analyze
+                  </button>
+                </>
+              )}
             </div>
           ) : (
             <div>
@@ -668,6 +696,11 @@ function ActivityDetail() {
                     try {
                       const res = await api.get(`/activities/${id}/intervals?reps=${repCount}&distance=${repDistance}`);
                       setIntervals(res.data);
+                      // Auto-tag as interval if analysis succeeded
+                      if (res.data.is_interval && !isInterval) {
+                        await api.post(`/activities/${id}/toggle-interval`);
+                        setIsInterval(true);
+                      }
                     } catch {
                       setIntervals({ is_interval: false, message: 'Failed to analyze intervals' });
                     }

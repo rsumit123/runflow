@@ -101,6 +101,7 @@ def _activity_to_dict(act: Activity) -> dict[str, Any]:
         "end_latlng": act.end_latlng,
         "map_summary_polyline": act.map_summary_polyline,
         "has_detailed_data": act.has_detailed_data,
+        "is_interval": act.is_interval,
     }
 
 
@@ -752,6 +753,7 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
             "start_date": a.start_date.isoformat() if a.start_date else None,
             "total_elevation_gain": a.total_elevation_gain,
             "polyline": a.map_summary_polyline,
+            "is_interval": a.is_interval,
         })
         if a.map_summary_polyline:
             polyline_map[a.id] = a.map_summary_polyline
@@ -792,7 +794,8 @@ async def get_routes(session: AsyncSession = Depends(get_session)):
         # Re-sort activities and recompute stats for merged routes
         for route in resolved_routes.values():
             route["activities"].sort(key=lambda a: a.get("date") or "")
-            paces = [a["pace_sec_per_km"] for a in route["activities"] if a.get("pace_sec_per_km")]
+            # Exclude interval runs from best pace calculation
+            paces = [a["pace_sec_per_km"] for a in route["activities"] if a.get("pace_sec_per_km") and not a.get("is_interval")]
             if paces:
                 route["best_pace_sec_per_km"] = round(min(paces), 1)
             times = [a["moving_time"] for a in route["activities"] if a.get("moving_time")]
@@ -1146,9 +1149,13 @@ async def get_phases(
         duration_days = (end_date - start_date).days + 1 if start_date and end_date else 1
         runs_per_week = len(phase) / max(duration_days / 7, 1)
 
+        # Exclude interval runs from avg pace calculation
+        pace_valid = [a for a in valid if not a.is_interval]
+        pace_distance = sum(a.distance or 0 for a in pace_valid)
+        pace_time = sum(a.moving_time or 0 for a in pace_valid)
         avg_pace_sec_per_km = None
-        if total_distance > 0 and total_time > 0:
-            avg_pace_sec_per_km = total_time / (total_distance / 1000)
+        if pace_distance > 0 and pace_time > 0:
+            avg_pace_sec_per_km = pace_time / (pace_distance / 1000)
 
         longest_act = max(valid, key=lambda a: a.distance or 0) if valid else None
         longest_run = longest_act.distance if longest_act else 0
@@ -1212,17 +1219,25 @@ async def monthly_stats(session: AsyncSession = Depends(get_session)):
                 "total_distance": 0,
                 "total_time": 0,
                 "total_elevation": 0,
+                "pace_distance": 0,
+                "pace_time": 0,
             }
         m = months[key]
         m["runs"] += 1
         m["total_distance"] += act.distance or 0
         m["total_time"] += act.moving_time or 0
         m["total_elevation"] += act.total_elevation_gain or 0
+        # Track non-interval distance/time separately for pace calculation
+        if not act.is_interval:
+            m["pace_distance"] += act.distance or 0
+            m["pace_time"] += act.moving_time or 0
 
     result_list = []
     for m in sorted(months.values(), key=lambda x: x["month"]):
         dist_km = m["total_distance"] / 1000
-        avg_pace = (m["total_time"] / dist_km) if dist_km > 0 else None
+        # Use non-interval runs for avg pace
+        pace_dist_km = m["pace_distance"] / 1000
+        avg_pace = (m["pace_time"] / pace_dist_km) if pace_dist_km > 0 else None
         result_list.append({
             "month": m["month"],
             "runs": m["runs"],
@@ -1333,6 +1348,17 @@ async def delete_activity(activity_id: int, session: AsyncSession = Depends(get_
     await session.delete(act)
     await session.commit()
     return {"message": f"Activity {activity_id} deleted", "id": activity_id}
+
+
+@app.post("/api/activities/{activity_id}/toggle-interval")
+async def toggle_interval(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Toggle the is_interval flag on an activity."""
+    act = await session.get(Activity, activity_id)
+    if act is None:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    act.is_interval = not act.is_interval
+    await session.commit()
+    return {"id": activity_id, "is_interval": act.is_interval}
 
 
 # ---------------------------------------------------------------------------

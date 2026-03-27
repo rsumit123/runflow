@@ -69,6 +69,7 @@ async def _get_route_history(session, act, limit=5):
             Activity.distance > 500,
             Activity.start_latlng.isnot(None),
             Activity.has_detailed_data.is_(True),
+            Activity.is_interval.isnot(True),
         )
         .order_by(Activity.start_date.desc())
     )
