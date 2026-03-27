@@ -709,6 +709,11 @@ async def get_intervals(
 @app.get("/api/activities/{activity_id}/interval-insights")
 async def get_interval_insights(activity_id: int, session: AsyncSession = Depends(get_session)):
     """Generate insights for an interval run: rep analysis, vs previous sessions, vs phase."""
+    def _fp(s):
+        """Format seconds/km as M:SS/km."""
+        m, sec = divmod(int(s), 60)
+        return f"{m}:{sec:02d}"
+
     act = await session.get(Activity, activity_id)
     if not act or not act.is_interval or not act.interval_config:
         return {"narratives": [], "tips": []}
@@ -737,17 +742,17 @@ async def get_interval_insights(activity_id: int, session: AsyncSession = Depend
         fade = second_avg - first_avg
 
         if spread <= 10:
-            narratives.append(f"Very consistent reps — only {round(spread)}s/km spread across {len(paces)} reps.")
+            narratives.append(f"Very consistent reps — only {round(spread)}s spread across {len(paces)} reps.")
         elif spread <= 25:
-            narratives.append(f"Good consistency — {round(spread)}s/km spread across {len(paces)} reps.")
+            narratives.append(f"Good consistency — {round(spread)}s spread across {len(paces)} reps.")
         else:
-            narratives.append(f"Wide pace variation — {round(spread)}s/km between fastest and slowest rep.")
+            narratives.append(f"Wide pace variation — {round(spread)}s between fastest and slowest rep.")
 
         if fade > 10:
-            narratives.append(f"You faded {round(fade)}s/km — first half averaged {round(first_avg)}s/km vs {round(second_avg)}s/km in the second half.")
-            tips.append(f"Try starting reps a bit slower. Target {round(min(paces) + spread * 0.3)}s/km to stay even.")
+            narratives.append(f"You faded {round(fade)}s — first half averaged {_fp(first_avg)}/km vs {_fp(second_avg)}/km in the second half.")
+            tips.append(f"Try starting reps a bit slower. Target {_fp(min(paces) + spread * 0.3)}/km to stay even.")
         elif fade < -10:
-            narratives.append(f"Strong negative split — you got {round(abs(fade))}s/km faster in the second half.")
+            narratives.append(f"Strong negative split — you got {round(abs(fade))}s faster in the second half.")
             tips.append("Great execution — building pace through reps is excellent for training adaptation.")
         else:
             narratives.append("Even pacing across all reps — well-executed session.")
@@ -791,11 +796,11 @@ async def get_interval_insights(activity_id: int, session: AsyncSession = Depend
         date_str = last["date"].strftime("%b %d") if last["date"] else "previous"
 
         if diff < -5:
-            narratives.append(f"Faster than last time! Your avg rep of {round(this_avg)}s/km beats your {date_str} session ({round(last['avg_pace'])}s/km) by {round(abs(diff))}s/km.")
+            narratives.append(f"Faster than last time! Your avg rep pace of {_fp(this_avg)}/km beats your {date_str} session ({_fp(last['avg_pace'])}/km) by {round(abs(diff))}s.")
         elif diff > 5:
-            narratives.append(f"Slightly slower than your {date_str} session ({round(last['avg_pace'])}s/km vs {round(this_avg)}s/km today).")
+            narratives.append(f"Slightly slower than your {date_str} session ({_fp(last['avg_pace'])}/km vs {_fp(this_avg)}/km today).")
         else:
-            narratives.append(f"Matching your recent interval pace — {round(this_avg)}s/km vs {round(last['avg_pace'])}s/km on {date_str}.")
+            narratives.append(f"Matching your recent interval pace — {_fp(this_avg)}/km vs {_fp(last['avg_pace'])}/km on {date_str}.")
 
         if len(reps) > last["reps"]:
             narratives.append(f"More volume today — {len(reps)} reps vs {last['reps']} last time at similar pace.")
@@ -822,9 +827,9 @@ async def get_interval_insights(activity_id: int, session: AsyncSession = Depend
             speed_diff = phase_avg - this_avg
 
             if speed_diff > 30:
-                narratives.append(f"Your rep pace ({round(this_avg)}s/km) is {round(speed_diff)}s/km faster than your regular running pace ({round(phase_avg)}s/km).")
+                narratives.append(f"Your rep pace ({_fp(this_avg)}/km) is {_fp(speed_diff)} faster than your regular running pace ({_fp(phase_avg)}/km).")
             elif speed_diff > 10:
-                narratives.append(f"Solid speed work — reps are {round(speed_diff)}s/km faster than your easy pace.")
+                narratives.append(f"Solid speed work — reps are {_fp(speed_diff)} faster than your easy pace.")
 
     # --- Best effort connection ---
     if rep_dist and paces:
@@ -846,7 +851,7 @@ async def get_interval_insights(activity_id: int, session: AsyncSession = Depend
             this_best_rep = min(paces)
             if abs(this_best_rep - be_pace) < 30:
                 label = f"{closest_dist}m" if closest_dist < 1000 else f"{closest_dist//1000}km"
-                narratives.append(f"Your fastest rep ({round(this_best_rep)}s/km) is close to your all-time best {label} pace ({round(be_pace)}s/km).")
+                narratives.append(f"Your fastest rep ({_fp(this_best_rep)}/km) is close to your all-time best {label} pace ({_fp(be_pace)}/km).")
 
     return {"narratives": narratives, "tips": tips}
 
