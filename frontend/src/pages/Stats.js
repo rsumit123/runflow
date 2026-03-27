@@ -180,14 +180,15 @@ function Stats() {
               let diffColor = '#a0a0b0';
               if (at && cp) {
                 diffSeconds = cp.time_seconds - at.time_seconds;
+                const diffPct = at.time_seconds > 0 ? (diffSeconds / at.time_seconds) * 100 : 0;
                 if (diffSeconds <= 0) {
-                  diffColor = '#4ade80'; // green - current phase matches or beats all-time
-                } else if (diffSeconds <= 5) {
-                  diffColor = '#4ade80'; // green - very close
-                } else if (diffSeconds <= 15) {
-                  diffColor = '#fbbf24'; // yellow - moderate gap
+                  diffColor = '#4ade80'; // green - PR
+                } else if (diffPct <= 5) {
+                  diffColor = '#4ade80'; // green - within 5%
+                } else if (diffPct <= 15) {
+                  diffColor = '#fbbf24'; // yellow - 5-15% gap
                 } else {
-                  diffColor = '#ff6b6b'; // red - far off
+                  diffColor = '#ff6b6b'; // red - >15% gap
                 }
               }
 
