@@ -590,7 +590,11 @@ function ActivityDetail() {
       {isInterval && hasSavedResult && (
         <>
           <IntervalBreakdown data={savedConfig.result} />
-          <div style={{ textAlign: 'right', marginBottom: '24px', marginTop: '-16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginBottom: '24px', marginTop: '-16px' }}>
+            <button onClick={() => { setIntervals(null); setShowIntervalForm(true); }}
+              style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '11px', cursor: 'pointer' }}>
+              Re-analyze
+            </button>
             <button onClick={handleUntagInterval}
               style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '11px', cursor: 'pointer' }}>
               Untag interval
