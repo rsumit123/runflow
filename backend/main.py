@@ -21,7 +21,7 @@ from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
 from goals import recommend_speed_goal, recommend_consistency_goal, recommend_volume_goal
 from route_matching import group_routes
-from intervals import analyze_intervals
+from intervals import analyze_intervals, analyze_intervals_timed
 from laps import detect_laps
 from insights import generate_run_insight
 
@@ -673,9 +673,11 @@ async def get_intervals(
     activity_id: int,
     reps: int = Query(..., ge=1, le=20),
     distance: int = Query(..., ge=50, le=5000),
+    warmup: int = Query(0, ge=0, le=600),
+    rest: int = Query(0, ge=0, le=600),
     session: AsyncSession = Depends(get_session),
 ):
-    """Analyze intervals: find N fastest non-overlapping segments of given distance."""
+    """Analyze intervals. If warmup/rest provided, use timed slicing. Otherwise find fastest windows."""
     result = await session.execute(
         select(Stream).where(
             Stream.activity_id == activity_id,
@@ -690,7 +692,13 @@ async def get_intervals(
     if not distance_stream or not time_stream:
         raise HTTPException(status_code=404, detail="No GPS streams for this activity")
 
-    intervals = analyze_intervals(distance_stream, time_stream, reps, distance)
+    if warmup > 0 or rest > 0:
+        intervals = analyze_intervals_timed(
+            distance_stream, time_stream, reps, distance,
+            warmup_s=warmup, rest_s=rest,
+        )
+    else:
+        intervals = analyze_intervals(distance_stream, time_stream, reps, distance)
 
     if not intervals:
         return {"is_interval": False, "message": "Could not analyze intervals for this run"}

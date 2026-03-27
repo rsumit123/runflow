@@ -1,9 +1,7 @@
 """
-Interval analysis: find N fastest non-overlapping segments of a given distance.
-
-User specifies: rep count + rep distance.
-We find the N fastest windows, then label everything between as rest,
-before as warmup, after as cooldown.
+Interval analysis: two modes:
+1. Auto: find N fastest non-overlapping segments of a given distance.
+2. Timed: user provides warmup/rest durations, we slice the time stream.
 """
 
 import logging
@@ -150,6 +148,19 @@ def analyze_intervals(
     fastest_rep = min(reps, key=lambda s: s["pace_sec_per_km"] or float("inf")) if reps else None
     slowest_rep = max(reps, key=lambda s: s["pace_sec_per_km"] or 0) if reps else None
 
+    return _build_summary(segments, rep_distance_m)
+
+
+def _build_summary(segments, rep_distance_m):
+    """Build the interval summary from segments."""
+    reps = [s for s in segments if s["type"] == "rep"]
+    rests = [s for s in segments if s["type"] == "rest"]
+
+    avg_rep_pace = sum(s["pace_sec_per_km"] for s in reps if s["pace_sec_per_km"]) / len(reps) if reps else None
+    avg_rest_duration = sum(s["duration_s"] for s in rests) / len(rests) if rests else 0
+    fastest_rep = min(reps, key=lambda s: s["pace_sec_per_km"] or float("inf")) if reps else None
+    slowest_rep = max(reps, key=lambda s: s["pace_sec_per_km"] or 0) if reps else None
+
     return {
         "is_interval": True,
         "segments": segments,
@@ -165,3 +176,109 @@ def analyze_intervals(
             "slowest_rep_pace": slowest_rep["pace_sec_per_km"] if slowest_rep else None,
         },
     }
+
+
+def _find_idx_at_time(time_stream, target_time):
+    """Find the stream index closest to a target time."""
+    for i, t in enumerate(time_stream):
+        if t >= target_time:
+            return i
+    return len(time_stream) - 1
+
+
+def analyze_intervals_timed(
+    distance_stream: list[float],
+    time_stream: list[int],
+    rep_count: int,
+    rep_distance_m: int,
+    warmup_s: int = 0,
+    rest_s: int = 0,
+) -> dict[str, Any] | None:
+    """
+    Slice intervals using known timing: warmup duration + rest duration.
+
+    After warmup_s seconds, each rep is the next rep_distance_m meters,
+    followed by rest_s seconds, repeated rep_count times.
+    """
+    if not distance_stream or not time_stream or len(distance_stream) < 10:
+        return None
+
+    total_distance = distance_stream[-1]
+    total_time = time_stream[-1]
+    segments = []
+
+    current_time = 0
+
+    # Warmup
+    if warmup_s > 0:
+        warmup_end_idx = _find_idx_at_time(time_stream, warmup_s)
+        warmup_dist = distance_stream[warmup_end_idx]
+        warmup_pace = (warmup_s / (warmup_dist / 1000)) if warmup_dist > 0 else 0
+        segments.append({
+            "type": "warmup",
+            "distance_m": round(warmup_dist),
+            "duration_s": warmup_s,
+            "pace_sec_per_km": round(warmup_pace, 1) if warmup_pace > 0 else None,
+        })
+        current_time = warmup_s
+
+    # Reps and rests
+    for rep_num in range(1, rep_count + 1):
+        # Find rep start index (at current_time)
+        rep_start_idx = _find_idx_at_time(time_stream, current_time)
+        rep_start_dist = distance_stream[rep_start_idx]
+
+        # Find rep end: where distance reaches rep_start_dist + rep_distance_m
+        rep_end_dist = rep_start_dist + rep_distance_m
+        rep_end_idx = rep_start_idx
+        for i in range(rep_start_idx, len(distance_stream)):
+            if distance_stream[i] >= rep_end_dist:
+                rep_end_idx = i
+                break
+        else:
+            rep_end_idx = len(distance_stream) - 1
+
+        actual_dist = distance_stream[rep_end_idx] - distance_stream[rep_start_idx]
+        rep_time = time_stream[rep_end_idx] - time_stream[rep_start_idx]
+        rep_pace = (rep_time / (actual_dist / 1000)) if actual_dist > 0 else 0
+
+        segments.append({
+            "type": "rep",
+            "rep_number": rep_num,
+            "distance_m": round(actual_dist),
+            "duration_s": round(rep_time),
+            "pace_sec_per_km": round(rep_pace, 1) if rep_pace > 0 else None,
+        })
+
+        current_time = time_stream[rep_end_idx]
+
+        # Rest (except after last rep)
+        if rep_num < rep_count and rest_s > 0:
+            rest_end_time = current_time + rest_s
+            rest_end_idx = _find_idx_at_time(time_stream, rest_end_time)
+            rest_dist = distance_stream[rest_end_idx] - distance_stream[rep_end_idx]
+            rest_pace = (rest_s / (rest_dist / 1000)) if rest_dist > 0 else 0
+
+            segments.append({
+                "type": "rest",
+                "rest_number": rep_num,
+                "distance_m": round(rest_dist),
+                "duration_s": rest_s,
+                "pace_sec_per_km": round(rest_pace, 1) if rest_pace > 0 else None,
+            })
+            current_time = rest_end_time
+
+    # Cooldown
+    cooldown_time = total_time - current_time
+    if cooldown_time > 10:
+        last_idx = _find_idx_at_time(time_stream, current_time)
+        cooldown_dist = total_distance - distance_stream[last_idx]
+        cooldown_pace = (cooldown_time / (cooldown_dist / 1000)) if cooldown_dist > 0 else 0
+        segments.append({
+            "type": "cooldown",
+            "distance_m": round(cooldown_dist),
+            "duration_s": round(cooldown_time),
+            "pace_sec_per_km": round(cooldown_pace, 1) if cooldown_pace > 0 else None,
+        })
+
+    return _build_summary(segments, rep_distance_m)

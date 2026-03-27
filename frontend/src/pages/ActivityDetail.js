@@ -272,6 +272,9 @@ function ActivityDetail() {
   const [showIntervalForm, setShowIntervalForm] = useState(false);
   const [repCount, setRepCount] = useState(3);
   const [repDistance, setRepDistance] = useState(400);
+  const [showTiming, setShowTiming] = useState(false);
+  const [warmupSec, setWarmupSec] = useState(180);
+  const [restSec, setRestSec] = useState(180);
   const [laps, setLaps] = useState(null);
   const [insight, setInsight] = useState(null);
   const [showMarkPrompt, setShowMarkPrompt] = useState(false);
@@ -301,6 +304,8 @@ function ActivityDetail() {
         interval_config: {
           reps: repCount,
           distance: repDistance,
+          warmup: showTiming ? warmupSec : null,
+          rest: showTiming ? restSec : null,
           result: intervalsData,
         },
       };
@@ -339,7 +344,11 @@ function ActivityDetail() {
   const handleAnalyze = async () => {
     setIntervalsLoading(true);
     try {
-      const res = await api.get(`/activities/${id}/intervals?reps=${repCount}&distance=${repDistance}`);
+      let url = `/activities/${id}/intervals?reps=${repCount}&distance=${repDistance}`;
+      if (showTiming) {
+        url += `&warmup=${warmupSec}&rest=${restSec}`;
+      }
+      const res = await api.get(url);
       setIntervals(res.data);
       if (res.data.is_interval) {
         setShowMarkPrompt(true);
@@ -644,6 +653,9 @@ function ActivityDetail() {
             repDistance={repDistance} setRepDistance={setRepDistance}
             intervalsLoading={intervalsLoading}
             onAnalyze={handleAnalyze}
+            showTiming={showTiming} setShowTiming={setShowTiming}
+            warmupSec={warmupSec} setWarmupSec={setWarmupSec}
+            restSec={restSec} setRestSec={setRestSec}
             onCancel={() => setShowIntervalForm(false)}
           />
         </div>
@@ -941,7 +953,9 @@ function ActivityDetail() {
 }
 
 /* ── Interval config form (reps x distance selector) ── */
-function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, intervalsLoading, onAnalyze, onCancel }) {
+function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, intervalsLoading, onAnalyze, onCancel,
+  showTiming, setShowTiming, warmupSec, setWarmupSec, restSec, setRestSec }) {
+  const fmtTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
   return (
     <div>
       <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '12px' }}>Describe your workout</div>
@@ -977,6 +991,37 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
             ))}
           </div>
         </div>
+      </div>
+      {/* Timing toggle */}
+      <div style={{ marginBottom: '12px' }}>
+        <button onClick={() => setShowTiming(!showTiming)}
+          style={{ padding: '0', border: 'none', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '12px', cursor: 'pointer' }}>
+          {showTiming ? '\u25B2' : '\u25BC'} {showTiming ? 'Hide timing' : 'Add timing (optional)'}
+        </button>
+        {showTiming && (
+          <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '10px' }}>
+            <div>
+              <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Warmup</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button onClick={() => setWarmupSec(Math.max(0, warmupSec - 30))}
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>-</button>
+                <span style={{ color: '#fff', fontSize: '15px', fontWeight: 600, minWidth: '40px', textAlign: 'center' }}>{fmtTime(warmupSec)}</span>
+                <button onClick={() => setWarmupSec(Math.min(600, warmupSec + 30))}
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>+</button>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Rest between reps</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button onClick={() => setRestSec(Math.max(0, restSec - 30))}
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>-</button>
+                <span style={{ color: '#fff', fontSize: '15px', fontWeight: 600, minWidth: '40px', textAlign: 'center' }}>{fmtTime(restSec)}</span>
+                <button onClick={() => setRestSec(Math.min(600, restSec + 30))}
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>+</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: '8px' }}>
         <button
