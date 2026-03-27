@@ -622,7 +622,7 @@ function ActivityDetail() {
                 <div>
                   <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Reps</div>
                   <div style={{ display: 'flex', gap: '4px' }}>
-                    {[2, 3, 4, 5, 6].map(n => (
+                    {[2, 3, 4, 5, 6, 8, 10].map(n => (
                       <button key={n} onClick={() => setRepCount(n)}
                         style={{
                           width: '36px', height: '36px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
@@ -638,7 +638,7 @@ function ActivityDetail() {
                 <div>
                   <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Distance</div>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                    {[100, 200, 400, 500, 800, 1000].map(d => (
+                    {[100, 200, 250, 400, 500, 800, 1000].map(d => (
                       <button key={d} onClick={() => setRepDistance(d)}
                         style={{
                           padding: '8px 12px', borderRadius: '6px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
