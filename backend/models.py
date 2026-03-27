@@ -24,6 +24,7 @@ class Activity(Base):
     end_latlng = Column(JSON, nullable=True)
     map_summary_polyline = Column(Text, nullable=True)
     has_detailed_data = Column(Boolean, default=False)
+    is_interval = Column(Boolean, default=False)
 
     splits = relationship("Split", back_populates="activity", cascade="all, delete-orphan")
     streams = relationship("Stream", back_populates="activity", cascade="all, delete-orphan")

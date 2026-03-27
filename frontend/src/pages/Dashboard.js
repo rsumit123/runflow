@@ -265,6 +265,9 @@ function Dashboard() {
                       <Link to={`/activity/${a.id}`} style={{ color: '#fc5200', fontWeight: 500 }}>
                         {a.name || 'Untitled'}
                       </Link>
+                      {a.is_interval && (
+                        <span style={{ marginLeft: '6px', color: '#fbbf24', backgroundColor: '#fbbf2410', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600 }}>INT</span>
+                      )}
                     </td>
                     <td style={{ padding: '12px 14px', borderBottom: '1px solid #252540', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatDate(a.start_date)}</td>
                     <td style={{ padding: '12px 14px', borderBottom: '1px solid #252540', fontSize: '13px', whiteSpace: 'nowrap' }}>{metersToKm(a.distance)} km</td>
