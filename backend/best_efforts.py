@@ -58,21 +58,28 @@ def compute_best_efforts_from_streams(
 
     total_distance = distance_stream[-1]
     results = []
+    glitch_count = 0
+
+    # Count total GPS glitches in the run
+    for k in range(len(distance_stream) - 1):
+        d = distance_stream[k + 1] - distance_stream[k]
+        t = time_stream[k + 1] - time_stream[k]
+        if t > 0 and d / t > 12:
+            glitch_count += 1
 
     for target in TARGET_DISTANCES:
         if total_distance < target * 0.9:
-            # Run is too short for this target
             continue
 
         best_time = float("inf")
         best_start = 0
         best_end = 0
+        had_glitch_candidate = False
 
         i = 0
         for j in range(1, len(distance_stream)):
             segment_dist = distance_stream[j] - distance_stream[i]
 
-            # Move start pointer forward while segment is longer than needed
             while i < j and (distance_stream[j] - distance_stream[i + 1]) >= target:
                 i += 1
                 segment_dist = distance_stream[j] - distance_stream[i]
@@ -80,11 +87,12 @@ def compute_best_efforts_from_streams(
             if segment_dist >= target:
                 segment_time = time_stream[j] - time_stream[i]
                 if segment_time > 0 and segment_time < best_time:
-                    # Check for GPS glitches in this segment
                     if not _has_gps_glitch(distance_stream, time_stream, i, j):
                         best_time = segment_time
                         best_start = i
                         best_end = j
+                    else:
+                        had_glitch_candidate = True
 
         min_time = MIN_TIMES.get(target, 10)
         if best_time < float("inf") and best_time >= min_time:
@@ -95,9 +103,10 @@ def compute_best_efforts_from_streams(
                 "pace_sec_per_km": round(pace, 1),
                 "start_index": best_start,
                 "end_index": best_end,
+                "glitch_filtered": had_glitch_candidate,
             })
 
-    return results
+    return {"efforts": results, "gps_glitch_count": glitch_count}
 
 
 async def compute_and_store_best_efforts(
@@ -124,7 +133,9 @@ async def compute_and_store_best_efforts(
         return []
 
     # Compute
-    efforts = compute_best_efforts_from_streams(distance_stream, time_stream)
+    result_data = compute_best_efforts_from_streams(distance_stream, time_stream)
+    efforts = result_data["efforts"] if isinstance(result_data, dict) else result_data
+    gps_glitch_count = result_data.get("gps_glitch_count", 0) if isinstance(result_data, dict) else 0
 
     if not efforts:
         return []
