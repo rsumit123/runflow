@@ -102,6 +102,7 @@ def _activity_to_dict(act: Activity) -> dict[str, Any]:
         "map_summary_polyline": act.map_summary_polyline,
         "has_detailed_data": act.has_detailed_data,
         "is_interval": act.is_interval,
+        "interval_config": act.interval_config,
     }
 
 
@@ -1350,15 +1351,24 @@ async def delete_activity(activity_id: int, session: AsyncSession = Depends(get_
     return {"message": f"Activity {activity_id} deleted", "id": activity_id}
 
 
-@app.post("/api/activities/{activity_id}/toggle-interval")
-async def toggle_interval(activity_id: int, session: AsyncSession = Depends(get_session)):
-    """Toggle the is_interval flag on an activity."""
+class MarkIntervalRequest(BaseModel):
+    is_interval: bool
+    interval_config: dict | None = None  # { reps, distance, result }
+
+
+@app.post("/api/activities/{activity_id}/mark-interval")
+async def mark_interval(activity_id: int, req: MarkIntervalRequest, session: AsyncSession = Depends(get_session)):
+    """Mark/unmark an activity as interval and save the config."""
     act = await session.get(Activity, activity_id)
     if act is None:
         raise HTTPException(status_code=404, detail="Activity not found")
-    act.is_interval = not act.is_interval
+    act.is_interval = req.is_interval
+    if req.is_interval and req.interval_config:
+        act.interval_config = req.interval_config
+    elif not req.is_interval:
+        act.interval_config = None
     await session.commit()
-    return {"id": activity_id, "is_interval": act.is_interval}
+    return {"id": activity_id, "is_interval": act.is_interval, "interval_config": act.interval_config}
 
 
 # ---------------------------------------------------------------------------

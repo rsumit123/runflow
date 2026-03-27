@@ -25,6 +25,7 @@ class Activity(Base):
     map_summary_polyline = Column(Text, nullable=True)
     has_detailed_data = Column(Boolean, default=False)
     is_interval = Column(Boolean, default=False)
+    interval_config = Column(JSON, nullable=True)  # { reps: 8, distance: 250, result: {...} }
 
     splits = relationship("Split", back_populates="activity", cascade="all, delete-orphan")
     streams = relationship("Stream", back_populates="activity", cascade="all, delete-orphan")
