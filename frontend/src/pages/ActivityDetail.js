@@ -68,19 +68,6 @@ const sectionTitle = {
   marginTop: '8px',
 };
 
-const mapPlaceholder = {
-  backgroundColor: '#1a1a2e',
-  borderRadius: '8px',
-  height: '300px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: '#555',
-  fontSize: '15px',
-  border: '1px dashed #333',
-  marginBottom: '32px',
-};
-
 const loadingStyle = {
   textAlign: 'center',
   padding: '60px',
@@ -169,6 +156,108 @@ function formatDistLabel(m) {
   return m >= 1000 ? `${m / 1000}km` : `${m}m`;
 }
 
+/* ── Interval-focused stats from saved config ── */
+function IntervalStats({ config }) {
+  const result = config.result || {};
+  const summary = result.summary || {};
+  const totalWorkoutDist = (result.segments || [])
+    .filter(s => s.type === 'rep')
+    .reduce((sum, s) => sum + (s.distance_m || 0), 0);
+
+  return (
+    <div style={statsGrid}>
+      <div style={statCard}>
+        <div style={statLabel}>Reps</div>
+        <div style={statValue}>{summary.total_reps || config.reps || '-'}</div>
+        <div style={statUnit}>x {formatDistLabel(summary.rep_distance_m || config.distance || 0)}</div>
+      </div>
+      <div style={statCard}>
+        <div style={statLabel}>Avg Rep Pace</div>
+        <div style={statValue}>{formatPaceSeconds(summary.avg_rep_pace)}</div>
+        <div style={statUnit}>min/km</div>
+      </div>
+      <div style={statCard}>
+        <div style={statLabel}>Avg Rest</div>
+        <div style={statValue}>{formatTime(summary.avg_rest_duration_s)}</div>
+        <div style={statUnit}>duration</div>
+      </div>
+      <div style={statCard}>
+        <div style={statLabel}>Workout Dist</div>
+        <div style={statValue}>{totalWorkoutDist >= 1000 ? (totalWorkoutDist / 1000).toFixed(2) : totalWorkoutDist}</div>
+        <div style={statUnit}>{totalWorkoutDist >= 1000 ? 'km' : 'm'}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Interval breakdown table (reusable for saved & live results) ── */
+function IntervalBreakdown({ data }) {
+  if (!data || !data.segments) return null;
+  const summary = data.summary || {};
+  return (
+    <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+      <h2 style={{ ...sectionTitle, marginTop: 0, marginBottom: '14px' }}>Interval Breakdown</h2>
+      {/* Summary cards */}
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+        <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+          <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Workout</div>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{summary.total_reps} x {summary.rep_distance_m}m</div>
+        </div>
+        <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+          <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Avg Rep Pace</div>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{formatPaceSeconds(summary.avg_rep_pace)}/km</div>
+        </div>
+        <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+          <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Avg Rest</div>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#a0a0b0' }}>{formatTime(summary.avg_rest_duration_s)}</div>
+        </div>
+      </div>
+      {/* Fastest/Slowest */}
+      {summary.fastest_rep && summary.total_reps > 1 && (
+        <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '14px' }}>
+          Fastest: <span style={{ color: '#4ade80', fontWeight: 600 }}>Rep {summary.fastest_rep} ({formatPaceSeconds(summary.fastest_rep_pace)}/km)</span>
+          {summary.slowest_rep !== summary.fastest_rep && (
+            <span style={{ marginLeft: '12px' }}>
+              Slowest: <span style={{ color: '#ff6b6b', fontWeight: 600 }}>Rep {summary.slowest_rep} ({formatPaceSeconds(summary.slowest_rep_pace)}/km)</span>
+            </span>
+          )}
+        </div>
+      )}
+      {/* Segments */}
+      {data.segments.map((seg, i) => {
+        const isRep = seg.type === 'rep';
+        const isRest = seg.type === 'rest';
+        const isFastest = isRep && seg.rep_number === summary.fastest_rep;
+        const isSlowest = isRep && seg.rep_number === summary.slowest_rep && summary.total_reps > 1;
+        const label = isRep ? `Rep ${seg.rep_number}`
+          : isRest ? `Rest ${seg.rest_number}`
+          : seg.type === 'warmup' ? 'Warmup' : 'Cooldown';
+        return (
+          <div key={i} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '8px 12px', borderBottom: '1px solid #252540',
+            backgroundColor: isFastest ? 'rgba(74,222,128,0.06)' : isSlowest ? 'rgba(255,107,107,0.06)' : 'transparent',
+            fontSize: '13px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '80px' }}>
+              <div style={{
+                width: '8px', height: '8px', borderRadius: '50%',
+                backgroundColor: isRep ? '#fc5200' : isRest ? '#555' : '#333',
+              }} />
+              <span style={{ color: isRep ? '#fc5200' : '#666', fontWeight: isRep ? 600 : 400 }}>{label}</span>
+            </div>
+            <span style={{ color: '#e0e0e0' }}>{seg.distance_m}m</span>
+            <span style={{ color: '#e0e0e0' }}>{formatTime(seg.duration_s)}</span>
+            <span style={{ color: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b' : isRep ? '#fc5200' : '#555', fontWeight: isRep ? 600 : 400 }}>
+              {seg.pace_sec_per_km ? `${formatPaceSeconds(seg.pace_sec_per_km)}/km` : '-'}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ActivityDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -185,7 +274,12 @@ function ActivityDetail() {
   const [repDistance, setRepDistance] = useState(400);
   const [laps, setLaps] = useState(null);
   const [insight, setInsight] = useState(null);
-  const [isInterval, setIsInterval] = useState(false);
+  const [showMarkPrompt, setShowMarkPrompt] = useState(false);
+  const [marking, setMarking] = useState(false);
+
+  const isInterval = activity?.is_interval || false;
+  const savedConfig = activity?.interval_config || null;
+  const hasSavedResult = savedConfig && savedConfig.result;
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this activity from your local database? (This does NOT delete from Strava)')) return;
@@ -199,12 +293,68 @@ function ActivityDetail() {
     }
   };
 
+  const handleMarkInterval = async (intervalsData) => {
+    setMarking(true);
+    try {
+      const body = {
+        is_interval: true,
+        interval_config: {
+          reps: repCount,
+          distance: repDistance,
+          result: intervalsData,
+        },
+      };
+      await api.post(`/activities/${id}/mark-interval`, body);
+      // Update local activity state
+      setActivity(prev => ({
+        ...prev,
+        is_interval: true,
+        interval_config: body.interval_config,
+      }));
+      setIntervals(null);
+      setShowMarkPrompt(false);
+      setShowIntervalForm(false);
+    } catch (err) {
+      alert('Failed to mark as interval: ' + (err.response?.data?.detail || err.message));
+    }
+    setMarking(false);
+  };
+
+  const handleUntagInterval = async () => {
+    if (!window.confirm('Remove interval tag? This run will be included in pace averages again.')) return;
+    try {
+      await api.post(`/activities/${id}/mark-interval`, { is_interval: false, interval_config: null });
+      setActivity(prev => ({
+        ...prev,
+        is_interval: false,
+        interval_config: null,
+      }));
+      setIntervals(null);
+      setShowIntervalForm(false);
+    } catch (err) {
+      alert('Failed to untag: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleAnalyze = async () => {
+    setIntervalsLoading(true);
+    try {
+      const res = await api.get(`/activities/${id}/intervals?reps=${repCount}&distance=${repDistance}`);
+      setIntervals(res.data);
+      if (res.data.is_interval) {
+        setShowMarkPrompt(true);
+      }
+    } catch {
+      setIntervals({ is_interval: false, message: 'Failed to analyze intervals' });
+    }
+    setIntervalsLoading(false);
+  };
+
   useEffect(() => {
     api
       .get(`/activities/${id}`)
       .then((res) => {
         setActivity(res.data);
-        setIsInterval(res.data.is_interval || false);
         setLoading(false);
       })
       .catch((err) => {
@@ -307,57 +457,64 @@ function ActivityDetail() {
         </div>
       )}
 
-      <div style={statsGrid}>
-        <div style={statCard}>
-          <div style={statLabel}>Distance</div>
-          <div style={statValue}>{metersToKm(activity.distance)}</div>
-          <div style={statUnit}>km</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Pace</div>
-          <div style={statValue}>{formatPace(activity.moving_time, activity.distance)}</div>
-          <div style={statUnit}>min/km</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Moving Time</div>
-          <div style={statValue}>{formatTime(activity.moving_time)}</div>
-          <div style={statUnit}>h:m:s</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Elapsed Time</div>
-          <div style={statValue}>{formatTime(activity.elapsed_time)}</div>
-          <div style={statUnit}>h:m:s</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Elevation Gain</div>
-          <div style={statValue}>{elevationM}</div>
-          <div style={statUnit}>m</div>
-        </div>
-        {activity.average_heartrate && (
+      {/* ── Stats section ── */}
+      {isInterval && hasSavedResult ? (
+        /* Case 2: Interval-focused stats */
+        <IntervalStats config={savedConfig} />
+      ) : (
+        /* Regular stats */
+        <div style={statsGrid}>
           <div style={statCard}>
-            <div style={statLabel}>Avg Heart Rate</div>
-            <div style={statValue}>{Math.round(activity.average_heartrate)}</div>
-            <div style={statUnit}>bpm</div>
+            <div style={statLabel}>Distance</div>
+            <div style={statValue}>{metersToKm(activity.distance)}</div>
+            <div style={statUnit}>km</div>
           </div>
-        )}
-        {activity.max_heartrate && (
           <div style={statCard}>
-            <div style={statLabel}>Max Heart Rate</div>
-            <div style={statValue}>{Math.round(activity.max_heartrate)}</div>
-            <div style={statUnit}>bpm</div>
+            <div style={statLabel}>Pace</div>
+            <div style={statValue}>{formatPace(activity.moving_time, activity.distance)}</div>
+            <div style={statUnit}>min/km</div>
           </div>
-        )}
-        {activity.average_cadence && (
           <div style={statCard}>
-            <div style={statLabel}>Avg Cadence</div>
-            <div style={statValue}>{Math.round(activity.average_cadence * 2)}</div>
-            <div style={statUnit}>spm</div>
+            <div style={statLabel}>Moving Time</div>
+            <div style={statValue}>{formatTime(activity.moving_time)}</div>
+            <div style={statUnit}>h:m:s</div>
           </div>
-        )}
-      </div>
+          <div style={statCard}>
+            <div style={statLabel}>Elapsed Time</div>
+            <div style={statValue}>{formatTime(activity.elapsed_time)}</div>
+            <div style={statUnit}>h:m:s</div>
+          </div>
+          <div style={statCard}>
+            <div style={statLabel}>Elevation Gain</div>
+            <div style={statValue}>{elevationM}</div>
+            <div style={statUnit}>m</div>
+          </div>
+          {activity.average_heartrate && (
+            <div style={statCard}>
+              <div style={statLabel}>Avg Heart Rate</div>
+              <div style={statValue}>{Math.round(activity.average_heartrate)}</div>
+              <div style={statUnit}>bpm</div>
+            </div>
+          )}
+          {activity.max_heartrate && (
+            <div style={statCard}>
+              <div style={statLabel}>Max Heart Rate</div>
+              <div style={statValue}>{Math.round(activity.max_heartrate)}</div>
+              <div style={statUnit}>bpm</div>
+            </div>
+          )}
+          {activity.average_cadence && (
+            <div style={statCard}>
+              <div style={statLabel}>Avg Cadence</div>
+              <div style={statValue}>{Math.round(activity.average_cadence * 2)}</div>
+              <div style={statUnit}>spm</div>
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Run Insight */}
-      {insight && insight.narratives.length > 0 && (
+      {/* ── Run Insight — hidden for interval runs ── */}
+      {!isInterval && insight && insight.narratives.length > 0 && (
         <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <h2 style={{ ...sectionTitle, marginBottom: '12px', fontSize: '16px' }}>Run Insight</h2>
           {insight.narratives.map((n, i) => (
@@ -415,7 +572,147 @@ function ActivityDetail() {
         </div>
       )}
 
-      {best1kmSplit && (
+      {/* ── Case 2: Saved interval breakdown ── */}
+      {isInterval && hasSavedResult && (
+        <>
+          <IntervalBreakdown data={savedConfig.result} />
+          <div style={{ textAlign: 'right', marginBottom: '24px', marginTop: '-16px' }}>
+            <button onClick={handleUntagInterval}
+              style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '11px', cursor: 'pointer' }}>
+              Untag interval
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── Case 3: Tagged as interval but no saved config ── */}
+      {isInterval && !hasSavedResult && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <span style={{ color: '#fbbf24', fontSize: '14px' }}>Tagged as interval run — excluded from pace averages</span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {!showIntervalForm && (
+                <button onClick={() => setShowIntervalForm(true)}
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                  Analyze reps
+                </button>
+              )}
+              <button onClick={handleUntagInterval}
+                style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '12px', cursor: 'pointer' }}>
+                Untag
+              </button>
+            </div>
+          </div>
+          {/* Inline form for Case 3 */}
+          {showIntervalForm && !intervals && (
+            <div style={{ marginTop: '16px' }}>
+              <IntervalForm
+                repCount={repCount} setRepCount={setRepCount}
+                repDistance={repDistance} setRepDistance={setRepDistance}
+                intervalsLoading={intervalsLoading}
+                onAnalyze={handleAnalyze}
+                onCancel={() => setShowIntervalForm(false)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Case 1: Not interval, no saved config — prompt ── */}
+      {!isInterval && activity.has_detailed_data && !intervals && !showIntervalForm && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <span style={{ color: '#a0a0b0', fontSize: '14px' }}>Was this an interval run?</span>
+            <button onClick={() => setShowIntervalForm(true)}
+              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+              Yes, analyze
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Interval config form (Case 1 expanded) ── */}
+      {!isInterval && showIntervalForm && !intervals && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+          <IntervalForm
+            repCount={repCount} setRepCount={setRepCount}
+            repDistance={repDistance} setRepDistance={setRepDistance}
+            intervalsLoading={intervalsLoading}
+            onAnalyze={handleAnalyze}
+            onCancel={() => setShowIntervalForm(false)}
+          />
+        </div>
+      )}
+
+      {/* ── Live interval results (not yet saved) ── */}
+      {intervals && intervals.is_interval && (
+        <>
+          <IntervalBreakdown data={intervals} />
+          {/* Mark as interval prompt */}
+          {showMarkPrompt && (
+            <div style={{
+              backgroundColor: '#16213e', borderRadius: '8px', padding: '16px', marginBottom: '24px', marginTop: '-16px',
+              border: '1px solid #fbbf2433',
+            }}>
+              <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Mark as interval run?</div>
+              <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '14px' }}>
+                This will exclude this run from pace averages and save your interval analysis.
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button onClick={() => handleMarkInterval(intervals)} disabled={marking}
+                  style={{
+                    padding: '8px 18px', borderRadius: '6px', border: 'none',
+                    backgroundColor: '#fbbf24', color: '#1a1a2e', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+                    opacity: marking ? 0.6 : 1,
+                  }}>
+                  {marking ? 'Saving...' : 'Mark as Interval'}
+                </button>
+                <button onClick={() => { setShowMarkPrompt(false); }}
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '13px', cursor: 'pointer' }}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Close button if prompt dismissed */}
+          {!showMarkPrompt && (
+            <div style={{ textAlign: 'right', marginBottom: '24px', marginTop: '-16px' }}>
+              <button onClick={() => { setIntervals(null); setShowIntervalForm(false); }}
+                style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '11px', cursor: 'pointer' }}>
+                Close results
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Interval analysis for Case 3 live results ── */}
+      {isInterval && !hasSavedResult && intervals && intervals.is_interval && (
+        <div style={{ textAlign: 'center', marginBottom: '24px', marginTop: '-16px' }}>
+          <button onClick={() => handleMarkInterval(intervals)} disabled={marking}
+            style={{
+              padding: '8px 18px', borderRadius: '6px', border: 'none',
+              backgroundColor: '#fbbf24', color: '#1a1a2e', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+              opacity: marking ? 0.6 : 1,
+            }}>
+            {marking ? 'Saving...' : 'Save interval analysis'}
+          </button>
+        </div>
+      )}
+
+      {/* ── Interval not detected ── */}
+      {intervals && !intervals.is_interval && (
+        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ color: '#666', fontSize: '13px' }}>{intervals.message}</span>
+          <button onClick={() => { setIntervals(null); setShowIntervalForm(true); }}
+            style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '11px', cursor: 'pointer' }}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {/* ── Best 1km split — hidden for interval runs ── */}
+      {!isInterval && best1kmSplit && (
         <div style={bestSplitCard}>
           <div style={statLabel}>Best 1km Split</div>
           <div style={statValue}>{formatPaceSeconds(best1kmSplit.paceSeconds)}</div>
@@ -425,8 +722,8 @@ function ActivityDetail() {
         </div>
       )}
 
-      {/* Run Analysis - Best Efforts */}
-      {hasBestEfforts && (
+      {/* ── Run Analysis - Best Efforts — hidden for interval runs ── */}
+      {!isInterval && hasBestEfforts && (
         <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
           <h2 style={{ ...sectionTitle, marginTop: 0 }}>Run Analysis</h2>
 
@@ -575,7 +872,7 @@ function ActivityDetail() {
         })()}
       </div>
 
-      {/* Laps */}
+      {/* Laps — always shown */}
       {laps && laps.lap_count >= 2 && (
         <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -621,192 +918,67 @@ function ActivityDetail() {
         </div>
       )}
 
-      {/* Interval Analysis */}
-      {activity.has_detailed_data && !intervals && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
-          {!showIntervalForm ? (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-              {isInterval ? (
-                <>
-                  <span style={{ color: '#fbbf24', fontSize: '14px' }}>Tagged as interval run — excluded from pace averages</span>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => setShowIntervalForm(true)}
-                      style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-                      Analyze reps
-                    </button>
-                    <button onClick={async () => {
-                      await api.post(`/activities/${id}/toggle-interval`);
-                      setIsInterval(false);
-                    }}
-                      style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '12px', cursor: 'pointer' }}>
-                      Untag
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <span style={{ color: '#a0a0b0', fontSize: '14px' }}>Was this an interval run?</span>
-                  <button onClick={() => setShowIntervalForm(true)}
-                    style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-                    Yes, analyze
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            <div>
-              <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '12px' }}>Describe your workout</div>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '12px' }}>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Reps</div>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    {[2, 3, 4, 5, 6, 8, 10].map(n => (
-                      <button key={n} onClick={() => setRepCount(n)}
-                        style={{
-                          width: '36px', height: '36px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
-                          backgroundColor: repCount === n ? '#fc5200' : '#16213e',
-                          color: repCount === n ? '#fff' : '#a0a0b0',
-                        }}>
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ color: '#333', fontSize: '20px', alignSelf: 'flex-end', paddingBottom: '4px' }}>x</div>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Distance</div>
-                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                    {[100, 200, 250, 400, 500, 800, 1000].map(d => (
-                      <button key={d} onClick={() => setRepDistance(d)}
-                        style={{
-                          padding: '8px 12px', borderRadius: '6px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-                          backgroundColor: repDistance === d ? '#fc5200' : '#16213e',
-                          color: repDistance === d ? '#fff' : '#a0a0b0',
-                        }}>
-                        {d >= 1000 ? `${d/1000}km` : `${d}m`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  onClick={async () => {
-                    setIntervalsLoading(true);
-                    try {
-                      const res = await api.get(`/activities/${id}/intervals?reps=${repCount}&distance=${repDistance}`);
-                      setIntervals(res.data);
-                      // Auto-tag as interval if analysis succeeded
-                      if (res.data.is_interval && !isInterval) {
-                        await api.post(`/activities/${id}/toggle-interval`);
-                        setIsInterval(true);
-                      }
-                    } catch {
-                      setIntervals({ is_interval: false, message: 'Failed to analyze intervals' });
-                    }
-                    setIntervalsLoading(false);
-                  }}
-                  disabled={intervalsLoading}
-                  style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: intervalsLoading ? 0.6 : 1 }}>
-                  {intervalsLoading ? 'Analyzing...' : `Analyze ${repCount} x ${repDistance >= 1000 ? `${repDistance/1000}km` : `${repDistance}m`}`}
-                </button>
-                <button onClick={() => setShowIntervalForm(false)}
-                  style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '13px', cursor: 'pointer' }}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Interval Results */}
-      {intervals && intervals.is_interval && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-            <h2 style={{ ...sectionTitle, marginBottom: 0 }}>Interval Breakdown</h2>
-            <button onClick={() => { setIntervals(null); setShowIntervalForm(false); }}
-              style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '11px', cursor: 'pointer' }}>
-              Close
-            </button>
-          </div>
-          {/* Summary */}
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
-            <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
-              <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Workout</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{intervals.summary.total_reps} x {intervals.summary.rep_distance_m}m</div>
-            </div>
-            <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
-              <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Avg Rep Pace</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{formatPaceSeconds(intervals.summary.avg_rep_pace)}/km</div>
-            </div>
-            <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
-              <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Avg Rest</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#a0a0b0' }}>{formatTime(intervals.summary.avg_rest_duration_s)}</div>
-            </div>
-          </div>
-          {/* Fastest/Slowest rep */}
-          {intervals.summary.fastest_rep && intervals.summary.total_reps > 1 && (
-            <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '14px' }}>
-              Fastest: <span style={{ color: '#4ade80', fontWeight: 600 }}>Rep {intervals.summary.fastest_rep} ({formatPaceSeconds(intervals.summary.fastest_rep_pace)}/km)</span>
-              {intervals.summary.slowest_rep !== intervals.summary.fastest_rep && (
-                <span style={{ marginLeft: '12px' }}>
-                  Slowest: <span style={{ color: '#ff6b6b', fontWeight: 600 }}>Rep {intervals.summary.slowest_rep} ({formatPaceSeconds(intervals.summary.slowest_rep_pace)}/km)</span>
-                </span>
-              )}
-            </div>
-          )}
-          {/* Segments */}
-          {intervals.segments.map((seg, i) => {
-            const isRep = seg.type === 'rep';
-            const isRest = seg.type === 'rest';
-            const isFastest = isRep && seg.rep_number === intervals.summary.fastest_rep;
-            const isSlowest = isRep && seg.rep_number === intervals.summary.slowest_rep && intervals.summary.total_reps > 1;
-            const label = isRep ? `Rep ${seg.rep_number}`
-              : isRest ? `Rest ${seg.rest_number}`
-              : seg.type === 'warmup' ? 'Warmup' : 'Cooldown';
-            return (
-              <div key={i} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '8px 12px', borderBottom: '1px solid #252540',
-                backgroundColor: isFastest ? 'rgba(74,222,128,0.06)' : isSlowest ? 'rgba(255,107,107,0.06)' : 'transparent',
-                fontSize: '13px',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '80px' }}>
-                  <div style={{
-                    width: '8px', height: '8px', borderRadius: '50%',
-                    backgroundColor: isRep ? '#fc5200' : isRest ? '#555' : '#333',
-                  }} />
-                  <span style={{ color: isRep ? '#fc5200' : '#666', fontWeight: isRep ? 600 : 400 }}>{label}</span>
-                </div>
-                <span style={{ color: '#e0e0e0' }}>{seg.distance_m}m</span>
-                <span style={{ color: '#e0e0e0' }}>{formatTime(seg.duration_s)}</span>
-                <span style={{ color: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b' : isRep ? '#fc5200' : '#555', fontWeight: isRep ? 600 : 400 }}>
-                  {seg.pace_sec_per_km ? `${formatPaceSeconds(seg.pace_sec_per_km)}/km` : '-'}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Interval not detected */}
-      {intervals && !intervals.is_interval && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ color: '#666', fontSize: '13px' }}>{intervals.message}</span>
-          <button onClick={() => { setIntervals(null); setShowIntervalForm(true); }}
-            style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '11px', cursor: 'pointer' }}>
-            Try again
-          </button>
-        </div>
-      )}
-
-      {activity.splits && activity.splits.length > 0 && (
+      {/* Splits — hidden for interval runs */}
+      {!isInterval && activity.splits && activity.splits.length > 0 && (
         <>
           <h2 style={sectionTitle}>Splits</h2>
           <SplitsTable splits={activity.splits} />
         </>
       )}
+    </div>
+  );
+}
+
+/* ── Interval config form (reps x distance selector) ── */
+function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, intervalsLoading, onAnalyze, onCancel }) {
+  return (
+    <div>
+      <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '12px' }}>Describe your workout</div>
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '12px' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Reps</div>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {[2, 3, 4, 5, 6, 8, 10].map(n => (
+              <button key={n} onClick={() => setRepCount(n)}
+                style={{
+                  width: '36px', height: '36px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
+                  backgroundColor: repCount === n ? '#fc5200' : '#16213e',
+                  color: repCount === n ? '#fff' : '#a0a0b0',
+                }}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ color: '#333', fontSize: '20px', alignSelf: 'flex-end', paddingBottom: '4px' }}>x</div>
+        <div>
+          <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Distance</div>
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            {[100, 200, 250, 400, 500, 800, 1000].map(d => (
+              <button key={d} onClick={() => setRepDistance(d)}
+                style={{
+                  padding: '8px 12px', borderRadius: '6px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                  backgroundColor: repDistance === d ? '#fc5200' : '#16213e',
+                  color: repDistance === d ? '#fff' : '#a0a0b0',
+                }}>
+                {d >= 1000 ? `${d/1000}km` : `${d}m`}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button
+          onClick={onAnalyze}
+          disabled={intervalsLoading}
+          style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: intervalsLoading ? 0.6 : 1 }}>
+          {intervalsLoading ? 'Analyzing...' : `Analyze ${repCount} x ${repDistance >= 1000 ? `${repDistance/1000}km` : `${repDistance}m`}`}
+        </button>
+        <button onClick={onCancel}
+          style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '13px', cursor: 'pointer' }}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
