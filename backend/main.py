@@ -399,6 +399,18 @@ async def get_activity(activity_id: int, session: AsyncSession = Depends(get_ses
         for be in sorted(act.best_efforts, key=lambda x: x.distance_target)
     ]
 
+    # Check GPS quality
+    gps_glitch_count = 0
+    dist_s = next((s.data for s in act.streams if s.stream_type == "distance"), None)
+    time_s = next((s.data for s in act.streams if s.stream_type == "time"), None)
+    if dist_s and time_s:
+        for k in range(len(dist_s) - 1):
+            d = dist_s[k + 1] - dist_s[k]
+            t = time_s[k + 1] - time_s[k]
+            if t > 0 and d / t > 12:
+                gps_glitch_count += 1
+    data["gps_glitch_count"] = gps_glitch_count
+
     # Look up route name: check all labels against this activity's coords
     data["route_name"] = None
     if act.start_latlng and act.distance:

@@ -289,6 +289,16 @@ function ActivityDetail() {
           </span>
         )}
       </div>
+      {activity.gps_glitch_count > 0 && (
+        <div style={{
+          backgroundColor: '#3d2515', border: '1px solid #6b4020', borderRadius: '8px',
+          padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#fbbf24',
+          display: 'flex', alignItems: 'center', gap: '8px',
+        }}>
+          <span style={{ fontSize: '16px' }}>&#9888;</span>
+          <span>GPS signal issues detected ({activity.gps_glitch_count} glitch{activity.gps_glitch_count > 1 ? 'es' : ''}). Some best effort times may have been filtered to ensure accuracy.</span>
+        </div>
+      )}
 
       <div style={statsGrid}>
         <div style={statCard}>
