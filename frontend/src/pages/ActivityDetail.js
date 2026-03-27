@@ -420,7 +420,12 @@ function ActivityDetail() {
     ? Math.round(activity.total_elevation_gain)
     : 0;
 
-  const hasBestEfforts = analysis && analysis.best_efforts && analysis.best_efforts.length > 0;
+  const savedRepDist = savedConfig?.distance || 0;
+  const allBestEfforts = analysis?.best_efforts || [];
+  const filteredBestEfforts = isInterval && savedRepDist
+    ? allBestEfforts.filter(e => e.distance < savedRepDist)
+    : allBestEfforts;
+  const hasBestEfforts = filteredBestEfforts.length > 0;
 
   return (
     <div>
@@ -722,12 +727,14 @@ function ActivityDetail() {
         </div>
       )}
 
-      {/* ── Run Analysis - Best Efforts — hidden for interval runs ── */}
-      {!isInterval && hasBestEfforts && (
+      {/* ── Run Analysis - Best Efforts ── */}
+      {hasBestEfforts && (
         <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
-          <h2 style={{ ...sectionTitle, marginTop: 0 }}>Run Analysis</h2>
+          <h2 style={{ ...sectionTitle, marginTop: 0 }}>
+            {isInterval ? `Best Efforts (under ${savedRepDist >= 1000 ? `${savedRepDist/1000}km` : `${savedRepDist}m`})` : 'Run Analysis'}
+          </h2>
 
-          {analysis.pace_percentile != null && (
+          {!isInterval && analysis.pace_percentile != null && (
             <div style={{
               backgroundColor: '#16213e',
               borderRadius: '8px',
@@ -769,7 +776,7 @@ function ActivityDetail() {
               <div>vs Phase</div>
             </div>
 
-            {analysis.best_efforts.map((effort) => (
+            {filteredBestEfforts.map((effort) => (
               <div key={effort.distance} style={{
                 display: 'grid',
                 gridTemplateColumns: '60px 1fr 1fr 1fr 80px 80px',
@@ -823,7 +830,11 @@ function ActivityDetail() {
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
         <h2 style={{ ...sectionTitle, marginBottom: 0 }}>Route Map</h2>
-        {activity.best_efforts && activity.best_efforts.length > 0 && (
+        {(() => {
+          const mapEfforts = isInterval && savedRepDist
+            ? (activity.best_efforts || []).filter(be => be.distance_target < savedRepDist)
+            : (activity.best_efforts || []);
+          return mapEfforts.length > 0 && (
           <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: '11px', color: '#666', marginRight: '4px' }}>Fastest:</span>
             <button
@@ -835,7 +846,7 @@ function ActivityDetail() {
               }}>
               Full
             </button>
-            {activity.best_efforts.map(be => (
+            {mapEfforts.map(be => (
               <button
                 key={be.distance_target}
                 onClick={() => setHighlightDist(highlightDist === be.distance_target ? null : be.distance_target)}
@@ -848,7 +859,7 @@ function ActivityDetail() {
               </button>
             ))}
           </div>
-        )}
+        );})()}
       </div>
       <div style={{ marginBottom: '32px' }}>
         <RouteMap
