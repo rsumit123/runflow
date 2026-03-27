@@ -900,7 +900,7 @@ function ActivityDetail() {
       </div>
 
       {/* Laps — always shown */}
-      {laps && laps.lap_count >= 2 && (
+      {!isInterval && laps && laps.lap_count >= 2 && (
         <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h2 style={{ ...sectionTitle, marginBottom: 0 }}>
