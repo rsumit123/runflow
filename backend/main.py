@@ -24,6 +24,7 @@ from route_matching import group_routes
 from intervals import analyze_intervals, analyze_intervals_timed
 from laps import detect_laps
 from insights import generate_run_insight
+from metrics import get_metrics_trend, compute_interval_metrics, compute_lap_metrics
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1461,6 +1462,12 @@ async def personal_records(session: AsyncSession = Depends(get_session)):
         "best_1km_split": best_1km,
         "personal_records": prs,
     }
+
+
+@app.get("/api/stats/metrics-trend")
+async def metrics_trend(session: AsyncSession = Depends(get_session)):
+    """Consistency, fade, decay trends over time for regular and interval runs."""
+    return await get_metrics_trend(session)
 
 
 @app.get("/api/stats/heatmap")

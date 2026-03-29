@@ -57,6 +57,8 @@ function Stats() {
   const [prs, setPrs] = useState(null);
   const [heatmap, setHeatmap] = useState([]);
   const [bestEfforts, setBestEfforts] = useState(null);
+  const [metricsTrend, setMetricsTrend] = useState(null);
+  const [metricsTab, setMetricsTab] = useState('regular');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -66,12 +68,14 @@ function Stats() {
       api.get('/stats/personal-records'),
       api.get('/stats/heatmap'),
       api.get('/best-efforts/records'),
-    ]).then(([monthlyRes, phasesRes, prsRes, heatmapRes, bestEffortsRes]) => {
+      api.get('/stats/metrics-trend'),
+    ]).then(([monthlyRes, phasesRes, prsRes, heatmapRes, bestEffortsRes, metricsTrendRes]) => {
       setMonthly(monthlyRes.data.months || []);
       setPhases(phasesRes.data.phases || []);
       setPrs(prsRes.data);
       setHeatmap(heatmapRes.data.days || []);
       setBestEfforts(bestEffortsRes.data);
+      setMetricsTrend(metricsTrendRes.data);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
@@ -247,6 +251,91 @@ function Stats() {
           </div>
         </div>
       )}
+
+      {/* Run Quality Metrics */}
+      {metricsTrend && (metricsTrend.regular?.length > 2 || metricsTrend.interval?.length > 1) && (() => {
+        const data = metricsTab === 'regular' ? (metricsTrend.regular || []) : (metricsTrend.interval || []);
+        const hasRegular = (metricsTrend.regular || []).length > 2;
+        const hasInterval = (metricsTrend.interval || []).length > 1;
+        const latest = data.length > 0 ? data[data.length - 1] : null;
+        const prev = data.length > 1 ? data[data.length - 2] : null;
+        const scoreDiff = latest && prev ? latest.consistency - prev.consistency : null;
+        return (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h2 style={{ ...sectionTitle, marginBottom: 0 }}>Run Quality</h2>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {hasRegular && (
+                  <button onClick={() => setMetricsTab('regular')}
+                    style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: 'none', cursor: 'pointer',
+                      backgroundColor: metricsTab === 'regular' ? '#fc5200' : '#16213e', color: metricsTab === 'regular' ? '#fff' : '#666' }}>
+                    Runs
+                  </button>
+                )}
+                {hasInterval && (
+                  <button onClick={() => setMetricsTab('interval')}
+                    style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: 'none', cursor: 'pointer',
+                      backgroundColor: metricsTab === 'interval' ? '#fbbf24' : '#16213e', color: metricsTab === 'interval' ? '#1a1a2e' : '#666' }}>
+                    Intervals
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Current metrics summary */}
+            {latest && (
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Consistency</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: latest.consistency >= 80 ? '#4ade80' : latest.consistency >= 60 ? '#fbbf24' : '#ff6b6b' }}>
+                    {latest.consistency}
+                  </div>
+                  {scoreDiff !== null && scoreDiff !== 0 && (
+                    <div style={{ fontSize: '10px', color: scoreDiff > 0 ? '#4ade80' : '#ff6b6b' }}>
+                      {scoreDiff > 0 ? '+' : ''}{scoreDiff} vs last
+                    </div>
+                  )}
+                </div>
+                <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Fade</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: Math.abs(latest.fade_s) <= 5 ? '#4ade80' : latest.fade_s > 15 ? '#ff6b6b' : '#fbbf24' }}>
+                    {latest.fade_s > 0 ? '+' : ''}{latest.fade_s}s
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#666' }}>{latest.fade_s > 3 ? 'slowing' : latest.fade_s < -3 ? 'speeding up' : 'even'}</div>
+                </div>
+                <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Decay</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: Math.abs(latest.decay_s_per_rep || latest.decay_s_per_lap || 0) <= 2 ? '#4ade80' : '#fbbf24' }}>
+                    {(latest.decay_s_per_rep || latest.decay_s_per_lap || 0).toFixed(1)}s
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#666' }}>per {metricsTab === 'interval' ? 'rep' : 'lap'}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Consistency trend chart */}
+            {data.length > 2 && (
+              <div style={chartWrap}>
+                <div style={chartInner(400)}>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <ComposedChart data={data.slice(-20)} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                      <XAxis dataKey="date" tick={{ fill: '#666', fontSize: 9 }} interval={Math.max(0, Math.floor(data.slice(-20).length / 6))} />
+                      <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={[0, 100]} width={35} />
+                      <Tooltip content={<CustomTooltip formatter={(v, name) => {
+                        if (name === 'Consistency') return `${v}/100`;
+                        if (name === 'Fade') return `${v}s`;
+                        return v;
+                      }} />} />
+                      <Area type="monotone" dataKey="consistency" name="Consistency" fill="#4ade8015" stroke="#4ade80" strokeWidth={2} dot={{ r: 3, fill: '#4ade80' }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Personal Records */}
       {(prEntries.length > 0 || prs?.best_1km_split) && (
