@@ -59,6 +59,7 @@ function Stats() {
   const [bestEfforts, setBestEfforts] = useState(null);
   const [metricsTrend, setMetricsTrend] = useState(null);
   const [metricsTab, setMetricsTab] = useState('regular');
+  const [metricsAllTime, setMetricsAllTime] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -253,16 +254,18 @@ function Stats() {
       )}
 
       {/* Run Quality Metrics */}
-      {metricsTrend && (metricsTrend.regular?.length > 2 || metricsTrend.interval?.length > 1) && (() => {
-        const data = metricsTab === 'regular' ? (metricsTrend.regular || []) : (metricsTrend.interval || []);
-        const hasRegular = (metricsTrend.regular || []).length > 2;
-        const hasInterval = (metricsTrend.interval || []).length > 1;
+      {metricsTrend && (metricsTrend.regular?.length > 1 || metricsTrend.interval?.length > 1) && (() => {
+        const activeData = metricsAllTime || metricsTrend;
+        const data = metricsTab === 'regular' ? (activeData.regular || []) : (activeData.interval || []);
+        const hasRegular = (activeData.regular || []).length > 1;
+        const hasInterval = (activeData.interval || []).length > 1;
         const latest = data.length > 0 ? data[data.length - 1] : null;
         const prev = data.length > 1 ? data[data.length - 2] : null;
         const scoreDiff = latest && prev ? latest.consistency - prev.consistency : null;
+        const isAllTime = metricsAllTime !== null;
         return (
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
               <h2 style={{ ...sectionTitle, marginBottom: 0 }}>Run Quality</h2>
               <div style={{ display: 'flex', gap: '4px' }}>
                 {hasRegular && (
@@ -280,6 +283,20 @@ function Stats() {
                   </button>
                 )}
               </div>
+            </div>
+            <div style={{ marginBottom: '14px' }}>
+              <button onClick={async () => {
+                if (isAllTime) { setMetricsAllTime(null); }
+                else {
+                  try {
+                    const res = await api.get('/stats/metrics-trend?phase_only=false');
+                    setMetricsAllTime(res.data);
+                  } catch {}
+                }
+              }}
+                style={{ padding: '0', border: 'none', backgroundColor: 'transparent', color: '#666', fontSize: '11px', cursor: 'pointer' }}>
+                {isAllTime ? 'Show current phase only' : 'Show all time'} {isAllTime ? '\u25B2' : '\u25BC'}
+              </button>
             </div>
 
             {/* Current metrics summary */}
