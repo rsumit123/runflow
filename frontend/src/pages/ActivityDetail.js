@@ -278,6 +278,7 @@ function ActivityDetail() {
   const [laps, setLaps] = useState(null);
   const [insight, setInsight] = useState(null);
   const [intervalInsight, setIntervalInsight] = useState(null);
+  const [runMetrics, setRunMetrics] = useState(null);
   const [showMarkPrompt, setShowMarkPrompt] = useState(false);
   const [marking, setMarking] = useState(false);
 
@@ -374,6 +375,10 @@ function ActivityDetail() {
 
     api.get(`/activities/${id}/insights`)
       .then((res) => { if (res.data.narratives?.length) setInsight(res.data); })
+      .catch(() => {});
+
+    api.get(`/activities/${id}/metrics`)
+      .then((res) => { if (res.data.consistency != null) setRunMetrics(res.data); })
       .catch(() => {});
 
     api.get(`/activities/${id}/interval-insights`)
@@ -615,7 +620,15 @@ function ActivityDetail() {
       {isInterval && hasSavedResult && (
         <>
           <IntervalBreakdown data={savedConfig.result} />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginBottom: '24px', marginTop: '-16px' }}>
+          {/* Interval metrics */}
+          {runMetrics && runMetrics.consistency != null && (
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', marginTop: '-12px', fontSize: '12px', color: '#a0a0b0', flexWrap: 'wrap', paddingLeft: '4px' }}>
+              <span>Consistency: <strong style={{ color: runMetrics.consistency >= 80 ? '#4ade80' : runMetrics.consistency >= 60 ? '#fbbf24' : '#ff6b6b' }}>{runMetrics.consistency}/100</strong></span>
+              <span>Fade: <strong style={{ color: Math.abs(runMetrics.fade_s) <= 5 ? '#4ade80' : '#fbbf24' }}>{runMetrics.fade_s > 0 ? '+' : ''}{runMetrics.fade_s}s</strong></span>
+              <span>Decay: <strong style={{ color: Math.abs(runMetrics.decay_s_per_rep || 0) <= 2 ? '#4ade80' : '#fbbf24' }}>{(runMetrics.decay_s_per_rep || 0).toFixed(1)}s/rep</strong></span>
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginBottom: '24px', marginTop: '-8px' }}>
             <button onClick={() => { setIntervals(null); setShowIntervalForm(true); }}
               style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '11px', cursor: 'pointer' }}>
               Re-analyze
@@ -967,6 +980,14 @@ function ActivityDetail() {
               </div>
             )}
           </div>
+          {/* Inline metrics for regular runs */}
+          {runMetrics && runMetrics.consistency != null && (
+            <div style={{ display: 'flex', gap: '12px', marginTop: '12px', fontSize: '12px', color: '#a0a0b0', flexWrap: 'wrap' }}>
+              <span>Consistency: <strong style={{ color: runMetrics.consistency >= 80 ? '#4ade80' : runMetrics.consistency >= 60 ? '#fbbf24' : '#ff6b6b' }}>{runMetrics.consistency}/100</strong></span>
+              <span>Fade: <strong style={{ color: Math.abs(runMetrics.fade_s) <= 5 ? '#4ade80' : '#fbbf24' }}>{runMetrics.fade_s > 0 ? '+' : ''}{runMetrics.fade_s}s</strong></span>
+              <span>Decay: <strong style={{ color: Math.abs(runMetrics.decay_s_per_lap || 0) <= 2 ? '#4ade80' : '#fbbf24' }}>{(runMetrics.decay_s_per_lap || 0).toFixed(1)}s/lap</strong></span>
+            </div>
+          )}
         </div>
       )}
 

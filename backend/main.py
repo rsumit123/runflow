@@ -1465,9 +1465,64 @@ async def personal_records(session: AsyncSession = Depends(get_session)):
 
 
 @app.get("/api/stats/metrics-trend")
-async def metrics_trend(session: AsyncSession = Depends(get_session)):
-    """Consistency, fade, decay trends over time for regular and interval runs."""
-    return await get_metrics_trend(session)
+async def metrics_trend(
+    phase_only: bool = Query(True),
+    session: AsyncSession = Depends(get_session),
+):
+    """Consistency, fade, decay trends. phase_only=true shows current phase only."""
+    result = await get_metrics_trend(session)
+
+    if phase_only:
+        # Find current phase boundary (14-day gap)
+        for dataset_key in ["regular", "interval"]:
+            data = result.get(dataset_key, [])
+            if len(data) < 2:
+                continue
+            # Walk backwards to find phase start
+            phase_start = len(data) - 1
+            for i in range(len(data) - 1, 0, -1):
+                from datetime import datetime as dt
+                curr = dt.strptime(data[i]["date"], "%Y-%m-%d")
+                prev = dt.strptime(data[i - 1]["date"], "%Y-%m-%d")
+                if (curr - prev).days > 14:
+                    break
+                phase_start = i - 1
+            result[dataset_key] = data[phase_start:]
+
+    return result
+
+
+@app.get("/api/activities/{activity_id}/metrics")
+async def activity_metrics(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Get consistency/fade/decay metrics for a single activity."""
+    act = await session.get(Activity, activity_id)
+    if not act:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    if act.is_interval and act.interval_config:
+        metrics = compute_interval_metrics(act.interval_config)
+        return metrics or {"consistency": None}
+
+    # Regular run — need laps
+    from laps import detect_laps as _detect_laps
+    stream_result = await session.execute(
+        select(Stream).where(
+            Stream.activity_id == activity_id,
+            Stream.stream_type.in_(["latlng", "distance", "time"]),
+        )
+    )
+    streams = {s.stream_type: s.data for s in stream_result.scalars().all()}
+    latlng = streams.get("latlng")
+    dist = streams.get("distance")
+    time = streams.get("time")
+
+    if latlng and dist and time:
+        laps = _detect_laps(latlng, dist, time)
+        if laps and laps.get("lap_count", 0) >= 3:
+            metrics = compute_lap_metrics(laps)
+            return metrics or {"consistency": None}
+
+    return {"consistency": None}
 
 
 @app.get("/api/stats/heatmap")
