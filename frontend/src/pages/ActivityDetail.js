@@ -1009,19 +1009,21 @@ function CustomDistanceInput({ repDistance, setRepDistance }) {
   const isCustom = !PRESET_DISTANCES.includes(repDistance);
   const [text, setText] = useState(isCustom ? String(repDistance) : '');
 
-  // Sync external changes (e.g. clicking a preset) into the input
+  // Reset input when a preset is clicked externally
   useEffect(() => {
-    if (PRESET_DISTANCES.includes(repDistance)) {
+    if (PRESET_DISTANCES.includes(repDistance) && text !== '') {
       setText('');
-    } else if (String(repDistance) !== text) {
-      setText(String(repDistance));
     }
   }, [repDistance]); // eslint-disable-line
 
-  const commit = () => {
-    const v = parseInt(text, 10);
-    if (!isNaN(v) && v >= 50 && v <= 5000) setRepDistance(v);
-    else setText(isCustom ? String(repDistance) : '');
+  const handleChange = (e) => {
+    const raw = e.target.value;
+    setText(raw);
+    // Live-commit: update repDistance immediately when input is valid
+    const v = parseInt(raw, 10);
+    if (!isNaN(v) && v >= 50 && v <= 5000) {
+      setRepDistance(v);
+    }
   };
 
   return (
@@ -1038,9 +1040,7 @@ function CustomDistanceInput({ repDistance, setRepDistance }) {
         step="10"
         placeholder="custom"
         value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); } }}
+        onChange={handleChange}
         style={{
           width: '70px', padding: '4px 6px', borderRadius: '4px',
           border: '1px solid #333', backgroundColor: '#0f0f1a',
