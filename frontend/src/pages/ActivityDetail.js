@@ -1002,6 +1002,57 @@ function ActivityDetail() {
   );
 }
 
+/* ── Custom distance input with local string state ── */
+const PRESET_DISTANCES = [100, 200, 250, 400, 500, 800, 1000];
+
+function CustomDistanceInput({ repDistance, setRepDistance }) {
+  const isCustom = !PRESET_DISTANCES.includes(repDistance);
+  const [text, setText] = useState(isCustom ? String(repDistance) : '');
+
+  // Sync external changes (e.g. clicking a preset) into the input
+  useEffect(() => {
+    if (PRESET_DISTANCES.includes(repDistance)) {
+      setText('');
+    } else if (String(repDistance) !== text) {
+      setText(String(repDistance));
+    }
+  }, [repDistance]); // eslint-disable-line
+
+  const commit = () => {
+    const v = parseInt(text, 10);
+    if (!isNaN(v) && v >= 50 && v <= 5000) setRepDistance(v);
+    else setText(isCustom ? String(repDistance) : '');
+  };
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '4px',
+      padding: '4px 8px', borderRadius: '6px',
+      backgroundColor: isCustom ? '#fc5200' : '#16213e',
+    }}>
+      <input
+        type="number"
+        inputMode="numeric"
+        min="50"
+        max="5000"
+        step="10"
+        placeholder="custom"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); } }}
+        style={{
+          width: '70px', padding: '4px 6px', borderRadius: '4px',
+          border: '1px solid #333', backgroundColor: '#0f0f1a',
+          color: '#fff', fontSize: '12px', fontWeight: 600,
+          textAlign: 'center',
+        }}
+      />
+      <span style={{ fontSize: '11px', color: isCustom ? '#fff' : '#666' }}>m</span>
+    </div>
+  );
+}
+
 /* ── Interval config form (reps x distance selector) ── */
 function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, intervalsLoading, onAnalyze, onCancel,
   showTiming, setShowTiming, warmupSec, setWarmupSec, restSec, setRestSec }) {
@@ -1040,32 +1091,7 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
               </button>
             ))}
             {/* Custom distance input */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '4px',
-              padding: '4px 8px', borderRadius: '6px',
-              backgroundColor: ![100, 200, 250, 400, 500, 800, 1000].includes(repDistance) ? '#fc5200' : '#16213e',
-            }}>
-              <input
-                type="number"
-                min="50"
-                max="5000"
-                step="10"
-                placeholder="custom"
-                value={![100, 200, 250, 400, 500, 800, 1000].includes(repDistance) ? repDistance : ''}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  if (!isNaN(v) && v >= 50 && v <= 5000) setRepDistance(v);
-                  else if (e.target.value === '') setRepDistance(150);
-                }}
-                style={{
-                  width: '60px', padding: '4px 6px', borderRadius: '4px',
-                  border: '1px solid #333', backgroundColor: '#0f0f1a',
-                  color: '#fff', fontSize: '12px', fontWeight: 600,
-                  textAlign: 'center',
-                }}
-              />
-              <span style={{ fontSize: '11px', color: ![100, 200, 250, 400, 500, 800, 1000].includes(repDistance) ? '#fff' : '#666' }}>m</span>
-            </div>
+            <CustomDistanceInput repDistance={repDistance} setRepDistance={setRepDistance} />
           </div>
         </div>
       </div>
