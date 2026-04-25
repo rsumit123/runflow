@@ -1028,7 +1028,7 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
         <div style={{ color: '#333', fontSize: '20px', alignSelf: 'flex-end', paddingBottom: '4px' }}>x</div>
         <div>
           <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Distance</div>
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
             {[100, 200, 250, 400, 500, 800, 1000].map(d => (
               <button key={d} onClick={() => setRepDistance(d)}
                 style={{
@@ -1039,6 +1039,33 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
                 {d >= 1000 ? `${d/1000}km` : `${d}m`}
               </button>
             ))}
+            {/* Custom distance input */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '4px',
+              padding: '4px 8px', borderRadius: '6px',
+              backgroundColor: ![100, 200, 250, 400, 500, 800, 1000].includes(repDistance) ? '#fc5200' : '#16213e',
+            }}>
+              <input
+                type="number"
+                min="50"
+                max="5000"
+                step="10"
+                placeholder="custom"
+                value={![100, 200, 250, 400, 500, 800, 1000].includes(repDistance) ? repDistance : ''}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!isNaN(v) && v >= 50 && v <= 5000) setRepDistance(v);
+                  else if (e.target.value === '') setRepDistance(150);
+                }}
+                style={{
+                  width: '60px', padding: '4px 6px', borderRadius: '4px',
+                  border: '1px solid #333', backgroundColor: '#0f0f1a',
+                  color: '#fff', fontSize: '12px', fontWeight: 600,
+                  textAlign: 'center',
+                }}
+              />
+              <span style={{ fontSize: '11px', color: ![100, 200, 250, 400, 500, 800, 1000].includes(repDistance) ? '#fff' : '#666' }}>m</span>
+            </div>
           </div>
         </div>
       </div>
