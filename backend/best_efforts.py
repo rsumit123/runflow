@@ -24,10 +24,10 @@ TARGET_DISTANCES = [100, 200, 400, 500, 1000, 2000]
 MIN_TIMES = {100: 9, 200: 18, 400: 42, 500: 54, 1000: 130, 2000: 280}
 
 
-def _has_gps_glitch(distance_stream, time_stream, start_idx, end_idx, max_speed_mps=12) -> bool:
+def _has_gps_glitch(distance_stream, time_stream, start_idx, end_idx, max_speed_mps=9) -> bool:
     """
     Check if a segment contains GPS glitches.
-    A glitch = any single point-to-point speed exceeding max_speed_mps (12 m/s ≈ 1:23/km).
+    A glitch = any single point-to-point speed exceeding max_speed_mps (9 m/s ≈ 1:51/km, 32 km/h).
     """
     for k in range(start_idx, end_idx):
         d = distance_stream[k + 1] - distance_stream[k]
@@ -51,7 +51,7 @@ def compute_best_efforts_from_streams(
     stream and find the window where (distance[j] - distance[i]) >= target with
     the minimum (time[j] - time[i]).
 
-    Rejects segments containing GPS glitches (point-to-point speed > 12 m/s).
+    Rejects segments containing GPS glitches (point-to-point speed > 9 m/s).
     """
     if not distance_stream or not time_stream or len(distance_stream) < 2:
         return []
@@ -64,7 +64,7 @@ def compute_best_efforts_from_streams(
     for k in range(len(distance_stream) - 1):
         d = distance_stream[k + 1] - distance_stream[k]
         t = time_stream[k + 1] - time_stream[k]
-        if t > 0 and d / t > 12:
+        if t > 0 and d / t > 9:
             glitch_count += 1
 
     for target in TARGET_DISTANCES:
