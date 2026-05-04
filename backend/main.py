@@ -1492,6 +1492,91 @@ async def metrics_trend(
     return result
 
 
+@app.get("/api/stats/phase-progress")
+async def phase_progress(session: AsyncSession = Depends(get_session)):
+    """
+    Per-session pace trend across the current phase, split by run type.
+    - regular: avg_pace_sec_per_km from each non-interval run
+    - interval: avg_rep_pace from each interval run's saved interval_config
+    """
+    from datetime import datetime as dt
+
+    result = await session.execute(
+        select(Activity)
+        .where(Activity.has_detailed_data.is_(True))
+        .order_by(Activity.start_date.asc())
+    )
+    activities = result.scalars().all()
+
+    regular_all = []
+    interval_all = []
+    for act in activities:
+        if not act.start_date or not act.distance or not act.moving_time:
+            continue
+        date_str = act.start_date.strftime("%Y-%m-%d")
+        if act.is_interval and act.interval_config:
+            cfg = act.interval_config or {}
+            res = cfg.get("result") or {}
+            summary = res.get("summary") or {}
+            avg_pace = summary.get("avg_rep_pace")
+            if avg_pace:
+                interval_all.append({
+                    "date": date_str,
+                    "activity_id": act.id,
+                    "pace_sec_per_km": round(avg_pace, 1),
+                    "rep_distance_m": cfg.get("distance"),
+                    "reps": cfg.get("reps"),
+                })
+        elif not act.is_interval:
+            dist_km = act.distance / 1000
+            if dist_km > 0:
+                pace = act.moving_time / dist_km
+                regular_all.append({
+                    "date": date_str,
+                    "activity_id": act.id,
+                    "pace_sec_per_km": round(pace, 1),
+                    "distance_km": round(dist_km, 2),
+                })
+
+    def _phase_slice(data):
+        if len(data) < 2:
+            return data
+        phase_start = len(data) - 1
+        for i in range(len(data) - 1, 0, -1):
+            curr = dt.strptime(data[i]["date"], "%Y-%m-%d")
+            prev = dt.strptime(data[i - 1]["date"], "%Y-%m-%d")
+            if (curr - prev).days > 14:
+                break
+            phase_start = i - 1
+        return data[phase_start:]
+
+    regular = _phase_slice(regular_all)
+    interval = _phase_slice(interval_all)
+
+    def _summary(data):
+        if not data:
+            return None
+        first = data[0]["pace_sec_per_km"]
+        latest = data[-1]["pace_sec_per_km"]
+        best = min(d["pace_sec_per_km"] for d in data)
+        return {
+            "first_pace": first,
+            "latest_pace": latest,
+            "best_pace": best,
+            "delta": round(latest - first, 1),
+            "session_count": len(data),
+            "phase_start": data[0]["date"],
+            "phase_end": data[-1]["date"],
+        }
+
+    return {
+        "regular": regular,
+        "interval": interval,
+        "regular_summary": _summary(regular),
+        "interval_summary": _summary(interval),
+    }
+
+
 @app.get("/api/activities/{activity_id}/metrics")
 async def activity_metrics(activity_id: int, session: AsyncSession = Depends(get_session)):
     """Get consistency/fade/decay metrics for a single activity."""

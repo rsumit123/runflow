@@ -60,6 +60,7 @@ function Stats() {
   const [metricsTrend, setMetricsTrend] = useState(null);
   const [metricsTab, setMetricsTab] = useState('regular');
   const [metricsAllTime, setMetricsAllTime] = useState(null);
+  const [phaseProgress, setPhaseProgress] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -70,13 +71,15 @@ function Stats() {
       api.get('/stats/heatmap'),
       api.get('/best-efforts/records'),
       api.get('/stats/metrics-trend'),
-    ]).then(([monthlyRes, phasesRes, prsRes, heatmapRes, bestEffortsRes, metricsTrendRes]) => {
+      api.get('/stats/phase-progress'),
+    ]).then(([monthlyRes, phasesRes, prsRes, heatmapRes, bestEffortsRes, metricsTrendRes, phaseProgressRes]) => {
       setMonthly(monthlyRes.data.months || []);
       setPhases(phasesRes.data.phases || []);
       setPrs(prsRes.data);
       setHeatmap(heatmapRes.data.days || []);
       setBestEfforts(bestEffortsRes.data);
       setMetricsTrend(metricsTrendRes.data);
+      setPhaseProgress(phaseProgressRes.data);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
@@ -252,6 +255,75 @@ function Stats() {
           </div>
         </div>
       )}
+
+      {/* Phase Progress */}
+      {phaseProgress && ((phaseProgress.regular || []).length > 1 || (phaseProgress.interval || []).length > 1) && (() => {
+        const fmtDelta = (d) => {
+          if (d === null || d === undefined) return '-';
+          const sign = d < 0 ? '↓' : d > 0 ? '↑' : '·';
+          const color = d < 0 ? '#22c55e' : d > 0 ? '#ef4444' : '#888';
+          const mins = Math.floor(Math.abs(d) / 60);
+          const secs = Math.round(Math.abs(d) % 60);
+          const txt = mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${Math.abs(d).toFixed(0)}s`;
+          return <span style={{ color, fontWeight: 700 }}>{sign} {txt}/km</span>;
+        };
+        const buildChart = (data) => data.map((d, i) => ({
+          idx: i + 1,
+          date: d.date.substring(5),
+          pace: d.pace_sec_per_km,
+          paceLabel: formatPace(d.pace_sec_per_km),
+        }));
+        const reg = phaseProgress.regular || [];
+        const intv = phaseProgress.interval || [];
+        const regSum = phaseProgress.regular_summary;
+        const intvSum = phaseProgress.interval_summary;
+        const block = (title, color, summary, data) => {
+          if (!summary || data.length < 2) return null;
+          const chartData = buildChart(data);
+          return (
+            <div style={{ flex: '1 1 280px', minWidth: 0, backgroundColor: '#0f0f1a', borderRadius: '6px', padding: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 700, color }}>{title}</div>
+                <div style={{ fontSize: '10px', color: '#666' }}>{summary.session_count} sessions</div>
+              </div>
+              <div style={{ fontSize: '11px', color: '#a0a0b0', marginBottom: '4px' }}>
+                {formatPace(summary.first_pace)} → <span style={{ color: '#fff', fontWeight: 700 }}>{formatPace(summary.latest_pace)}</span>/km &nbsp;{fmtDelta(summary.delta)}
+              </div>
+              <div style={{ fontSize: '10px', color: '#666', marginBottom: '8px' }}>
+                phase best: {formatPace(summary.best_pace)}/km
+              </div>
+              <ResponsiveContainer width="100%" height={120}>
+                <LineChart data={chartData} margin={{ top: 4, right: 6, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke="#222" strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fill: '#555', fontSize: 9 }} />
+                  <YAxis tick={{ fill: '#555', fontSize: 9 }} domain={['auto', 'auto']} tickFormatter={(v) => formatPace(v)} reversed width={42} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #333', borderRadius: '4px', fontSize: '11px' }}
+                    labelStyle={{ color: '#fff' }}
+                    formatter={(v) => [`${formatPace(v)}/km`, 'pace']}
+                  />
+                  <Line type="monotone" dataKey="pace" stroke={color} strokeWidth={2} dot={{ r: 3, fill: color }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          );
+        };
+        return (
+          <div style={cardStyle}>
+            <h2 style={sectionTitle}>Phase Progress</h2>
+            <div style={{ fontSize: '11px', color: '#666', marginBottom: '12px' }}>
+              Pace per session within the current phase. Lower = faster. Green delta = improving.
+            </div>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              {block('Regular Runs', '#fc5200', regSum, reg)}
+              {block('Interval Avg Rep', '#fbbf24', intvSum, intv)}
+            </div>
+            {!regSum && !intvSum && (
+              <div style={{ color: '#666', fontSize: '12px' }}>Not enough sessions in this phase yet.</div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Run Quality Metrics */}
       {metricsTrend && (metricsTrend.regular?.length > 1 || metricsTrend.interval?.length > 1) && (() => {
