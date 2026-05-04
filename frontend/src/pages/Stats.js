@@ -312,7 +312,7 @@ function Stats() {
           <div style={cardStyle}>
             <h2 style={sectionTitle}>Phase Progress</h2>
             <div style={{ fontSize: '11px', color: '#666', marginBottom: '12px' }}>
-              Pace per session within the current phase. Lower = faster. Green delta = improving.
+              Pace per session within the current phase. Line trending up = getting faster. Green delta = improving.
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               {block('Regular Runs', '#fc5200', regSum, reg)}
