@@ -1538,17 +1538,22 @@ async def phase_progress(session: AsyncSession = Depends(get_session)):
                     "distance_km": round(dist_km, 2),
                 })
 
-    def _phase_slice(data):
-        if len(data) < 2:
-            return data
-        phase_start = len(data) - 1
-        for i in range(len(data) - 1, 0, -1):
-            curr = dt.strptime(data[i]["date"], "%Y-%m-%d")
-            prev = dt.strptime(data[i - 1]["date"], "%Y-%m-%d")
+    # Derive phase boundary from ALL activities so interval/regular share the same window
+    combined_dates = sorted({d["date"] for d in regular_all} | {d["date"] for d in interval_all})
+    phase_start_date = combined_dates[0] if combined_dates else None
+    if len(combined_dates) >= 2:
+        phase_start_date = combined_dates[-1]
+        for i in range(len(combined_dates) - 1, 0, -1):
+            curr = dt.strptime(combined_dates[i], "%Y-%m-%d")
+            prev = dt.strptime(combined_dates[i - 1], "%Y-%m-%d")
             if (curr - prev).days > 14:
                 break
-            phase_start = i - 1
-        return data[phase_start:]
+            phase_start_date = combined_dates[i - 1]
+
+    def _phase_slice(data):
+        if not phase_start_date:
+            return data
+        return [d for d in data if d["date"] >= phase_start_date]
 
     regular = _phase_slice(regular_all)
     interval = _phase_slice(interval_all)
