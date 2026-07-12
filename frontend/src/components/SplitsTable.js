@@ -12,7 +12,7 @@ const tableStyle = {
   width: '100%',
   borderCollapse: 'collapse',
   backgroundColor: '#1a1a2e',
-  minWidth: '420px',
+  minWidth: '560px',
 };
 
 const thStyle = {
@@ -61,6 +61,11 @@ function formatElevation(elevDiff) {
   const m = Math.round(elevDiff);
   const sign = m >= 0 ? '+' : '';
   return `${sign}${m} m`;
+}
+
+function formatMetric(value) {
+  if (value == null || Number.isNaN(value)) return '—';
+  return Math.round(value);
 }
 
 function SplitsTable({ splits }) {
@@ -123,6 +128,8 @@ function SplitsTable({ splits }) {
             <th style={thStyle}>Split #</th>
             <th style={thStyle}>Distance</th>
             <th style={thStyle}>Pace (min/km)</th>
+            <th style={thStyle}>HR</th>
+            <th style={thStyle}>Cadence</th>
             <th style={thStyle}>Elevation Change</th>
           </tr>
         </thead>
@@ -144,6 +151,8 @@ function SplitsTable({ splits }) {
                   </span>
                 )}
               </td>
+              <td style={tdBase}>{formatMetric(split.average_heartrate)}</td>
+              <td style={tdBase}>{formatMetric(split.average_cadence)}</td>
               <td style={tdBase}>
                 {formatElevation(split.elevation_difference ?? split.total_elevation_gain)}
               </td>

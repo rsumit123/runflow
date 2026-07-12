@@ -1,8 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import {
+  ResponsiveContainer, LineChart, Line,
+  XAxis, YAxis, Tooltip, CartesianGrid,
+} from 'recharts';
 import api from '../api';
 import SplitsTable from '../components/SplitsTable';
 import RouteMap from '../components/RouteMap';
+
+/* ── Read a stream's data array by type (streams = array of {stream_type, data}) ── */
+function getStreamData(activity, streamType) {
+  if (!activity || !activity.streams) return null;
+  const s = activity.streams.find((st) => st.stream_type === streamType);
+  return s && Array.isArray(s.data) && s.data.length > 0 ? s.data : null;
+}
+
+const chartTooltipStyle = {
+  backgroundColor: '#16213e',
+  border: '1px solid #333',
+  borderRadius: '6px',
+  fontSize: '13px',
+};
 
 const backLink = {
   display: 'inline-block',
@@ -936,6 +954,123 @@ function ActivityDetail() {
           );
         })()}
       </div>
+
+      {/* ── Heart Rate (Garmin only — guarded on heartrate stream) ── */}
+      {(() => {
+        const hrStream = getStreamData(activity, 'heartrate');
+        if (!hrStream) return null;
+        const zones = Array.isArray(activity.hr_zones) ? activity.hr_zones : [];
+        const maxZoneSecs = zones.reduce((m, z) => Math.max(m, z.secs || 0), 0);
+        return (
+          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+              <h2 style={{ ...sectionTitle, marginBottom: 0, marginTop: 0 }}>Heart Rate</h2>
+              <div style={{ display: 'flex', gap: '16px', fontSize: '13px', color: '#a0a0b0' }}>
+                {typeof activity.average_heartrate === 'number' && (
+                  <span>Avg <strong style={{ color: '#fc5200' }}>{Math.round(activity.average_heartrate)}</strong> bpm</span>
+                )}
+                {typeof activity.max_heartrate === 'number' && (
+                  <span>Max <strong style={{ color: '#ff6b6b' }}>{Math.round(activity.max_heartrate)}</strong> bpm</span>
+                )}
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={hrStream.map((v, i) => ({ i, bpm: v }))} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                <XAxis dataKey="i" tick={false} height={4} />
+                <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} width={35} />
+                <Tooltip contentStyle={chartTooltipStyle} labelFormatter={() => ''} formatter={(v) => [`${Math.round(v)} bpm`, 'HR']} />
+                <Line type="monotone" dataKey="bpm" name="HR" stroke="#ff6b6b" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+            {zones.length > 0 && (
+              <div style={{ marginTop: '16px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Time in Zones
+                </div>
+                {zones.map((z, i) => {
+                  const secs = z.secs || 0;
+                  const pct = maxZoneSecs > 0 ? (secs / maxZoneSecs) * 100 : 0;
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontSize: '12px' }}>
+                      <span style={{ width: '70px', color: '#a0a0b0', flexShrink: 0 }}>
+                        Z{z.zone}{z.low_bpm != null ? ` (${z.low_bpm}+)` : ''}
+                      </span>
+                      <div style={{ flex: 1, backgroundColor: '#16213e', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#fc5200', borderRadius: '4px' }} />
+                      </div>
+                      <span style={{ width: '54px', textAlign: 'right', color: '#e0e0e0', flexShrink: 0 }}>{formatTime(secs)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Cadence (Garmin only — guarded on cadence stream) ── */}
+      {(() => {
+        const cadenceStream = getStreamData(activity, 'cadence');
+        if (!cadenceStream) return null;
+        return (
+          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+              <h2 style={{ ...sectionTitle, marginBottom: 0, marginTop: 0 }}>Cadence</h2>
+              {typeof activity.average_cadence === 'number' && (
+                <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+                  Avg <strong style={{ color: '#60a5fa' }}>{Math.round(activity.average_cadence)}</strong> spm
+                </div>
+              )}
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={cadenceStream.map((v, i) => ({ i, spm: v }))} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                <XAxis dataKey="i" tick={false} height={4} />
+                <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} width={35} />
+                <Tooltip contentStyle={chartTooltipStyle} labelFormatter={() => ''} formatter={(v) => [`${Math.round(v)} spm`, 'Cadence']} />
+                <Line type="monotone" dataKey="spm" name="Cadence" stroke="#60a5fa" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      })()}
+
+      {/* ── Running Dynamics (Garmin only — guarded on non-null object w/ a value) ── */}
+      {(() => {
+        const rd = activity.running_dynamics;
+        if (!rd || typeof rd !== 'object') return null;
+        const hasAny = rd.stride_length != null || rd.ground_contact_time != null || rd.vertical_oscillation != null;
+        if (!hasAny) return null;
+        return (
+          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+            <h2 style={{ ...sectionTitle, marginTop: 0 }}>Running Dynamics</h2>
+            <div style={statsGrid}>
+              {rd.stride_length != null && (
+                <div style={statCard}>
+                  <div style={statLabel}>Stride Length</div>
+                  <div style={statValue}>{rd.stride_length}</div>
+                  <div style={statUnit}>m</div>
+                </div>
+              )}
+              {rd.ground_contact_time != null && (
+                <div style={statCard}>
+                  <div style={statLabel}>Ground Contact</div>
+                  <div style={statValue}>{rd.ground_contact_time}</div>
+                  <div style={statUnit}>ms</div>
+                </div>
+              )}
+              {rd.vertical_oscillation != null && (
+                <div style={statCard}>
+                  <div style={statLabel}>Vertical Oscillation</div>
+                  <div style={statValue}>{rd.vertical_oscillation}</div>
+                  <div style={statUnit}>cm</div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Laps — always shown */}
       {!isInterval && laps && laps.lap_count >= 2 && (
