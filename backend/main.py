@@ -1707,6 +1707,7 @@ async def import_by_date(req: DateImportRequest, session: AsyncSession = Depends
 
     imported = 0
     skipped = 0
+    already_existed = 0
     page = 1
     per_page = 50
 
@@ -1722,7 +1723,6 @@ async def import_by_date(req: DateImportRequest, session: AsyncSession = Depends
         if not activities:
             break
 
-        already_existed = 0
         for act_data in activities:
             sport = act_data.get("sport_type") or act_data.get("type") or ""
             if not _is_running(sport):
