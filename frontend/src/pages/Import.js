@@ -143,6 +143,7 @@ function Import() {
   const [importProgress, setImportProgress] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [garminLoading, setGarminLoading] = useState(false);
   const [authUrl, setAuthUrl] = useState(null);
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -307,6 +308,25 @@ function Import() {
     setSyncLoading(false);
   };
 
+  const handleGarminSync = async () => {
+    setGarminLoading(true);
+    setSyncStatus(null);
+    try {
+      const res = await api.post('/import/garmin/sync');
+      setSyncStatus({
+        type: 'success',
+        message: `Garmin: imported ${res.data.imported} new run(s) (${res.data.already_existed} already had).`,
+      });
+    } catch (err) {
+      setSyncStatus({
+        type: 'error',
+        message: err.response?.data?.detail || 'Garmin sync failed.',
+      });
+    } finally {
+      setGarminLoading(false);
+    }
+  };
+
   const handleBulkImport = async () => {
     if (!bulkDir.trim()) return;
     setBulkLoading(true);
@@ -437,6 +457,14 @@ function Import() {
           ) : (
             'Sync New Activities'
           )}
+        </button>
+        <button
+          onClick={handleGarminSync}
+          disabled={garminLoading}
+          style={{ minHeight: 44, marginLeft: 12, background: '#007cc3', color: '#fff',
+                   border: 'none', borderRadius: 8, padding: '0 16px', cursor: 'pointer' }}
+        >
+          {garminLoading ? 'Syncing Garmin…' : 'Sync from Garmin'}
         </button>
         {syncLoading && (
           <div style={loadingStatus}>
