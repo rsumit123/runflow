@@ -26,6 +26,12 @@ class Activity(Base):
     has_detailed_data = Column(Boolean, default=False)
     is_interval = Column(Boolean, default=False)
     interval_config = Column(JSON, nullable=True)  # { reps: 8, distance: 250, result: {...} }
+    source = Column(String, default="strava", index=True)  # 'strava' | 'garmin'
+    average_heartrate = Column(Float, nullable=True)
+    max_heartrate = Column(Float, nullable=True)
+    average_cadence = Column(Float, nullable=True)
+    hr_zones = Column(JSON, nullable=True)            # [{zone, secs}, ...]
+    running_dynamics = Column(JSON, nullable=True)    # {stride_length, gct, vertical_oscillation}
 
     splits = relationship("Split", back_populates="activity", cascade="all, delete-orphan")
     streams = relationship("Stream", back_populates="activity", cascade="all, delete-orphan")
@@ -45,6 +51,7 @@ class Split(Base):
     pace_zone = Column(Integer, nullable=True)
     elevation_difference = Column(Float, nullable=True)
     average_heartrate = Column(Float, nullable=True)
+    average_cadence = Column(Float, nullable=True)
 
     activity = relationship("Activity", back_populates="splits")
 
