@@ -6,3 +6,4 @@ sqlalchemy
 aiosqlite
 gpxpy
 fitdecode
+garminconnect
