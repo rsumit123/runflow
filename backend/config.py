@@ -55,3 +55,25 @@ def update_env_tokens(access_token: str, refresh_token: str) -> None:
     STRAVA_REFRESH_TOKEN = refresh_token
     os.environ["strava_access_token"] = access_token
     os.environ["strava_refresh_token"] = refresh_token
+
+
+# ---------------------------------------------------------------------------
+# Garmin
+# ---------------------------------------------------------------------------
+GARMIN_TOKENSTORE = os.getenv("GARMIN_TOKENSTORE", "/data/garmin_tokens")
+
+# activityDetailMetrics descriptor keys -> RunFlow stream types.
+# Confirm/adjust against tests/fixtures/garmin_details.json['metricDescriptors'].
+GARMIN_METRIC_KEYS = {
+    "latitude": "directLatitude",
+    "longitude": "directLongitude",
+    "timestamp": "directTimestamp",
+    "distance": "sumDistance",
+    "speed": "directSpeed",
+    "heartrate": "directHeartRate",
+    "cadence": "directRunCadence",
+    "stride_length": "directStrideLength",
+    "ground_contact_time": "directGroundContactTime",
+    "vertical_oscillation": "directVerticalOscillation",
+}
+GARMIN_RUNNING_TYPES = {"running", "track_running", "trail_running", "treadmill_running"}
