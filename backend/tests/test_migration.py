@@ -1,8 +1,7 @@
-import os, tempfile, asyncio
+import tempfile
 import pytest
 
 async def _columns(engine, table):
-    from sqlalchemy import text
     async with engine.begin() as conn:
         rows = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
         return {r[1] for r in rows.fetchall()}
