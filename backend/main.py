@@ -25,6 +25,11 @@ from intervals import analyze_intervals, analyze_intervals_timed
 from laps import detect_laps
 from insights import generate_run_insight
 from metrics import get_metrics_trend, compute_interval_metrics, compute_lap_metrics
+import asyncio as _asyncio
+import garmin_transform as gt
+from garmin_client import GarminClient
+
+garmin = GarminClient()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -239,6 +244,44 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
         await compute_and_store_best_efforts(session, act.id)
     except Exception as exc:
         logger.warning("Failed to compute best efforts for activity %s: %s", act.id, exc)
+
+
+async def _persist_garmin_activity(session, summary, splits_payload, details, zones) -> None:
+    """Map Garmin payloads into Activity/Split/Stream and run the analysis helpers."""
+    fields = gt.summary_to_activity_fields(summary)
+    activity_id = fields["id"]
+
+    act = await session.get(Activity, activity_id)
+    if act is None:
+        act = Activity(id=activity_id)
+        session.add(act)
+    for k, v in fields.items():
+        if k != "id":
+            setattr(act, k, v)
+
+    # Splits (replace existing)
+    for old in (await session.execute(select(Split).where(Split.activity_id == activity_id))).scalars().all():
+        await session.delete(old)
+    for sd in gt.laps_to_splits(splits_payload):
+        session.add(Split(activity_id=activity_id, **sd))
+
+    # Streams (replace existing)
+    for old in (await session.execute(select(Stream).where(Stream.activity_id == activity_id))).scalars().all():
+        await session.delete(old)
+    streams = gt.details_to_streams(details)
+    for stype, data in streams.items():
+        session.add(Stream(activity_id=activity_id, stream_type=stype, data=data))
+
+    if streams.get("latlng"):
+        act.map_summary_polyline = encode_polyline(streams["latlng"])
+    act.hr_zones = gt.hr_zones(zones)
+    act.running_dynamics = gt.running_dynamics_summary(streams)
+    act.has_detailed_data = True
+
+    try:
+        await compute_and_store_best_efforts(session, activity_id)
+    except Exception as exc:
+        logger.warning("best efforts failed for %s: %s", activity_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1840,6 +1883,51 @@ async def import_sync(session: AsyncSession = Depends(get_session)):
         "imported": imported,
         "skipped_non_running": skipped,
     }
+
+
+@app.post("/api/import/garmin/sync")
+async def import_garmin_sync(session: AsyncSession = Depends(get_session)):
+    """Incremental Garmin sync: import running activities not already stored."""
+    try:
+        gc = garmin
+        imported = already_existed = 0
+        start, page_size = 0, 20
+        while True:
+            try:
+                acts = await gc.get_recent_running(limit=page_size, start=start)
+            except Exception as exc:
+                logger.error("Garmin fetch failed at start=%d: %s", start, exc)
+                if start == 0:
+                    raise HTTPException(status_code=502, detail=f"Garmin fetch failed: {exc}")
+                break
+            if not acts:
+                break
+            page_all_exist = True
+            for summary in acts:
+                aid = summary["activityId"]
+                existing = await session.get(Activity, aid)
+                if existing and existing.has_detailed_data:
+                    already_existed += 1
+                    continue
+                page_all_exist = False
+                splits = await gc.get_splits(aid)
+                details = await gc.get_details(aid)
+                try:
+                    zones = await gc.get_hr_zones(aid)
+                except Exception:
+                    zones = []
+                await _persist_garmin_activity(session, summary, splits, details, zones)
+                imported += 1
+                await session.commit()
+            if page_all_exist:
+                break
+            start += page_size
+            await _asyncio.sleep(1)  # be gentle with Garmin
+        return {"imported": imported, "already_existed": already_existed, "skipped_non_running": 0}
+    except HTTPException:
+        raise
+    except RuntimeError as exc:  # missing token, etc.
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 class BulkImportRequest(BaseModel):
