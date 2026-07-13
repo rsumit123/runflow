@@ -295,7 +295,8 @@ function Training() {
                         {zone}
                       </span>
                       {r.basis === 'pace' && (
-                        <span title="HR-inferred zone" style={{ marginLeft: '4px', color: '#666', fontSize: '10px' }}>est</span>
+                        <span title="No HR for this run — zone inferred from pace"
+                              style={{ marginLeft: '6px', color: '#777', fontSize: '10px', fontStyle: 'italic' }}>(pace-est)</span>
                       )}
                     </div>
                   </div>
