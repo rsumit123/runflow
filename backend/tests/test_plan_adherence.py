@@ -31,6 +31,19 @@ def test_done_missed_upcoming():
     assert r["summary"]["done"] == 1 and r["summary"]["missed"] == 1
 
 
+def test_preplan_run_not_matched():
+    # workout on plan day 0 (NOW-... let plan start = NOW-3d); a run BEFORE start
+    # must not fulfil it.
+    plan_start = NOW - timedelta(days=3)
+    workouts = [_wo(1, 3, "easy", 3.0)]           # dated at plan start
+    acts = [_act(100, 4, 3.0, 430, 150)]          # a run one day BEFORE plan start
+    r = pa.match_and_grade(workouts, acts, NOW, plan_start=plan_start)
+    assert r["workouts"][0]["status"] == "missed"  # not matched to the pre-plan run
+    # without the plan_start guard it WOULD match (±1 day)
+    r2 = pa.match_and_grade(workouts, acts, NOW)
+    assert r2["workouts"][0]["status"] == "done"
+
+
 def test_easy_run_hard_flagged():
     workouts = [_wo(1, 3, "easy", 3.0, hr_ceiling=160)]
     acts = [_act(100, 3, 3.0, 360, 185)]  # HR 185 >> ceiling 160 -> ran hard

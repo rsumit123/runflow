@@ -27,10 +27,17 @@ def _pace_sec(speed_mps: Optional[float]) -> Optional[int]:
 
 
 def match_and_grade(
-    workouts: list[dict[str, Any]], activities: list[dict[str, Any]], now: datetime
+    workouts: list[dict[str, Any]], activities: list[dict[str, Any]], now: datetime,
+    plan_start: Optional[datetime] = None,
 ) -> dict[str, Any]:
-    """Return {workouts: enriched, summary: {...}} — pure, order-preserving."""
+    """Return {workouts: enriched, summary: {...}} — pure, order-preserving.
+
+    Runs from before ``plan_start`` are ignored — a run that happened before the
+    plan existed can't fulfil one of its workouts.
+    """
     runs = [a for a in activities if a.get("start_date") and a.get("distance")]
+    if plan_start is not None:
+        runs = [a for a in runs if a["start_date"].date() >= plan_start.date()]
     used: set[Any] = set()
     enriched: list[dict[str, Any]] = []
 

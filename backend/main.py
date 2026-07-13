@@ -493,7 +493,7 @@ async def _workout_dicts(session: AsyncSession, plan: Plan) -> list[dict[str, An
 async def _plan_response(session: AsyncSession, plan: Plan) -> dict[str, Any]:
     workout_dicts = await _workout_dicts(session, plan)
     acts = await _plan_activity_dicts(session)
-    graded = padh.match_and_grade(workout_dicts, acts, datetime.utcnow())
+    graded = padh.match_and_grade(workout_dicts, acts, datetime.utcnow(), plan.start_date)
     out = []
     for w in graded["workouts"]:
         d = dict(w)
@@ -578,6 +578,90 @@ class WorkoutMoveRequest(BaseModel):
     date: str  # YYYY-MM-DD
 
 
+def _downsample(seq: Optional[list], target: int = 120) -> Optional[list]:
+    if not seq:
+        return seq
+    if len(seq) <= target:
+        return seq
+    step = len(seq) / target
+    return [seq[int(i * step)] for i in range(target)]
+
+
+def _workout_verdict(w: PlannedWorkout, ew: Optional[dict[str, Any]],
+                     actual: Optional[dict[str, Any]]) -> Optional[str]:
+    if ew is None:
+        return None
+    status = ew.get("status")
+    if status == "upcoming":
+        return "Coming up — run it as prescribed and it'll log here afterwards."
+    if status == "missed":
+        return "No run logged near this day. Skip it and move on — don't cram it in."
+    comp = ew.get("compliance")
+    avg = actual.get("avg_hr") if actual else None
+    ceil = w.hr_ceiling
+    if comp == "ran_hard" and avg and ceil:
+        over = int(round(avg - ceil))
+        return (f"You ran this easy day at {int(round(avg))} bpm — about {over} over the "
+                f"{ceil} bpm ceiling. Easy days are supposed to feel genuinely easy; that's what "
+                "builds the aerobic base you're chasing. Slow right down next time and let the HR settle.")
+    if comp == "on_target" and avg and ceil:
+        return (f"Nicely done — you held {int(round(avg))} bpm, under the {ceil} bpm ceiling. "
+                "That's real easy running, and it's exactly what pays off on race day.")
+    return "Logged and matched to this workout. Keep it rolling."
+
+
+@app.get("/api/plan/workout/{workout_id}")
+async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(get_session)):
+    """Plan-aware detail for one workout: planned targets, the matched run's HR
+    breakdown, how it fit the plan, and a plain-language verdict."""
+    w = await session.get(PlannedWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    plan = await session.get(Plan, w.plan_id)
+
+    workout_dicts = await _workout_dicts(session, plan)
+    acts = await _plan_activity_dicts(session)
+    graded = padh.match_and_grade(
+        workout_dicts, acts, datetime.utcnow(), plan.start_date if plan else None
+    )
+    ew = next((x for x in graded["workouts"] if x["id"] == workout_id), None)
+
+    actual = None
+    if ew and ew.get("actual"):
+        aid = ew["actual"]["activity_id"]
+        act = await session.get(Activity, aid)
+        hr_stream = (await session.execute(
+            select(Stream).where(Stream.activity_id == aid, Stream.stream_type == "heartrate")
+        )).scalars().first()
+        actual = {
+            "activity_id": aid,
+            "name": act.name if act else None,
+            "distance_m": act.distance if act else None,
+            "avg_hr": act.average_heartrate if act else None,
+            "max_hr": act.max_heartrate if act else None,
+            "pace_sec": ew["actual"].get("pace_sec"),
+            "hr_zones": act.hr_zones if act else None,
+            "heartrate": _downsample(hr_stream.data if hr_stream else None),
+        }
+
+    return {
+        "workout": {
+            "id": w.id, "date": w.date.isoformat() if w.date else None,
+            "week_number": w.week_number, "day_type": w.day_type,
+            "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
+            "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
+            "title": w.title, "description": w.description,
+            "status": ew.get("status") if ew else None,
+            "compliance": ew.get("compliance") if ew else None,
+        },
+        "plan": ({"target_time_sec": plan.target_time_sec, "weeks": plan.weeks,
+                  "goal_date": plan.goal_date.isoformat() if plan.goal_date else None}
+                 if plan else None),
+        "actual": actual,
+        "verdict": _workout_verdict(w, ew, actual),
+    }
+
+
 HARD_DAY_TYPES = {"quality", "long"}
 
 
@@ -636,7 +720,7 @@ async def _active_plan(session: AsyncSession) -> Optional[Plan]:
 async def _plan_suggestions(session: AsyncSession, plan: Plan) -> list[dict[str, Any]]:
     workout_dicts = await _workout_dicts(session, plan)
     acts = await _plan_activity_dicts(session)
-    graded = padh.match_and_grade(workout_dicts, acts, datetime.utcnow())
+    graded = padh.match_and_grade(workout_dicts, acts, datetime.utcnow(), plan.start_date)
     return padh.suggest(graded["workouts"], graded["summary"], datetime.utcnow())
 
 
