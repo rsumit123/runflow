@@ -31,6 +31,7 @@ from garmin_client import GarminClient
 import fitness_model as fmodel
 import fitness_projection as fproj
 import plan_generator as pgen
+import plan_adherence as padh
 import coach_llm
 
 garmin = GarminClient()
@@ -476,10 +477,28 @@ def _weeks_overview(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [by_week[k] for k in sorted(by_week)]
 
 
-async def _plan_response(session: AsyncSession, plan: Plan) -> dict[str, Any]:
+async def _workout_dicts(session: AsyncSession, plan: Plan) -> list[dict[str, Any]]:
     wos = (await session.execute(
         select(PlannedWorkout).where(PlannedWorkout.plan_id == plan.id).order_by(PlannedWorkout.date)
     )).scalars().all()
+    return [
+        {"id": w.id, "date": w.date, "week_number": w.week_number, "day_type": w.day_type,
+         "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
+         "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
+         "title": w.title, "description": w.description}
+        for w in wos
+    ]
+
+
+async def _plan_response(session: AsyncSession, plan: Plan) -> dict[str, Any]:
+    workout_dicts = await _workout_dicts(session, plan)
+    acts = await _plan_activity_dicts(session)
+    graded = padh.match_and_grade(workout_dicts, acts, datetime.utcnow())
+    out = []
+    for w in graded["workouts"]:
+        d = dict(w)
+        d["date"] = w["date"].isoformat() if w.get("date") else None
+        out.append(d)
     return {
         "plan": {
             "id": plan.id, "goal_type": plan.goal_type, "target_time_sec": plan.target_time_sec,
@@ -487,14 +506,8 @@ async def _plan_response(session: AsyncSession, plan: Plan) -> dict[str, Any]:
             "goal_date": plan.goal_date.isoformat() if plan.goal_date else None,
             "weeks": plan.weeks, "status": plan.status, "narrative": plan.narrative,
         },
-        "workouts": [
-            {"id": w.id, "date": w.date.isoformat() if w.date else None,
-             "week_number": w.week_number, "day_type": w.day_type,
-             "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
-             "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
-             "title": w.title, "description": w.description}
-            for w in wos
-        ],
+        "workouts": out,
+        "adherence": graded["summary"],
     }
 
 
@@ -555,6 +568,48 @@ async def abandon_plan(plan_id: int, session: AsyncSession = Depends(get_session
     plan.status = "abandoned"
     await session.commit()
     return {"status": "abandoned", "id": plan_id}
+
+
+class SuggestionApplyRequest(BaseModel):
+    id: str
+
+
+async def _active_plan(session: AsyncSession) -> Optional[Plan]:
+    return (await session.execute(
+        select(Plan).where(Plan.status == "active").order_by(Plan.id.desc())
+    )).scalars().first()
+
+
+async def _plan_suggestions(session: AsyncSession, plan: Plan) -> list[dict[str, Any]]:
+    workout_dicts = await _workout_dicts(session, plan)
+    acts = await _plan_activity_dicts(session)
+    graded = padh.match_and_grade(workout_dicts, acts, datetime.utcnow())
+    return padh.suggest(graded["workouts"], graded["summary"], datetime.utcnow())
+
+
+@app.get("/api/plan/suggestions")
+async def get_plan_suggestions(session: AsyncSession = Depends(get_session)):
+    plan = await _active_plan(session)
+    if plan is None:
+        return {"suggestions": []}
+    return {"suggestions": await _plan_suggestions(session, plan)}
+
+
+@app.post("/api/plan/suggestions/apply")
+async def apply_plan_suggestion(req: SuggestionApplyRequest, session: AsyncSession = Depends(get_session)):
+    plan = await _active_plan(session)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No active plan")
+    # Re-derive suggestions server-side and apply the matching one (authoritative).
+    suggestion = next((s for s in await _plan_suggestions(session, plan) if s["id"] == req.id), None)
+    if suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion no longer applies")
+    for ch in suggestion.get("changes", []):
+        w = await session.get(PlannedWorkout, ch["workout_id"])
+        if w is not None and ch.get("value") is not None:
+            setattr(w, ch["field"], ch["value"])
+    await session.commit()
+    return await _plan_response(session, plan)
 
 
 @app.get("/api/activities/{activity_id}")
