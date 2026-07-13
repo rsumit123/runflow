@@ -28,6 +28,7 @@ from metrics import get_metrics_trend, compute_interval_metrics, compute_lap_met
 import asyncio as _asyncio
 import garmin_transform as gt
 from garmin_client import GarminClient
+import fitness_model as fmodel
 
 garmin = GarminClient()
 
@@ -419,6 +420,21 @@ async def list_activities(
         "total": total,
         "activities": [_activity_to_dict(a) for a in activities],
     }
+
+
+@app.get("/api/training")
+async def training(session: AsyncSession = Depends(get_session)):
+    """Adaptive-coaching model: fitness metrics, gray-zone classification, warnings."""
+    result = await session.execute(select(Activity))
+    acts = [
+        {
+            "id": a.id, "name": a.name, "distance": a.distance,
+            "start_date": a.start_date, "average_speed": a.average_speed,
+            "average_heartrate": a.average_heartrate, "max_heartrate": a.max_heartrate,
+        }
+        for a in result.scalars().all()
+    ]
+    return fmodel.training_report(acts, datetime.utcnow())
 
 
 @app.get("/api/activities/{activity_id}")
