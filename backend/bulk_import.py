@@ -10,6 +10,7 @@ import io
 import logging
 import math
 import os
+import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -668,5 +669,227 @@ async def import_from_export(
         "skipped_non_running": skipped,
         "already_exists": already_exists,
         "errors": errors,
+        "total_in_csv": total,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Heart-rate seeding from a Strava export (enrich already-imported runs)
+# ---------------------------------------------------------------------------
+#
+# The Strava API import never fetched heart rate, so historical runs have none.
+# The export files DO carry HR (GPX gpxtpx:hr, FIT heart_rate, TCX HeartRateBpm).
+# These extractors scan a file for ALL heart-rate readings regardless of whether
+# the point also has GPS — Garmin logs HR-only and GPS-only trackpoints
+# separately, so a position-gated parser would drop HR samples.
+
+HR_MIN_VALID = 30      # below this = sensor dropout / not-worn (e.g. loose GW4)
+HR_MAX_VALID = 230     # above this = implausible noise
+HR_MIN_SAMPLES = 10    # need at least this many valid samples to trust a run
+
+
+def _local(tag: str) -> str:
+    """Strip an XML namespace: '{ns}hr' -> 'hr'."""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _read_xml_root(filepath: str) -> "ET.Element | None":
+    """Parse an XML file into a root element, tolerating a leading BOM or
+    whitespace before the ``<?xml`` declaration (some Strava exports have it)."""
+    try:
+        with open(filepath, "rb") as f:
+            content = f.read()
+        if content[:3] == b"\xef\xbb\xbf":  # UTF-8 BOM
+            content = content[3:]
+        content = content.lstrip()
+        return ET.fromstring(content)
+    except (ET.ParseError, OSError) as exc:
+        logger.warning("XML parse failed for %s: %s", filepath, exc)
+        return None
+
+
+def _extract_hr_from_gpx(filepath: str) -> list[float]:
+    """All <gpxtpx:hr> (or any *:hr) values, in order."""
+    root = _read_xml_root(filepath)
+    if root is None:
+        return []
+    values: list[float] = []
+    for el in root.iter():
+        if _local(el.tag) == "hr" and el.text:
+            try:
+                values.append(float(el.text))
+            except ValueError:
+                pass
+    return values
+
+
+def _extract_hr_from_tcx(filepath: str) -> list[float]:
+    """Per-trackpoint <HeartRateBpm><Value> values.
+
+    Matches the exact tag 'HeartRateBpm' so lap-level 'AverageHeartRateBpm' /
+    'MaximumHeartRateBpm' summaries are excluded.
+    """
+    root = _read_xml_root(filepath)
+    if root is None:
+        return []
+    values: list[float] = []
+    for el in root.iter():
+        if _local(el.tag) == "HeartRateBpm":
+            for child in el:
+                if _local(child.tag) == "Value" and child.text:
+                    try:
+                        values.append(float(child.text))
+                    except ValueError:
+                        pass
+                    break
+    return values
+
+
+def _extract_hr_from_fit(filepath: str) -> list[float]:
+    """Per-record heart_rate values from a FIT file."""
+    try:
+        import fitdecode
+    except ImportError:
+        return []
+    values: list[float] = []
+    try:
+        with fitdecode.FitReader(filepath) as fit:
+            for frame in fit:
+                if not isinstance(frame, fitdecode.FitDataMessage):
+                    continue
+                if frame.name != "record":
+                    continue
+                try:
+                    hr = frame.get_value("heart_rate")
+                except KeyError:
+                    hr = None
+                if hr is not None:
+                    try:
+                        values.append(float(hr))
+                    except (ValueError, TypeError):
+                        pass
+    except Exception as exc:  # noqa: BLE001 — fitdecode raises many types
+        logger.warning("FIT HR parse failed for %s: %s", filepath, exc)
+    return values
+
+
+def _extract_hr_values(filepath: str) -> list[float]:
+    """Dispatch HR extraction by file type (decompressing .gz first)."""
+    filepath = _decompress_if_needed(filepath)
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == ".gpx":
+        return _extract_hr_from_gpx(filepath)
+    if ext == ".tcx":
+        return _extract_hr_from_tcx(filepath)
+    if ext == ".fit":
+        return _extract_hr_from_fit(filepath)
+    return []
+
+
+def clean_hr_values(values: list[float]) -> dict[str, Any]:
+    """Filter dropouts/noise and summarize.
+
+    Returns {clean: [...], avg, max, raw_count, valid_count, valid_fraction}.
+    avg/max are None when there aren't enough trustworthy samples.
+    """
+    clean = [v for v in values if HR_MIN_VALID <= v <= HR_MAX_VALID]
+    raw = len(values)
+    valid = len(clean)
+    if valid < HR_MIN_SAMPLES:
+        return {"clean": [], "avg": None, "max": None,
+                "raw_count": raw, "valid_count": valid,
+                "valid_fraction": (valid / raw) if raw else 0.0}
+    return {
+        "clean": clean,
+        "avg": round(sum(clean) / valid, 1),
+        "max": max(clean),
+        "raw_count": raw,
+        "valid_count": valid,
+        "valid_fraction": round(valid / raw, 3) if raw else 0.0,
+    }
+
+
+async def enrich_hr_from_export(
+    session: AsyncSession,
+    export_path: str,
+    progress: dict[str, Any] | None = None,
+) -> dict[str, int]:
+    """Add heart rate to already-imported runs from a Strava export.
+
+    Non-destructive: sets ``average_heartrate`` / ``max_heartrate`` and (re)writes
+    only the ``heartrate`` stream. GPS streams, splits, and best efforts are left
+    untouched. Only rows already present in the DB are enriched.
+    """
+    base_dir = extract_zip_if_needed(export_path)
+    csv_path = os.path.join(base_dir, "activities.csv")
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"activities.csv not found in {base_dir}")
+
+    csv_activities = _parse_csv_activities(csv_path)
+    total = len(csv_activities)
+    if progress is not None:
+        progress.update({"total": total, "enriched": 0, "status": "running"})
+
+    enriched = no_file = no_hr = low_conf = not_in_db = 0
+
+    for idx, act_data in enumerate(csv_activities):
+        activity_id = act_data["id"]
+        existing = await session.get(Activity, activity_id)
+        if existing is None:
+            not_in_db += 1
+            continue
+
+        activity_file = _find_activity_file(base_dir, act_data.get("filename", ""))
+        if not activity_file:
+            no_file += 1
+            continue
+
+        try:
+            values = _extract_hr_values(activity_file)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HR extraction failed for %s: %s", activity_id, exc)
+            values = []
+
+        summary = clean_hr_values(values)
+        if summary["avg"] is None:
+            # Either no HR at all, or a mostly-dropout run (e.g. loose GW4).
+            if summary["raw_count"] > 0:
+                low_conf += 1
+            else:
+                no_hr += 1
+            continue
+
+        existing.average_heartrate = summary["avg"]
+        existing.max_heartrate = summary["max"]
+
+        # Replace only the heartrate stream (leave GPS/other streams alone).
+        old = await session.execute(
+            select(Stream).where(
+                Stream.activity_id == activity_id,
+                Stream.stream_type == "heartrate",
+            )
+        )
+        for s in old.scalars().all():
+            await session.delete(s)
+        session.add(Stream(activity_id=activity_id, stream_type="heartrate",
+                           data=summary["clean"]))
+
+        enriched += 1
+        if enriched % 25 == 0:
+            await session.commit()
+            logger.info("HR enrich progress: %d/%d", idx + 1, total)
+        if progress is not None:
+            progress.update({"enriched": enriched, "current": idx + 1})
+
+    await session.commit()
+    if progress is not None:
+        progress["status"] = "completed"
+
+    return {
+        "enriched": enriched,
+        "no_hr": no_hr,
+        "low_confidence": low_conf,
+        "no_file": no_file,
+        "not_in_db": not_in_db,
         "total_in_csv": total,
     }
