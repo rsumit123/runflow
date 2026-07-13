@@ -36,7 +36,10 @@ SYSTEM_PROMPT = (
     "- Be concise and concrete: cite the actual numbers and what they mean. Prefer 2-5 "
     "sentences unless asked for detail.\n"
     "- You are not a doctor; do not give medical advice. Encourage, don't diagnose.\n"
-    "- Paces are seconds per km; format them as M:SS/km in your answers."
+    "- Paces are seconds per km; format them as M:SS/km in your answers.\n"
+    "- Reply in plain text — NO markdown. Do not use **bold**, #headers, or bullet "
+    "characters like * or -; if you list things, write them as short sentences or use "
+    "a simple dash at the very start of a line only."
 )
 
 TOOLS = [
