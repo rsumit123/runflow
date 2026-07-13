@@ -1050,7 +1050,8 @@ function ActivityDetail() {
               {rd.stride_length != null && (
                 <div style={statCard}>
                   <div style={statLabel}>Stride Length</div>
-                  <div style={statValue}>{rd.stride_length}</div>
+                  {/* Garmin stores stride length in cm; show meters */}
+                  <div style={statValue}>{(rd.stride_length / 100).toFixed(2)}</div>
                   <div style={statUnit}>m</div>
                 </div>
               )}
