@@ -54,11 +54,20 @@ function StatCard({ label, value, sub, color }) {
 function PlanSection() {
   const [plan, setPlan] = useState(null);
   const [workouts, setWorkouts] = useState([]);
+  const [adherence, setAdherence] = useState(null);
   const [projections, setProjections] = useState(null);
   const [loading, setLoading] = useState(true);
   const [building, setBuilding] = useState(null); // holds weeks being built, or null
+  const [suggestions, setSuggestions] = useState([]);
+  const [dismissedIds, setDismissedIds] = useState(() => new Set());
+  const [applyingId, setApplyingId] = useState(null);
+  const [selectedWeek, setSelectedWeek] = useState(null);
 
   const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
+
+  const loadSuggestions = () => api.get('/plan/suggestions')
+    .then((res) => setSuggestions(res.data.suggestions || []))
+    .catch(() => setSuggestions([]));
 
   const loadPlan = () => {
     setLoading(true);
@@ -66,14 +75,48 @@ function PlanSection() {
       .then((res) => {
         setPlan(res.data.plan || null);
         setWorkouts(res.data.workouts || []);
+        setAdherence(res.data.adherence || null);
         if (!res.data.plan) return loadProjections();
-        return undefined;
+        return loadSuggestions();
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { loadPlan(); }, []);
+
+  // Default the selected week to the plan's current week whenever the plan identity changes.
+  useEffect(() => {
+    if (!plan) { setSelectedWeek(null); return; }
+    let cw = 1;
+    if (plan.start_date && plan.weeks) {
+      const start = new Date(plan.start_date);
+      const diffDays = Math.floor((Date.now() - start.getTime()) / 86400000);
+      cw = Math.floor(diffDays / 7) + 1;
+      if (cw < 1) cw = 1;
+      if (cw > plan.weeks) cw = plan.weeks;
+    }
+    setSelectedWeek(cw);
+  }, [plan]);
+
+  const applySuggestion = (id) => {
+    setApplyingId(id);
+    api.post('/plan/suggestions/apply', { id })
+      .then((res) => {
+        setPlan(res.data.plan || null);
+        setWorkouts(res.data.workouts || []);
+        setAdherence(res.data.adherence || null);
+        return loadSuggestions();
+      })
+      .catch(() => {})
+      .finally(() => setApplyingId(null));
+  };
+
+  const dismissSuggestion = (id) => setDismissedIds((prev) => {
+    const next = new Set(prev);
+    next.add(id);
+    return next;
+  });
 
   const buildPlan = (weeks, targetTimeSec) => {
     setBuilding(weeks);
@@ -121,17 +164,52 @@ function PlanSection() {
       if (currentWeek > plan.weeks) currentWeek = plan.weeks;
     }
 
-    // Group workouts by week_number
+    // Group workouts by week_number (workouts within a week sorted by date)
     const byWeek = {};
     workouts.forEach((w) => {
       const wn = w.week_number;
       if (!byWeek[wn]) byWeek[wn] = [];
       byWeek[wn].push(w);
     });
+    Object.keys(byWeek).forEach((k) => {
+      byWeek[k].sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+    });
     const weekNumbers = Object.keys(byWeek).map(Number).sort((a, b) => a - b);
+    const totalWeeks = plan.weeks || (weekNumbers.length ? weekNumbers[weekNumbers.length - 1] : 1);
+
+    // Selected week (fall back to current week until the effect initialises it)
+    const sel = selectedWeek || currentWeek;
+    const selWorkouts = byWeek[sel] || [];
+
+    // Per-week status → tint for the week chips
+    const weekStatus = (wn) => {
+      const ws = (byWeek[wn] || []).filter((w) => w.status !== 'rest');
+      if (ws.length === 0) return 'neutral';
+      if (ws.every((w) => w.status === 'done')) return 'done';
+      if (ws.some((w) => w.status === 'missed')) return 'missed';
+      return 'neutral';
+    };
+    const chipBg = { done: '#22c55e18', missed: '#ef444418', neutral: '#16213e' };
+
+    // Selected-week date range + narrative focus
+    const selDates = selWorkouts.map((w) => w.date).filter(Boolean).map((d) => new Date(d));
+    const rangeStart = selDates.length ? formatDate(new Date(Math.min(...selDates.map((d) => d.getTime())))) : null;
+    const rangeEnd = selDates.length ? formatDate(new Date(Math.max(...selDates.map((d) => d.getTime())))) : null;
+    const dateRange = rangeStart && rangeEnd
+      ? (rangeStart === rangeEnd ? rangeStart : `${rangeStart} – ${rangeEnd}`)
+      : null;
+    const selFocus = narrative && narrative.weekly
+      ? ((narrative.weekly.find((w) => w.week === sel) || {}).focus || null)
+      : null;
+
+    const visibleSuggestions = suggestions.filter((s) => !dismissedIds.has(s.id));
+
+    const adh = adherence || null;
+    const showAdherence = adh && adh.planned_past != null;
 
     return (
       <div style={cardStyle}>
+        {/* a) Header */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px', alignItems: 'baseline', marginBottom: '14px' }}>
           <div style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>
             5K in <span style={{ color: '#fc5200' }}>{goalSec != null ? formatPace(goalSec) : '—'}</span>
@@ -140,7 +218,7 @@ function PlanSection() {
             Goal date {formatDate(plan.goal_date)}
           </div>
           <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
-            · Week {currentWeek} of {plan.weeks}
+            · Week {currentWeek} of {totalWeeks}
           </div>
           <button
             onClick={abandonPlan}
@@ -163,60 +241,221 @@ function PlanSection() {
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          {weekNumbers.map((wn) => {
-            const focus = narrative && narrative.weekly
-              ? (narrative.weekly.find((w) => w.week === wn) || {}).focus
-              : null;
-            return (
-              <div key={wn}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '10px', marginBottom: '10px' }}>
-                  <span style={{
-                    fontSize: '13px', fontWeight: 700, color: '#fff',
-                    backgroundColor: wn === currentWeek ? '#fc520022' : 'transparent',
-                    border: wn === currentWeek ? '1px solid #fc5200' : '1px solid #333',
-                    borderRadius: '4px', padding: '2px 8px',
-                  }}>
-                    Week {wn}
-                  </span>
-                  {focus && <span style={{ fontSize: '12px', color: '#a0a0b0' }}>{focus}</span>}
-                </div>
-                <div style={{
-                  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px',
+        {/* b) Adherence summary strip */}
+        {showAdherence && (
+          adh.planned_past > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '18px' }}>
+              <span style={{
+                fontSize: '12px', fontWeight: 600, color: '#e0e0e0', backgroundColor: '#16213e',
+                borderRadius: '20px', padding: '5px 12px',
+              }}>
+                {adh.done != null ? adh.done : 0}/{adh.planned_past} done
+              </span>
+              {adh.adherence_pct != null && (
+                <span style={{
+                  fontSize: '12px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e18',
+                  borderRadius: '20px', padding: '5px 12px',
                 }}>
-                  {byWeek[wn].map((w) => {
-                    const dt = w.day_type || 'easy';
-                    const dc = DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy;
-                    const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
-                    const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
-                    return (
-                      <div key={w.id} style={{
-                        backgroundColor: '#16213e', borderRadius: '8px', padding: '12px',
-                        borderTop: `3px solid ${dc}`,
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                          <span style={{ fontSize: '11px', color: '#a0a0b0' }}>{formatDate(w.date)}</span>
-                          <span style={{
-                            color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
-                            fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
-                          }}>
-                            {dt}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>
-                          {w.title || 'Workout'}
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '12px', color: '#e0e0e0', marginBottom: w.description ? '8px' : 0 }}>
-                          {km != null && <span>{km} km</span>}
-                          {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
-                          {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
-                        </div>
-                        {w.description && (
-                          <div style={{ fontSize: '11px', color: '#777', lineHeight: 1.4 }}>{w.description}</div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {adh.adherence_pct}%
+                </span>
+              )}
+              {adh.easy_run_hard > 0 && (
+                <span style={{
+                  fontSize: '12px', fontWeight: 600, color: '#f59e0b', backgroundColor: '#f59e0b18',
+                  borderRadius: '20px', padding: '5px 12px',
+                }}>
+                  ⚠ {adh.easy_run_hard} easy day{adh.easy_run_hard === 1 ? '' : 's'} run hard
+                </span>
+              )}
+            </div>
+          ) : (
+            <div style={{ fontSize: '12px', color: '#777', marginBottom: '18px' }}>
+              Your plan starts now — track your runs here as you go.
+            </div>
+          )
+        )}
+
+        {/* c) Suggestions panel */}
+        {visibleSuggestions.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+            {visibleSuggestions.map((s) => {
+              const isOnTrack = s.type === 'on_track';
+              const accent = isOnTrack ? '#22c55e' : '#f59e0b';
+              const isApplying = applyingId === s.id;
+              return (
+                <div key={s.id} style={{
+                  backgroundColor: '#16213e', borderLeft: `4px solid ${accent}`, borderRadius: '6px',
+                  padding: '12px 14px',
+                }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
+                    {s.title}
+                  </div>
+                  {s.detail && (
+                    <div style={{ fontSize: '13px', color: '#a0a0b0', lineHeight: 1.5 }}>{s.detail}</div>
+                  )}
+                  {!isOnTrack && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => applySuggestion(s.id)}
+                        disabled={applyingId != null}
+                        style={{
+                          backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                          fontSize: '12px', fontWeight: 700, padding: '8px 16px', minHeight: '44px',
+                          cursor: applyingId != null ? 'default' : 'pointer', opacity: applyingId != null && !isApplying ? 0.5 : 1,
+                        }}
+                      >
+                        {isApplying ? 'Applying…' : 'Accept'}
+                      </button>
+                      <button
+                        onClick={() => dismissSuggestion(s.id)}
+                        disabled={applyingId != null}
+                        style={{
+                          backgroundColor: 'transparent', border: '1px solid #333', borderRadius: '6px', color: '#a0a0b0',
+                          fontSize: '12px', fontWeight: 600, padding: '8px 16px', minHeight: '44px',
+                          cursor: applyingId != null ? 'default' : 'pointer',
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* d) Week-at-a-time calendar — month/plan strip */}
+        <div style={{ ...chartWrap, marginBottom: '12px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {weekNumbers.map((wn) => {
+              const st = weekStatus(wn);
+              const isSel = wn === sel;
+              return (
+                <button
+                  key={wn}
+                  onClick={() => setSelectedWeek(wn)}
+                  style={{
+                    fontSize: '12px', fontWeight: 700, color: '#e0e0e0',
+                    backgroundColor: chipBg[st] || chipBg.neutral,
+                    border: isSel ? '1px solid #fc5200' : '1px solid #2a2a45',
+                    borderRadius: '6px', padding: '6px 10px', minHeight: '36px', cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  W{wn}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Week switcher */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+          <button
+            onClick={() => setSelectedWeek(Math.max(1, sel - 1))}
+            disabled={sel <= 1}
+            style={{
+              backgroundColor: '#16213e', border: '1px solid #2a2a45', borderRadius: '6px', color: '#e0e0e0',
+              fontSize: '16px', fontWeight: 700, width: '40px', minHeight: '40px',
+              cursor: sel <= 1 ? 'default' : 'pointer', opacity: sel <= 1 ? 0.4 : 1,
+            }}
+          >
+            ‹
+          </button>
+          <div style={{ flex: 1, textAlign: 'center' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+              Week {sel}{dateRange ? <span style={{ fontSize: '12px', fontWeight: 400, color: '#a0a0b0' }}> ({dateRange})</span> : null}
+            </div>
+            {selFocus && <div style={{ fontSize: '12px', color: '#a0a0b0', marginTop: '2px' }}>{selFocus}</div>}
+          </div>
+          <button
+            onClick={() => setSelectedWeek(Math.min(totalWeeks, sel + 1))}
+            disabled={sel >= totalWeeks}
+            style={{
+              backgroundColor: '#16213e', border: '1px solid #2a2a45', borderRadius: '6px', color: '#e0e0e0',
+              fontSize: '16px', fontWeight: 700, width: '40px', minHeight: '40px',
+              cursor: sel >= totalWeeks ? 'default' : 'pointer', opacity: sel >= totalWeeks ? 0.4 : 1,
+            }}
+          >
+            ›
+          </button>
+        </div>
+
+        {/* Day cards for the selected week */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {selWorkouts.length === 0 ? (
+            <div style={{ fontSize: '13px', color: '#666' }}>No workouts scheduled this week.</div>
+          ) : selWorkouts.map((w) => {
+            const dt = w.day_type || 'easy';
+            const dc = DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy;
+            const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
+            const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
+            const status = w.status || 'upcoming';
+            const actual = w.actual || null;
+
+            // Left status marker
+            let marker = null;
+            if (status === 'done') marker = { ch: '●', color: '#22c55e' };
+            else if (status === 'missed') marker = { ch: '✗', color: '#ef4444' };
+            else if (status === 'upcoming') marker = { ch: '○', color: '#64748b' };
+
+            return (
+              <div key={w.id} style={{
+                display: 'flex', gap: '10px', backgroundColor: '#16213e', borderRadius: '8px',
+                padding: '12px', borderLeft: `3px solid ${dc}`,
+              }}>
+                <div style={{
+                  width: '18px', flex: '0 0 18px', textAlign: 'center', fontSize: '15px',
+                  color: marker ? marker.color : 'transparent', lineHeight: '20px',
+                }}>
+                  {marker ? marker.ch : ''}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11px', color: '#a0a0b0' }}>{formatDate(w.date)}</span>
+                    <span style={{
+                      color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
+                      fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
+                    }}>
+                      {dt}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>
+                    {w.title || 'Workout'}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '12px', color: '#e0e0e0', marginBottom: w.description ? '8px' : 0 }}>
+                    {km != null && <span>{km} km</span>}
+                    {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
+                    {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
+                  </div>
+                  {w.description && (
+                    <div style={{ fontSize: '11px', color: '#777', lineHeight: 1.4 }}>{w.description}</div>
+                  )}
+                  {status === 'done' && actual && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                      <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                        Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
+                        {actual.avg_hr != null ? ` · ${Math.round(actual.avg_hr)} bpm` : ''}
+                      </span>
+                      {w.compliance === 'ran_hard' && (
+                        <span style={{
+                          fontSize: '10px', fontWeight: 700, color: '#ef4444', backgroundColor: '#ef444422',
+                          padding: '2px 7px', borderRadius: '4px',
+                        }}>
+                          ran hard
+                        </span>
+                      )}
+                      {w.compliance === 'on_target' && (
+                        <span style={{
+                          fontSize: '10px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e22',
+                          padding: '2px 7px', borderRadius: '4px',
+                        }}>
+                          ✓ easy
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
