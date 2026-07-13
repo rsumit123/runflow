@@ -1,5 +1,6 @@
 import json, pathlib, tempfile
 import pytest
+from sqlalchemy import select
 
 FIX = pathlib.Path(__file__).parent / "fixtures"
 
@@ -27,3 +28,17 @@ async def test_persist_garmin_activity(monkeypatch):
         assert act.source == "garmin"
         assert act.has_detailed_data is True
         assert act.map_summary_polyline  # derived from latlng
+
+        # The API serializers must expose the new fields, else the frontend
+        # HR/cadence/dynamics panels never render (regression guard).
+        d = main._activity_to_dict(act)
+        for key in ("source", "average_heartrate", "max_heartrate",
+                    "average_cadence", "hr_zones", "running_dynamics"):
+            assert key in d, f"_activity_to_dict missing {key}"
+        assert d["source"] == "garmin"
+        assert d["average_heartrate"] == summary["averageHR"]
+
+        split = (await s.execute(
+            select(Split).where(Split.activity_id == act.id)
+        )).scalars().first()
+        assert "average_cadence" in main._split_to_dict(split)
