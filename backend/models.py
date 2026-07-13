@@ -110,3 +110,41 @@ class RouteMerge(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     from_key = Column(String, nullable=False, index=True)  # route key being merged away
     to_key = Column(String, nullable=False)  # route key to merge into
+
+
+class Plan(Base):
+    __tablename__ = "plans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    goal_type = Column(String, nullable=False)          # "5k"
+    goal_distance_m = Column(Float, nullable=False)     # 5000
+    target_time_sec = Column(Integer, nullable=False)   # target finish time
+    start_date = Column(DateTime, nullable=False)
+    goal_date = Column(DateTime, nullable=False)
+    weeks = Column(Integer, nullable=False)
+    status = Column(String, default="active")           # active | completed | abandoned
+    created_at = Column(DateTime, nullable=True)
+    fitness_snapshot = Column(JSON, nullable=True)      # fitness model at creation
+    narrative = Column(JSON, nullable=True)             # {overview, weekly: [..]} | null
+
+    workouts = relationship("PlannedWorkout", back_populates="plan",
+                            cascade="all, delete-orphan")
+
+
+class PlannedWorkout(Base):
+    __tablename__ = "planned_workouts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id = Column(Integer, ForeignKey("plans.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    date = Column(DateTime, nullable=False)
+    week_number = Column(Integer, nullable=False)
+    day_type = Column(String, nullable=False)           # easy | long | quality | strides | rest
+    target_distance_m = Column(Float, nullable=True)
+    pace_low_sec = Column(Integer, nullable=True)       # sec/km (faster bound)
+    pace_high_sec = Column(Integer, nullable=True)      # sec/km (slower bound)
+    hr_ceiling = Column(Integer, nullable=True)
+    title = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+
+    plan = relationship("Plan", back_populates="workouts")
