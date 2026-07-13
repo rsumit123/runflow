@@ -97,7 +97,9 @@ function PlanSection() {
       if (cw > plan.weeks) cw = plan.weeks;
     }
     setSelectedWeek(cw);
-  }, [plan]);
+    // key on plan.id so applying a suggestion (which replaces `plan` but keeps
+    // the same id) doesn't snap the user back to the week they were viewing.
+  }, [plan && plan.id]);
 
   const applySuggestion = (id) => {
     setApplyingId(id);
