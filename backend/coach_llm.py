@@ -79,14 +79,15 @@ async def generate_plan_narrative(
         "Here is a runner's 5K training plan built by our engine. Respond with a "
         "JSON object only, no prose outside it:\n"
         '  "overview": 2-3 warm sentences on the plan and how it should feel.\n'
-        '  "weekly": a list of {"week": <int>, "focus": "<one short line>"} — one '
-        "per week.\n"
+        '  "weekly": a list of {"week": <int>, "focus": "<ONE short sentence, max 12 '
+        'words>"} — one per week. Keep each focus punchy, not a paragraph.\n'
         "Do NOT change any numbers.\n\n"
         f"Goal: 5K in {goal.get('target_str')} across {goal.get('weeks')} weeks.\n"
         f"Weeks: {json.dumps(weeks_overview)}"
     )
     content = await _chat(
-        [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
+        [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}],
+        max_tokens=1800,
     )
     data = _extract_json(content)
     if not isinstance(data, dict) or "overview" not in data:
