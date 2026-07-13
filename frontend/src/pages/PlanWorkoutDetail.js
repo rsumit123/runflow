@@ -21,6 +21,17 @@ function formatDate(dateString) {
 
 const DAY_TYPE_COLORS = { easy: '#22c55e', long: '#3b82f6', quality: '#ef4444', strides: '#f59e0b', rest: '#64748b' };
 
+// Sprint (100m) plan day types — colored label + display text.
+const SPRINT_DAY_TYPE = {
+  accel: { color: '#fc5200', label: 'Accel' },
+  max_velocity: { color: '#ff8a3d', label: 'Max velocity' },
+  speed_endurance: { color: '#e0245e', label: 'Speed endurance' },
+  technique: { color: '#3d9970', label: 'Technique' },
+  plyometrics: { color: '#b10dc9', label: 'Plyometrics' },
+  test: { color: '#f1c40f', label: 'Test' },
+  rest: { color: '#5a5a6a', label: 'Rest' },
+};
+
 const STATUS_META = {
   done: { label: 'Done', color: '#22c55e' },
   missed: { label: 'Missed', color: '#ef4444' },
@@ -77,8 +88,12 @@ function PlanWorkoutDetail() {
   const actual = data.actual || null;
   const verdict = data.verdict || null;
 
+  const isSprint = plan && plan.goal_type === 'sprint_100m';
   const dt = w.day_type || 'easy';
-  const dc = DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy;
+  const sprintMeta = isSprint ? (SPRINT_DAY_TYPE[dt] || SPRINT_DAY_TYPE.rest) : null;
+  const dc = isSprint ? sprintMeta.color : (DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy);
+  const dtLabel = isSprint ? sprintMeta.label : dt;
+  const structure = w.structure || null;
   const status = w.status || 'upcoming';
   const statusMeta = STATUS_META[status] || STATUS_META.upcoming;
   const compliance = w.compliance || null;
@@ -119,7 +134,7 @@ function PlanWorkoutDetail() {
             color: dc, backgroundColor: `${dc}22`, padding: '2px 8px', borderRadius: '4px',
             fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
           }}>
-            {dt}
+            {dtLabel}
           </span>
           <span style={{
             marginLeft: 'auto', color: statusMeta.color, backgroundColor: `${statusMeta.color}22`,
@@ -132,7 +147,7 @@ function PlanWorkoutDetail() {
           {w.title || 'Workout'}
         </h1>
         <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
-          Week {w.week_number != null ? w.week_number : '?'}{plan && plan.weeks != null ? ` of ${plan.weeks}` : ''} &middot; 5K plan
+          Week {w.week_number != null ? w.week_number : '?'}{plan && plan.weeks != null ? ` of ${plan.weeks}` : ''} &middot; {isSprint ? '100m sprint plan' : '5K plan'}
         </div>
       </div>
 
@@ -146,24 +161,148 @@ function PlanWorkoutDetail() {
         </div>
       )}
 
-      {/* Planned */}
-      <div style={cardStyle}>
-        <div style={cardHeading}>Planned</div>
-        {km != null && <StatRow label="Target distance" value={`${km} km`} />}
-        {hasPace && <StatRow label="Pace band" value={`${formatPace(w.pace_low_sec)}–${formatPace(w.pace_high_sec)} /km`} />}
-        {w.hr_ceiling != null && <StatRow label="HR ceiling" value={`≤ ${w.hr_ceiling} bpm`} />}
-        {km == null && !hasPace && w.hr_ceiling == null && (
-          <div style={{ fontSize: '13px', color: '#666' }}>No prescribed targets for this day.</div>
-        )}
-        {w.description && (
-          <div style={{ marginTop: '12px', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.5 }}>
-            {w.description}
-          </div>
-        )}
-      </div>
+      {/* Planned — sprint */}
+      {isSprint ? (
+        <div style={cardStyle}>
+          <div style={cardHeading}>Planned</div>
+          {structure ? (
+            <>
+              {structure.warmup && (
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#a0a0b0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Warm-up</div>
+                  <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.warmup}</div>
+                </div>
+              )}
 
-      {/* Actual — only when done */}
-      {showActual && (
+              {Array.isArray(structure.main_set) && structure.main_set.length > 0 && (
+                <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', marginBottom: '4px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr>
+                        {['Reps', 'Distance', 'Effort', 'Recovery'].map((h) => (
+                          <th key={h} style={{
+                            textAlign: 'left', color: '#a0a0b0', fontWeight: 600, padding: '8px',
+                            borderBottom: '1px solid #252540', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {structure.main_set.map((m, i) => (
+                        <tr key={i}>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{m.reps != null ? m.reps : '—'}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{m.distance_m != null ? `${m.distance_m}m` : '—'}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{m.effort_pct != null ? `${m.effort_pct}%` : '—'}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#a0a0b0' }}>{m.recovery || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {structure.finisher && (
+                <div style={{ marginTop: '14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#a0a0b0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Finisher</div>
+                  <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.finisher}</div>
+                </div>
+              )}
+
+              {Array.isArray(structure.cues) && structure.cues.length > 0 && (
+                <div style={{ marginTop: '14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#a0a0b0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Cues</div>
+                  <ul style={{ margin: 0, paddingLeft: '18px', color: '#c8c8d4', fontSize: '13px', lineHeight: 1.6 }}>
+                    {structure.cues.map((c, i) => <li key={i}>{c}</li>)}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: '13px', color: '#666' }}>No prescribed structure for this day.</div>
+          )}
+          {w.description && (
+            <div style={{ marginTop: '12px', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.5 }}>
+              {w.description}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={cardStyle}>
+          <div style={cardHeading}>Planned</div>
+          {km != null && <StatRow label="Target distance" value={`${km} km`} />}
+          {hasPace && <StatRow label="Pace band" value={`${formatPace(w.pace_low_sec)}–${formatPace(w.pace_high_sec)} /km`} />}
+          {w.hr_ceiling != null && <StatRow label="HR ceiling" value={`≤ ${w.hr_ceiling} bpm`} />}
+          {km == null && !hasPace && w.hr_ceiling == null && (
+            <div style={{ fontSize: '13px', color: '#666' }}>No prescribed targets for this day.</div>
+          )}
+          {w.description && (
+            <div style={{ marginTop: '12px', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.5 }}>
+              {w.description}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Actual — sprint (whenever actual present) */}
+      {isSprint && actual && (
+        <div style={cardStyle}>
+          <div style={{ ...cardHeading, marginBottom: '12px' }}>How it went</div>
+          {actual.best_100m_sec != null && <StatRow label="Best 100m" value={`${actual.best_100m_sec}s`} />}
+          {actual.fade_pct != null && <StatRow label="Fade" value={`${actual.fade_pct}%`} />}
+          {actual.fastest_rep_sec != null && <StatRow label="Fastest rep" value={`${actual.fastest_rep_sec}s`} />}
+
+          {Array.isArray(actual.reps) && actual.reps.length > 0 && (
+            <div style={{ marginTop: '16px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Reps
+              </div>
+              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr>
+                      {['Rep', 'Dist', 'Time', 'Pace'].map((h) => (
+                        <th key={h} style={{
+                          textAlign: 'left', color: '#a0a0b0', fontWeight: 600, padding: '8px',
+                          borderBottom: '1px solid #252540', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {actual.reps.map((r, i) => (
+                      <tr key={i}>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.rep != null ? r.rep : i + 1}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.distance_m != null ? `${r.distance_m}m` : '—'}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.duration_s != null ? `${r.duration_s}s` : '—'}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.pace_sec_per_km != null ? `${formatPace(r.pace_sec_per_km)}/km` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {actual.activity_id != null && (
+            <Link to={`/activity/${actual.activity_id}`} style={{
+              display: 'block', marginTop: '16px', textAlign: 'center',
+              backgroundColor: '#fc5200', color: '#fff', fontSize: '14px', fontWeight: 700,
+              padding: '12px 16px', borderRadius: '8px', minHeight: '44px', boxSizing: 'border-box',
+            }}>
+              View full interval analysis &rsaquo;
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* Actual — 5K, only when done */}
+      {!isSprint && showActual && (
         <div style={cardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
             <div style={{ ...cardHeading, marginBottom: 0 }}>How it went</div>

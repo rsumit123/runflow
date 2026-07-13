@@ -26,6 +26,12 @@ _MIGRATIONS = {
     "splits": {
         "average_cadence": "FLOAT",
     },
+    "plans": {
+        "sprint_target_sec": "FLOAT",
+    },
+    "planned_workouts": {
+        "structure": "JSON",
+    },
 }
 
 

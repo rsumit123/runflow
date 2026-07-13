@@ -21,6 +21,10 @@ from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
 from goals import recommend_speed_goal, recommend_consistency_goal, recommend_volume_goal
 from route_matching import group_routes
+import sprint_baseline as sbase
+import sprint_projection as sproj
+import sprint_plan_generator as spgen
+import sprint_tracking as strack
 from intervals import analyze_intervals, analyze_intervals_timed
 from laps import detect_laps
 from insights import generate_run_insight
@@ -447,7 +451,9 @@ async def training(session: AsyncSession = Depends(get_session)):
 
 class PlanCreateRequest(BaseModel):
     weeks: int
-    target_time_sec: int
+    goal_type: str = "5k"                       # "5k" | "sprint_100m"
+    target_time_sec: Optional[int] = None       # 5K target (whole sec)
+    target_100m_sec: Optional[float] = None      # sprint target (sub-second); None -> horizon projection
 
 
 async def _plan_activity_dicts(session: AsyncSession) -> list[dict[str, Any]]:
@@ -485,30 +491,140 @@ async def _workout_dicts(session: AsyncSession, plan: Plan) -> list[dict[str, An
         {"id": w.id, "date": w.date, "week_number": w.week_number, "day_type": w.day_type,
          "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
          "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
-         "title": w.title, "description": w.description}
+         "title": w.title, "description": w.description, "structure": w.structure}
         for w in wos
     ]
 
 
-async def _plan_response(session: AsyncSession, plan: Plan) -> dict[str, Any]:
-    workout_dicts = await _workout_dicts(session, plan)
-    acts = await _plan_activity_dicts(session)
-    graded = padh.match_and_grade(workout_dicts, acts, datetime.utcnow(), plan.start_date)
+def _serialize_workouts(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
-    for w in graded["workouts"]:
+    for w in workouts:
         d = dict(w)
         d["date"] = w["date"].isoformat() if w.get("date") else None
         out.append(d)
+    return out
+
+
+async def _plan_response(session: AsyncSession, plan: Plan) -> dict[str, Any]:
+    workout_dicts = await _workout_dicts(session, plan)
+    now = datetime.utcnow()
+    plan_out = {
+        "id": plan.id, "goal_type": plan.goal_type, "target_time_sec": plan.target_time_sec,
+        "sprint_target_sec": plan.sprint_target_sec,
+        "start_date": plan.start_date.isoformat() if plan.start_date else None,
+        "goal_date": plan.goal_date.isoformat() if plan.goal_date else None,
+        "weeks": plan.weeks, "status": plan.status, "narrative": plan.narrative,
+    }
+
+    if plan.goal_type == "sprint_100m":
+        plan_out["profile"] = plan.fitness_snapshot
+        interval_acts = await _sprint_interval_activities(session)
+        tracked = strack.match_sprint_sessions(workout_dicts, interval_acts, now, plan.start_date)
+        return {
+            "plan": plan_out,
+            "workouts": _serialize_workouts(tracked["workouts"]),
+            "progress": tracked["progress"],
+        }
+
+    acts = await _plan_activity_dicts(session)
+    graded = padh.match_and_grade(workout_dicts, acts, now, plan.start_date)
     return {
-        "plan": {
-            "id": plan.id, "goal_type": plan.goal_type, "target_time_sec": plan.target_time_sec,
-            "start_date": plan.start_date.isoformat() if plan.start_date else None,
-            "goal_date": plan.goal_date.isoformat() if plan.goal_date else None,
-            "weeks": plan.weeks, "status": plan.status, "narrative": plan.narrative,
-        },
-        "workouts": out,
+        "plan": plan_out,
+        "workouts": _serialize_workouts(graded["workouts"]),
         "adherence": graded["summary"],
     }
+
+
+def _fmt_sprint(sec: Optional[float]) -> str:
+    return f"{sec:.1f}s" if sec else "?"
+
+
+async def _sprint_baseline_inputs(session: AsyncSession):
+    be_rows = (await session.execute(
+        select(BestEffort.distance_target, BestEffort.time_seconds, Activity.start_date)
+        .join(Activity, Activity.id == BestEffort.activity_id)
+        .where(BestEffort.distance_target.in_([100, 200]))
+    )).all()
+    best_efforts = [
+        {"distance_target": d, "time_seconds": t, "start_date": sd}
+        for d, t, sd in be_rows
+    ]
+    iv_rows = (await session.execute(
+        select(Activity.start_date, Activity.interval_config).where(Activity.is_interval.is_(True))
+    )).all()
+    interval_configs = [{"start_date": sd, "config": cfg} for sd, cfg in iv_rows if cfg]
+    return best_efforts, interval_configs
+
+
+async def _sprint_profile(session: AsyncSession, now: datetime) -> dict[str, Any]:
+    best_efforts, interval_configs = await _sprint_baseline_inputs(session)
+    return sbase.build_sprint_profile(best_efforts, interval_configs, now)
+
+
+async def _sprint_interval_activities(session: AsyncSession) -> list[dict[str, Any]]:
+    """Interval-tagged activities with their best 100m + fade/fastest-rep, for tracking."""
+    rows = (await session.execute(
+        select(Activity.id, Activity.start_date, Activity.interval_config)
+        .where(Activity.is_interval.is_(True))
+    )).all()
+    be100 = dict((aid, t) for aid, t in (await session.execute(
+        select(BestEffort.activity_id, func.min(BestEffort.time_seconds))
+        .where(BestEffort.distance_target == 100).group_by(BestEffort.activity_id)
+    )).all())
+    out = []
+    for aid, sd, cfg in rows:
+        fade = fastest = None
+        if isinstance(cfg, dict):
+            result = cfg.get("result") or {}
+            summ = result.get("summary") or {}
+            fpace, space = summ.get("fastest_rep_pace"), summ.get("slowest_rep_pace")
+            if fpace and space:
+                fade = round((space / fpace - 1) * 100, 1)
+            reps = [s.get("duration_s") for s in (result.get("segments") or [])
+                    if s.get("type") == "rep" and s.get("duration_s")]
+            fastest = min(reps) if reps else None
+        out.append({"id": aid, "start_date": sd, "best_100m_sec": be100.get(aid),
+                    "fade_pct": fade, "fastest_rep_sec": fastest})
+    return out
+
+
+def _sprint_weeks_overview(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_week: dict[int, list[dict[str, Any]]] = {}
+    for w in workouts:
+        by_week.setdefault(w["week_number"], []).append(w)
+    max_wk = max(by_week) if by_week else 0
+    out = []
+    for wk in sorted(by_week):
+        types = [x["day_type"] for x in by_week[wk]]
+        sessions = [t for t in types if t != "rest"]
+        if wk == max_wk:
+            phase = "taper"
+        elif wk == 1 and "test" in types:
+            phase = "foundation"
+        elif "speed_endurance" not in types and len(sessions) <= 2:
+            phase = "deload"
+        elif wk <= 2:
+            phase = "foundation"
+        else:
+            phase = "development"
+        out.append({"week": wk, "phase": phase, "focus": ", ".join(sorted(set(sessions)))})
+    return out
+
+
+@app.get("/api/plan/sprint/baseline")
+async def sprint_baseline_endpoint(session: AsyncSession = Depends(get_session)):
+    """Data-derived 100m sprint profile (best efforts + interval history)."""
+    return await _sprint_profile(session, datetime.utcnow())
+
+
+@app.get("/api/plan/sprint/projections")
+async def sprint_projections_endpoint(session: AsyncSession = Depends(get_session)):
+    """Sprint profile + realistic 100m targets at fixed horizons."""
+    now = datetime.utcnow()
+    profile = await _sprint_profile(session, now)
+    current = profile.get("best_100m_sec") or 20.0
+    proj = sproj.sprint_projections(current, now)
+    return {"profile": profile, **proj}
 
 
 @app.get("/api/plan/projections")
@@ -518,10 +634,48 @@ async def plan_projections(session: AsyncSession = Depends(get_session)):
     return fproj.projections(dicts, datetime.utcnow())
 
 
+async def _abandon_active_plans(session: AsyncSession) -> None:
+    for old in (await session.execute(select(Plan).where(Plan.status == "active"))).scalars().all():
+        old.status = "abandoned"
+
+
+async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> dict[str, Any]:
+    now = datetime.utcnow()
+    profile = await _sprint_profile(session, now)
+    current = profile.get("best_100m_sec") or 20.0
+    target = req.target_100m_sec
+    if target is None:
+        target = sproj.sprint_projections(current, now, horizons=(req.weeks,))["horizons"][0]["target_100m_sec"]
+    gen = spgen.generate_sprint_plan(profile, req.weeks, target, now)
+
+    await _abandon_active_plans(session)
+    plan = Plan(
+        goal_type="sprint_100m", goal_distance_m=100.0,
+        target_time_sec=round(target), sprint_target_sec=target,
+        start_date=now, goal_date=gen["goal_date"], weeks=req.weeks, status="active",
+        created_at=now, fitness_snapshot=profile,
+    )
+    session.add(plan)
+    await session.flush()
+    for w in gen["workouts"]:
+        session.add(PlannedWorkout(plan_id=plan.id, **w))
+
+    plan.narrative = await coach_llm.generate_sprint_narrative(
+        {"target_str": _fmt_sprint(target), "current_str": _fmt_sprint(current), "weeks": req.weeks},
+        profile, _sprint_weeks_overview(gen["workouts"]),
+    )
+    await session.commit()
+    return await _plan_response(session, plan)
+
+
 @app.post("/api/plan")
 async def create_plan(req: PlanCreateRequest, session: AsyncSession = Depends(get_session)):
     if not (4 <= req.weeks <= 20):
         raise HTTPException(status_code=400, detail="weeks must be between 4 and 20")
+    if req.goal_type == "sprint_100m":
+        return await _create_sprint_plan(req, session)
+    if req.target_time_sec is None:
+        raise HTTPException(status_code=400, detail="target_time_sec required for 5k plans")
     now = datetime.utcnow()
     dicts = await _plan_activity_dicts(session)
 
@@ -610,6 +764,68 @@ def _workout_verdict(w: PlannedWorkout, ew: Optional[dict[str, Any]],
     return "Logged and matched to this workout. Keep it rolling."
 
 
+def _sprint_workout_verdict(ew: Optional[dict[str, Any]], actual: Optional[dict[str, Any]],
+                            target_sec: Optional[float]) -> Optional[str]:
+    if ew is None:
+        return None
+    status = ew.get("status")
+    if status == "upcoming":
+        return "Coming up — hit the reps at full quality with full recovery. It'll log here once you run it."
+    if status == "missed":
+        return "No sprint session logged near this day. Let it go — freshness matters more than making it up."
+    best = actual.get("best_100m_sec") if actual else None
+    fade = actual.get("fade_pct") if actual else None
+    bits = ["Logged and matched to this session."]
+    if best:
+        bits.append(f"Best 100m in it: {best:.1f}s" + (f" (target {target_sec:.1f}s)." if target_sec else "."))
+    if fade is not None:
+        bits.append(f"Fade across reps: {fade:.0f}% — the lower this trends over the plan, the faster your 100m gets.")
+    return " ".join(bits)
+
+
+async def _sprint_workout_detail(w: PlannedWorkout, plan: Plan,
+                                 session: AsyncSession) -> dict[str, Any]:
+    workout_dicts = await _workout_dicts(session, plan)
+    interval_acts = await _sprint_interval_activities(session)
+    tracked = strack.match_sprint_sessions(
+        workout_dicts, interval_acts, datetime.utcnow(), plan.start_date if plan else None
+    )
+    ew = next((x for x in tracked["workouts"] if x["id"] == w.id), None)
+
+    actual = None
+    if ew and ew.get("actual"):
+        a = ew["actual"]
+        act = await session.get(Activity, a["activity_id"])
+        reps = []
+        if act and isinstance(act.interval_config, dict):
+            for s in (act.interval_config.get("result") or {}).get("segments", []):
+                if s.get("type") == "rep":
+                    reps.append({"rep": s.get("rep_number"), "distance_m": s.get("distance_m"),
+                                 "duration_s": s.get("duration_s"), "pace_sec_per_km": s.get("pace_sec_per_km")})
+        actual = {
+            "activity_id": a["activity_id"],
+            "name": act.name if act else None,
+            "date": act.start_date.date().isoformat() if act and act.start_date else None,
+            "best_100m_sec": a.get("best_100m_sec"),
+            "fade_pct": a.get("fade_pct"),
+            "fastest_rep_sec": a.get("fastest_rep_sec"),
+            "reps": reps,
+        }
+
+    return {
+        "workout": {
+            "id": w.id, "date": w.date.isoformat() if w.date else None,
+            "week_number": w.week_number, "day_type": w.day_type,
+            "title": w.title, "description": w.description, "structure": w.structure,
+            "status": ew.get("status") if ew else None,
+        },
+        "plan": {"goal_type": "sprint_100m", "sprint_target_sec": plan.sprint_target_sec,
+                 "weeks": plan.weeks, "goal_date": plan.goal_date.isoformat() if plan.goal_date else None},
+        "actual": actual,
+        "verdict": _sprint_workout_verdict(ew, actual, plan.sprint_target_sec),
+    }
+
+
 @app.get("/api/plan/workout/{workout_id}")
 async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(get_session)):
     """Plan-aware detail for one workout: planned targets, the matched run's HR
@@ -618,6 +834,8 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
     if w is None:
         raise HTTPException(status_code=404, detail="Workout not found")
     plan = await session.get(Plan, w.plan_id)
+    if plan and plan.goal_type == "sprint_100m":
+        return await _sprint_workout_detail(w, plan, session)
 
     workout_dicts = await _workout_dicts(session, plan)
     acts = await _plan_activity_dicts(session)
