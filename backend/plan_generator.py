@@ -19,10 +19,17 @@ LONG_RUN_CAP_KM = 5.0        # a 5K plan's long run needn't exceed race distance
 LONG_RUN_START_CAP_KM = 4.0  # don't start the long run too high
 DOWN_WEEK_FACTOR = 0.7
 
+# Every steady run is bookended by an easy warm-up and cool-down (Garmin-Coach
+# style). Quality/race sessions carry their own warm-up in the description.
+WARMUP_5K = "2 min easy jog + a few leg swings to open the legs up."
+COOLDOWN_5K = "2 min easy jog, then light stretching."
+RUN_STRUCTURE = {"warmup": WARMUP_5K, "cooldown": COOLDOWN_5K}
+
 
 def _wo(week_monday: datetime, weekday: int, week_num: int, day_type: str,
         dist_km: Optional[float], pace_low: Optional[int], pace_high: Optional[int],
-        hr_ceiling: Optional[int], title: str, desc: str) -> dict[str, Any]:
+        hr_ceiling: Optional[int], title: str, desc: str,
+        structure: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     return {
         "date": week_monday + timedelta(days=weekday),
         "week_number": week_num,
@@ -33,6 +40,7 @@ def _wo(week_monday: datetime, weekday: int, week_num: int, day_type: str,
         "hr_ceiling": hr_ceiling,
         "title": title,
         "description": desc,
+        "structure": structure,
     }
 
 
@@ -59,9 +67,9 @@ def generate_plan(model: dict[str, Any], weeks: int, target_time_sec: int,
 
         if is_taper:
             workouts.append(_wo(wk_mon, 0, w, "easy", 3.0, easy_low, easy_high, ceiling,
-                                "Easy shakeout", "Very easy, legs-only. Stay under the HR ceiling."))
+                                "Easy shakeout", "Very easy, legs-only. Stay under the HR ceiling.", RUN_STRUCTURE))
             workouts.append(_wo(wk_mon, 3, w, "strides", 3.0, easy_low, easy_high, ceiling,
-                                "Easy + strides", "2 km easy, then 4 × 20 s strides at fast-but-relaxed effort, full walk-back recovery."))
+                                "Easy + strides", "2 km easy, then 4 × 20 s strides at fast-but-relaxed effort, full walk-back recovery.", RUN_STRUCTURE))
             workouts.append(_wo(wk_mon, 5, w, "quality", 5.0, goal_pace, goal_pace, None,
                                 "Race day — 5K", f"Goal: {_fmt(target_time_sec)}. Even pacing ~{_fmt_pace(goal_pace)}/km. Start controlled."))
             continue
@@ -79,7 +87,7 @@ def generate_plan(model: dict[str, Any], weeks: int, target_time_sec: int,
 
         # Mon — easy (always)
         workouts.append(_wo(wk_mon, 0, w, "easy", easy_short_km, easy_low, easy_high, ceiling,
-                            "Easy run", f"Conversational, nose-breathing. Keep HR ≤{ceiling} bpm — if it climbs, slow down."))
+                            "Easy run", f"Conversational, nose-breathing. Keep HR ≤{ceiling} bpm — if it climbs, slow down.", RUN_STRUCTURE))
         # Wed — quality (once base supports it, not on down weeks)
         if not is_down and w >= QUALITY_START_WEEK:
             workouts.append(_wo(wk_mon, 2, w, "quality", min(4.0, long_km), goal_pace - 10, goal_pace + 5, None,
@@ -87,11 +95,12 @@ def generate_plan(model: dict[str, Any], weeks: int, target_time_sec: int,
         # Thu — easy (not on down weeks)
         if not is_down:
             workouts.append(_wo(wk_mon, 3, w, "easy", easy_long_km, easy_low, easy_high, ceiling,
-                                "Easy run", f"Easy aerobic. HR ≤{ceiling} bpm."))
+                                "Easy run", f"Easy aerobic. HR ≤{ceiling} bpm.", RUN_STRUCTURE))
         # Sat — long
         workouts.append(_wo(wk_mon, 5, w, "long", long_km, long_low, long_high, ceiling + 5,
                             f"Long run — {long_km} km",
-                            f"Steady and easy{' (down week — shorter)' if is_down else ''}. Build endurance, not speed."))
+                            f"Steady and easy{' (down week — shorter)' if is_down else ''}. Build endurance, not speed.",
+                            RUN_STRUCTURE))
 
     goal_date = week0_monday + timedelta(days=7 * (weeks - 1) + 5)  # taper-week Saturday
     return {"goal_date": goal_date, "workouts": workouts, "goal_pace_sec": goal_pace}

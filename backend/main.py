@@ -25,6 +25,7 @@ import sprint_baseline as sbase
 import sprint_projection as sproj
 import sprint_plan_generator as spgen
 import sprint_tracking as strack
+import warmup_cooldown as wcd
 from intervals import analyze_intervals, analyze_intervals_timed
 from laps import detect_laps
 from insights import generate_run_insight
@@ -758,10 +759,24 @@ def _workout_verdict(w: PlannedWorkout, ew: Optional[dict[str, Any]],
         return (f"You ran this easy day at {int(round(avg))} bpm — about {over} over the "
                 f"{ceil} bpm ceiling. Easy days are supposed to feel genuinely easy; that's what "
                 "builds the aerobic base you're chasing. Slow right down next time and let the HR settle.")
+    base = None
     if comp == "on_target" and avg and ceil:
-        return (f"Nicely done — you held {int(round(avg))} bpm, under the {ceil} bpm ceiling. "
+        base = (f"Nicely done — you held {int(round(avg))} bpm, under the {ceil} bpm ceiling. "
                 "That's real easy running, and it's exactly what pays off on race day.")
-    return "Logged and matched to this workout. Keep it rolling."
+    else:
+        base = "Logged and matched to this workout. Keep it rolling."
+    phases = actual.get("phases") if actual else None
+    if phases:
+        if phases.get("has_warmup") and phases.get("has_cooldown"):
+            base += (f" You eased in for ~{phases['warmup_sec'] // 60} min and cooled down for "
+                     f"~{phases['cooldown_sec'] // 60} min — good habits that stick.")
+        elif phases.get("has_warmup"):
+            base += f" Nice {phases['warmup_sec'] // 60}-min warm-up; try tacking on a short cool-down jog too."
+        elif phases.get("has_cooldown"):
+            base += " Good cool-down; ease into the next one with a couple of easy minutes first."
+        elif phases.get("main_pace_sec"):
+            base += " Looks like you ran it at an even pace — no distinct warm-up/cool-down. Book-end it with 2 easy min next time."
+    return base
 
 
 def _sprint_workout_verdict(ew: Optional[dict[str, Any]], actual: Optional[dict[str, Any]],
@@ -848,9 +863,12 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
     if ew and ew.get("actual"):
         aid = ew["actual"]["activity_id"]
         act = await session.get(Activity, aid)
-        hr_stream = (await session.execute(
-            select(Stream).where(Stream.activity_id == aid, Stream.stream_type == "heartrate")
-        )).scalars().first()
+        streams = {s.stream_type: s.data for s in (await session.execute(
+            select(Stream).where(
+                Stream.activity_id == aid,
+                Stream.stream_type.in_(["heartrate", "distance", "time"]),
+            )
+        )).scalars().all()}
         actual = {
             "activity_id": aid,
             "name": act.name if act else None,
@@ -859,7 +877,8 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
             "max_hr": act.max_heartrate if act else None,
             "pace_sec": ew["actual"].get("pace_sec"),
             "hr_zones": act.hr_zones if act else None,
-            "heartrate": _downsample(hr_stream.data if hr_stream else None),
+            "heartrate": _downsample(streams.get("heartrate")),
+            "phases": wcd.detect_warmup_cooldown(streams.get("distance"), streams.get("time")),
         }
 
     return {
@@ -868,7 +887,7 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
             "week_number": w.week_number, "day_type": w.day_type,
             "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
             "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
-            "title": w.title, "description": w.description,
+            "title": w.title, "description": w.description, "structure": w.structure,
             "status": ew.get("status") if ew else None,
             "compliance": ew.get("compliance") if ew else None,
         },

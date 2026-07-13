@@ -232,10 +232,22 @@ function PlanWorkoutDetail() {
       ) : (
         <div style={cardStyle}>
           <div style={cardHeading}>Planned</div>
+          {structure && structure.warmup && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#3d9970', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Warm-up</div>
+              <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.warmup}</div>
+            </div>
+          )}
           {km != null && <StatRow label="Target distance" value={`${km} km`} />}
           {hasPace && <StatRow label="Pace band" value={`${formatPace(w.pace_low_sec)}–${formatPace(w.pace_high_sec)} /km`} />}
           {w.hr_ceiling != null && <StatRow label="HR ceiling" value={`≤ ${w.hr_ceiling} bpm`} />}
-          {km == null && !hasPace && w.hr_ceiling == null && (
+          {structure && structure.cooldown && (
+            <div style={{ marginTop: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#3d9970', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Cool-down</div>
+              <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.cooldown}</div>
+            </div>
+          )}
+          {km == null && !hasPace && w.hr_ceiling == null && !structure && (
             <div style={{ fontSize: '13px', color: '#666' }}>No prescribed targets for this day.</div>
           )}
           {w.description && (
@@ -322,6 +334,26 @@ function PlanWorkoutDetail() {
           {actual.pace_sec != null && <StatRow label="Pace" value={`${formatPace(actual.pace_sec)} /km`} />}
           {actual.avg_hr != null && <StatRow label="Avg HR" value={`${Math.round(actual.avg_hr)} bpm`} />}
           {actual.max_hr != null && <StatRow label="Max HR" value={`${Math.round(actual.max_hr)} bpm`} />}
+
+          {/* Warm-up / cool-down auto-detected from the run */}
+          {actual.phases && (actual.phases.main_pace_sec != null) && (
+            <div style={{ marginTop: '16px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Warm-up &amp; cool-down
+              </div>
+              {[['Warm-up', actual.phases.has_warmup, actual.phases.warmup_sec],
+                ['Cool-down', actual.phases.has_cooldown, actual.phases.cooldown_sec]].map(([label, has, secs]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px' }}>
+                  <span style={{ color: '#a0a0b0' }}>{label}</span>
+                  {has ? (
+                    <span style={{ color: '#22c55e', fontWeight: 600 }}>✓ {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
+                  ) : (
+                    <span style={{ color: '#666' }}>not detected</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* HR over the run */}
           {hrSeries && (
