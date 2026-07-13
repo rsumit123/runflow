@@ -77,3 +77,10 @@ GARMIN_METRIC_KEYS = {
     "vertical_oscillation": "directVerticalOscillation",
 }
 GARMIN_RUNNING_TYPES = {"running", "track_running", "trail_running", "treadmill_running"}
+
+# ---------------------------------------------------------------------------
+# OpenRouter (coaching narrative) — OpenAI-compatible chat completions
+# ---------------------------------------------------------------------------
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-5")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
