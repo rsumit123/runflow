@@ -25,6 +25,7 @@ const sectionTitle = { fontSize: '18px', fontWeight: 600, color: '#fff', marginB
 
 const ZONE_COLORS = { easy: '#22c55e', gray: '#f59e0b', hard: '#ef4444', unknown: '#666' };
 const WARN_COLORS = { danger: '#ef4444', warn: '#f59e0b', info: '#3b82f6' };
+const DAY_TYPE_COLORS = { easy: '#22c55e', long: '#3b82f6', quality: '#ef4444', strides: '#f59e0b', rest: '#64748b' };
 
 const GrayTooltip = ({ active, payload, label }) => {
   if (!active || !payload || !payload.length) return null;
@@ -46,6 +47,244 @@ function StatCard({ label, value, sub, color }) {
       <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>{label}</div>
       <div style={{ fontSize: '22px', fontWeight: 700, color: color || '#fc5200' }}>{value}</div>
       {sub && <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>{sub}</div>}
+    </div>
+  );
+}
+
+function PlanSection() {
+  const [plan, setPlan] = useState(null);
+  const [workouts, setWorkouts] = useState([]);
+  const [projections, setProjections] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [building, setBuilding] = useState(null); // holds weeks being built, or null
+
+  const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
+
+  const loadPlan = () => {
+    setLoading(true);
+    return api.get('/plan')
+      .then((res) => {
+        setPlan(res.data.plan || null);
+        setWorkouts(res.data.workouts || []);
+        if (!res.data.plan) return loadProjections();
+        return undefined;
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadPlan(); }, []);
+
+  const buildPlan = (weeks, targetTimeSec) => {
+    setBuilding(weeks);
+    api.post('/plan', { weeks, target_time_sec: targetTimeSec })
+      .then((res) => {
+        setPlan(res.data.plan || null);
+        setWorkouts(res.data.workouts || []);
+      })
+      .catch(() => {})
+      .finally(() => setBuilding(null));
+  };
+
+  const abandonPlan = () => {
+    if (!plan) return;
+    if (!window.confirm('Abandon this plan? Your workouts will be removed.')) return;
+    api.delete(`/plan/${plan.id}`)
+      .then(() => {
+        setPlan(null);
+        setWorkouts([]);
+        return loadProjections();
+      })
+      .catch(() => {});
+  };
+
+  if (loading) {
+    return (
+      <div style={cardStyle}>
+        <div style={{ color: '#a0a0b0', fontSize: '13px' }}>Loading plan...</div>
+      </div>
+    );
+  }
+
+  // ---------- State B: active plan ----------
+  if (plan) {
+    const goalSec = plan.target_time_sec;
+    const narrative = plan.narrative || null;
+
+    // Current week: today vs start_date, clamped 1..weeks
+    let currentWeek = 1;
+    if (plan.start_date && plan.weeks) {
+      const start = new Date(plan.start_date);
+      const diffDays = Math.floor((Date.now() - start.getTime()) / 86400000);
+      currentWeek = Math.floor(diffDays / 7) + 1;
+      if (currentWeek < 1) currentWeek = 1;
+      if (currentWeek > plan.weeks) currentWeek = plan.weeks;
+    }
+
+    // Group workouts by week_number
+    const byWeek = {};
+    workouts.forEach((w) => {
+      const wn = w.week_number;
+      if (!byWeek[wn]) byWeek[wn] = [];
+      byWeek[wn].push(w);
+    });
+    const weekNumbers = Object.keys(byWeek).map(Number).sort((a, b) => a - b);
+
+    return (
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px', alignItems: 'baseline', marginBottom: '14px' }}>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>
+            5K in <span style={{ color: '#fc5200' }}>{goalSec != null ? formatPace(goalSec) : '—'}</span>
+          </div>
+          <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+            Goal date {formatDate(plan.goal_date)}
+          </div>
+          <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+            · Week {currentWeek} of {plan.weeks}
+          </div>
+          <button
+            onClick={abandonPlan}
+            style={{
+              marginLeft: 'auto', background: 'none', border: 'none', color: '#ef4444',
+              fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '4px 0',
+            }}
+          >
+            Abandon plan
+          </button>
+        </div>
+
+        {narrative && narrative.overview && (
+          <div style={{
+            backgroundColor: '#16213e', borderLeft: '4px solid #fc5200', borderRadius: '6px',
+            padding: '12px 14px', marginBottom: '18px', fontSize: '13px', color: '#c8c8d4',
+            fontStyle: 'italic', lineHeight: 1.5,
+          }}>
+            {narrative.overview}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {weekNumbers.map((wn) => {
+            const focus = narrative && narrative.weekly
+              ? (narrative.weekly.find((w) => w.week === wn) || {}).focus
+              : null;
+            return (
+              <div key={wn}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '10px', marginBottom: '10px' }}>
+                  <span style={{
+                    fontSize: '13px', fontWeight: 700, color: '#fff',
+                    backgroundColor: wn === currentWeek ? '#fc520022' : 'transparent',
+                    border: wn === currentWeek ? '1px solid #fc5200' : '1px solid #333',
+                    borderRadius: '4px', padding: '2px 8px',
+                  }}>
+                    Week {wn}
+                  </span>
+                  {focus && <span style={{ fontSize: '12px', color: '#a0a0b0' }}>{focus}</span>}
+                </div>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px',
+                }}>
+                  {byWeek[wn].map((w) => {
+                    const dt = w.day_type || 'easy';
+                    const dc = DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy;
+                    const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
+                    const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
+                    return (
+                      <div key={w.id} style={{
+                        backgroundColor: '#16213e', borderRadius: '8px', padding: '12px',
+                        borderTop: `3px solid ${dc}`,
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '11px', color: '#a0a0b0' }}>{formatDate(w.date)}</span>
+                          <span style={{
+                            color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
+                            fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
+                          }}>
+                            {dt}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>
+                          {w.title || 'Workout'}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '12px', color: '#e0e0e0', marginBottom: w.description ? '8px' : 0 }}>
+                          {km != null && <span>{km} km</span>}
+                          {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
+                          {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
+                        </div>
+                        {w.description && (
+                          <div style={{ fontSize: '11px', color: '#777', lineHeight: 1.4 }}>{w.description}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- State A: no active plan ----------
+  const currentSec = projections ? projections.current_5k_sec : null;
+  const horizons = (projections && projections.horizons) || [];
+  const confidence = projections ? projections.confidence : null;
+  const hasEstimate = currentSec != null;
+
+  return (
+    <div style={cardStyle}>
+      <h2 style={sectionTitle}>Build your 5K plan</h2>
+
+      <div style={{ marginBottom: hasEstimate ? '18px' : 0 }}>
+        {hasEstimate ? (
+          <div style={{ fontSize: '14px', color: '#e0e0e0' }}>
+            Projected 5K now: <span style={{ fontSize: '20px', fontWeight: 700, color: '#fc5200' }}>{formatPace(currentSec)}</span>
+            <span style={{ marginLeft: '8px', color: '#666', fontSize: '11px' }}>
+              estimate{confidence === 'low' ? ' (rough — improves as you log runs)' : ''}
+            </span>
+          </div>
+        ) : (
+          <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+            Log a few runs and I'll project a 5K target.
+          </div>
+        )}
+      </div>
+
+      {hasEstimate && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
+          {horizons.map((h) => {
+            const impliedPace = h.target_time_sec != null ? Math.round(h.target_time_sec / 5) : null;
+            const isBuilding = building === h.weeks;
+            return (
+              <button
+                key={h.weeks}
+                onClick={() => buildPlan(h.weeks, h.target_time_sec)}
+                disabled={building != null}
+                style={{
+                  textAlign: 'left', backgroundColor: '#16213e', border: '1px solid #333',
+                  borderRadius: '8px', padding: '14px', cursor: building != null ? 'default' : 'pointer',
+                  color: 'inherit', minHeight: '44px', opacity: building != null && !isBuilding ? 0.5 : 1,
+                }}
+              >
+                {isBuilding ? (
+                  <div style={{ fontSize: '13px', color: '#fc5200', fontWeight: 600 }}>Building your plan…</div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: '14px', color: '#e0e0e0', marginBottom: '4px' }}>
+                      {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{formatPace(h.target_time_sec)}</span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#666' }}>
+                      {impliedPace != null && <>≈{formatPace(impliedPace)}/km</>}
+                      {h.improvement_pct != null && <>, {h.improvement_pct}% faster</>}
+                    </div>
+                  </>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -120,6 +359,9 @@ function Training() {
   return (
     <div>
       <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '24px' }}>Training</h1>
+
+      {/* Plan section */}
+      <PlanSection />
 
       {/* a) Headline hero */}
       <div style={cardStyle}>
