@@ -2,7 +2,7 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 
 import config
 from database import init_db, get_session, async_session
-from models import Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal
+from models import Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal, Plan, PlannedWorkout
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
@@ -29,6 +29,9 @@ import asyncio as _asyncio
 import garmin_transform as gt
 from garmin_client import GarminClient
 import fitness_model as fmodel
+import fitness_projection as fproj
+import plan_generator as pgen
+import coach_llm
 
 garmin = GarminClient()
 
@@ -435,6 +438,123 @@ async def training(session: AsyncSession = Depends(get_session)):
         for a in result.scalars().all()
     ]
     return fmodel.training_report(acts, datetime.utcnow())
+
+
+# ---------------------------------------------------------------------------
+# Plan builder (v2a)
+# ---------------------------------------------------------------------------
+
+class PlanCreateRequest(BaseModel):
+    weeks: int
+    target_time_sec: int
+
+
+async def _plan_activity_dicts(session: AsyncSession) -> list[dict[str, Any]]:
+    acts = (await session.execute(select(Activity))).scalars().all()
+    return [
+        {"id": a.id, "name": a.name, "distance": a.distance, "start_date": a.start_date,
+         "average_speed": a.average_speed, "average_heartrate": a.average_heartrate,
+         "max_heartrate": a.max_heartrate}
+        for a in acts
+    ]
+
+
+def _fmt_time(sec: Optional[int]) -> str:
+    if not sec:
+        return "?"
+    m, s = divmod(int(sec), 60)
+    return f"{m}:{s:02d}"
+
+
+def _weeks_overview(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_week: dict[int, dict[str, Any]] = {}
+    for w in workouts:
+        wk = by_week.setdefault(w["week_number"], {"week": w["week_number"], "sessions": 0, "long_km": 0})
+        wk["sessions"] += 1
+        if w["day_type"] == "long" and w.get("target_distance_m"):
+            wk["long_km"] = round(w["target_distance_m"] / 1000, 1)
+    return [by_week[k] for k in sorted(by_week)]
+
+
+async def _plan_response(session: AsyncSession, plan: Plan) -> dict[str, Any]:
+    wos = (await session.execute(
+        select(PlannedWorkout).where(PlannedWorkout.plan_id == plan.id).order_by(PlannedWorkout.date)
+    )).scalars().all()
+    return {
+        "plan": {
+            "id": plan.id, "goal_type": plan.goal_type, "target_time_sec": plan.target_time_sec,
+            "start_date": plan.start_date.isoformat() if plan.start_date else None,
+            "goal_date": plan.goal_date.isoformat() if plan.goal_date else None,
+            "weeks": plan.weeks, "status": plan.status, "narrative": plan.narrative,
+        },
+        "workouts": [
+            {"id": w.id, "date": w.date.isoformat() if w.date else None,
+             "week_number": w.week_number, "day_type": w.day_type,
+             "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
+             "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
+             "title": w.title, "description": w.description}
+            for w in wos
+        ],
+    }
+
+
+@app.get("/api/plan/projections")
+async def plan_projections(session: AsyncSession = Depends(get_session)):
+    """Current 5K estimate + realistic targets at fixed horizons."""
+    dicts = await _plan_activity_dicts(session)
+    return fproj.projections(dicts, datetime.utcnow())
+
+
+@app.post("/api/plan")
+async def create_plan(req: PlanCreateRequest, session: AsyncSession = Depends(get_session)):
+    if not (4 <= req.weeks <= 20):
+        raise HTTPException(status_code=400, detail="weeks must be between 4 and 20")
+    now = datetime.utcnow()
+    dicts = await _plan_activity_dicts(session)
+
+    model = fmodel.build_fitness_model(dicts, now)
+    gen = pgen.generate_plan(model, req.weeks, req.target_time_sec, now)
+
+    # Only one active plan at a time.
+    for old in (await session.execute(select(Plan).where(Plan.status == "active"))).scalars().all():
+        old.status = "abandoned"
+
+    plan = Plan(
+        goal_type="5k", goal_distance_m=5000.0, target_time_sec=req.target_time_sec,
+        start_date=now, goal_date=gen["goal_date"], weeks=req.weeks, status="active",
+        created_at=now, fitness_snapshot=model,
+    )
+    session.add(plan)
+    await session.flush()  # assign plan.id
+    for w in gen["workouts"]:
+        session.add(PlannedWorkout(plan_id=plan.id, **w))
+
+    plan.narrative = await coach_llm.generate_plan_narrative(
+        {"target_str": _fmt_time(req.target_time_sec), "weeks": req.weeks},
+        _weeks_overview(gen["workouts"]),
+    )
+    await session.commit()
+    return await _plan_response(session, plan)
+
+
+@app.get("/api/plan")
+async def get_active_plan(session: AsyncSession = Depends(get_session)):
+    plan = (await session.execute(
+        select(Plan).where(Plan.status == "active").order_by(Plan.id.desc())
+    )).scalars().first()
+    if plan is None:
+        return {"plan": None, "workouts": []}
+    return await _plan_response(session, plan)
+
+
+@app.delete("/api/plan/{plan_id}")
+async def abandon_plan(plan_id: int, session: AsyncSession = Depends(get_session)):
+    plan = await session.get(Plan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    plan.status = "abandoned"
+    await session.commit()
+    return {"status": "abandoned", "id": plan_id}
 
 
 @app.get("/api/activities/{activity_id}")
