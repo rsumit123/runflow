@@ -116,9 +116,10 @@ class Plan(Base):
     __tablename__ = "plans"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    goal_type = Column(String, nullable=False)          # "5k"
-    goal_distance_m = Column(Float, nullable=False)     # 5000
-    target_time_sec = Column(Integer, nullable=False)   # target finish time
+    goal_type = Column(String, nullable=False)          # "5k" | "sprint_100m"
+    goal_distance_m = Column(Float, nullable=False)     # 5000 | 100
+    target_time_sec = Column(Integer, nullable=False)   # target finish time (whole sec; 5K)
+    sprint_target_sec = Column(Float, nullable=True)    # sub-second target (100m sprint)
     start_date = Column(DateTime, nullable=False)
     goal_date = Column(DateTime, nullable=False)
     weeks = Column(Integer, nullable=False)
@@ -139,12 +140,15 @@ class PlannedWorkout(Base):
                      nullable=False, index=True)
     date = Column(DateTime, nullable=False)
     week_number = Column(Integer, nullable=False)
-    day_type = Column(String, nullable=False)           # easy | long | quality | strides | rest
+    # 5K: easy | long | quality | strides | rest
+    # sprint: accel | max_velocity | speed_endurance | technique | plyometrics | test | rest
+    day_type = Column(String, nullable=False)
     target_distance_m = Column(Float, nullable=True)
     pace_low_sec = Column(Integer, nullable=True)       # sec/km (faster bound)
     pace_high_sec = Column(Integer, nullable=True)      # sec/km (slower bound)
     hr_ceiling = Column(Integer, nullable=True)
     title = Column(String, nullable=True)
     description = Column(Text, nullable=True)
+    structure = Column(JSON, nullable=True)             # sprint rep scheme {warmup, main_set, finisher, cues, total_volume_m}
 
     plan = relationship("Plan", back_populates="workouts")

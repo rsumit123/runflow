@@ -27,6 +27,54 @@ const ZONE_COLORS = { easy: '#22c55e', gray: '#f59e0b', hard: '#ef4444', unknown
 const WARN_COLORS = { danger: '#ef4444', warn: '#f59e0b', info: '#3b82f6' };
 const DAY_TYPE_COLORS = { easy: '#22c55e', long: '#3b82f6', quality: '#ef4444', strides: '#f59e0b', rest: '#64748b' };
 
+// Sprint (100m) plan day types — colored label + display text.
+const SPRINT_DAY_TYPE = {
+  accel: { color: '#fc5200', label: 'Accel' },
+  max_velocity: { color: '#ff8a3d', label: 'Max velocity' },
+  speed_endurance: { color: '#e0245e', label: 'Speed endurance' },
+  technique: { color: '#3d9970', label: 'Technique' },
+  plyometrics: { color: '#b10dc9', label: 'Plyometrics' },
+  test: { color: '#f1c40f', label: 'Test' },
+  rest: { color: '#5a5a6a', label: 'Rest' },
+};
+
+function sprintMainSetLines(mainSet) {
+  if (!Array.isArray(mainSet)) return [];
+  return mainSet.map((m) => {
+    const reps = m.reps != null ? m.reps : '';
+    const dist = m.distance_m != null ? `${m.distance_m}m` : '';
+    const eff = m.effort_pct != null ? ` @ ${m.effort_pct}%` : '';
+    return `${reps} × ${dist}${eff}`.trim();
+  });
+}
+
+// Compact rep-scheme summary shared by the Today card and the day cards.
+function SprintSummary({ structure, dc }) {
+  if (!structure) return null;
+  const lines = sprintMainSetLines(structure.main_set);
+  const recovery = Array.isArray(structure.main_set) && structure.main_set.length
+    ? structure.main_set[0].recovery : null;
+  const vol = structure.total_volume_m;
+  return (
+    <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e0e0e0', alignItems: 'center' }}>
+        {lines.map((l, i) => <span key={i}>{l}</span>)}
+        {vol != null && (
+          <span style={{
+            color: dc, backgroundColor: `${dc}22`, padding: '1px 8px', borderRadius: '4px',
+            fontSize: '11px', fontWeight: 700,
+          }}>
+            {vol} m
+          </span>
+        )}
+      </div>
+      {recovery && (
+        <div style={{ fontSize: '11px', color: '#777', marginTop: '6px' }}>Recovery: {recovery}</div>
+      )}
+    </>
+  );
+}
+
 const GrayTooltip = ({ active, payload, label }) => {
   if (!active || !payload || !payload.length) return null;
   return (
@@ -57,6 +105,10 @@ function PlanSection() {
   const [workouts, setWorkouts] = useState([]);
   const [adherence, setAdherence] = useState(null);
   const [projections, setProjections] = useState(null);
+  const [progress, setProgress] = useState(null); // sprint plan progress
+  const [goalType, setGoalType] = useState('5k'); // builder goal toggle: '5k' | 'sprint'
+  const [sprintProjections, setSprintProjections] = useState(null);
+  const [sprintLoading, setSprintLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [building, setBuilding] = useState(null); // holds weeks being built, or null
   const [suggestions, setSuggestions] = useState([]);
@@ -82,7 +134,10 @@ function PlanSection() {
         setPlan(res.data.plan || null);
         setWorkouts(res.data.workouts || []);
         setAdherence(res.data.adherence || null);
+        setProgress(res.data.progress || null);
         if (!res.data.plan) return loadProjections();
+        // Sprint plans have no suggestions pipeline.
+        if (res.data.plan.goal_type === 'sprint_100m') return undefined;
         return loadSuggestions();
       })
       .catch(() => {})
@@ -167,6 +222,32 @@ function PlanSection() {
       .finally(() => setBuilding(null));
   };
 
+  const buildSprintPlan = (weeks, target100) => {
+    setBuilding(weeks);
+    const body = { weeks, goal_type: 'sprint_100m' };
+    if (target100 != null) body.target_100m_sec = target100;
+    api.post('/plan', body)
+      .then((res) => {
+        setPlan(res.data.plan || null);
+        setWorkouts(res.data.workouts || []);
+        setProgress(res.data.progress || null);
+      })
+      .catch(() => {})
+      .finally(() => setBuilding(null));
+  };
+
+  // Toggle the builder goal; lazily fetch sprint projections the first time.
+  const selectGoal = (g) => {
+    setGoalType(g);
+    if (g === 'sprint' && !sprintProjections && !sprintLoading) {
+      setSprintLoading(true);
+      api.get('/plan/sprint/projections')
+        .then((res) => setSprintProjections(res.data))
+        .catch(() => {})
+        .finally(() => setSprintLoading(false));
+    }
+  };
+
   const abandonPlan = () => {
     if (!plan) return;
     if (!window.confirm('Abandon this plan? Your workouts will be removed.')) return;
@@ -189,6 +270,7 @@ function PlanSection() {
 
   // ---------- State B: active plan ----------
   if (plan) {
+    const isSprint = plan.goal_type === 'sprint_100m';
     const goalSec = plan.target_time_sec;
     const narrative = plan.narrative || null;
 
@@ -261,7 +343,11 @@ function PlanSection() {
         {/* a) Header */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px', alignItems: 'baseline', marginBottom: '14px' }}>
           <div style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>
-            5K in <span style={{ color: '#fc5200' }}>{goalSec != null ? formatPace(goalSec) : '—'}</span>
+            {isSprint ? (
+              <>100m in <span style={{ color: '#fc5200' }}>{plan.sprint_target_sec != null ? `${plan.sprint_target_sec.toFixed(1)}s` : '—'}</span></>
+            ) : (
+              <>5K in <span style={{ color: '#fc5200' }}>{goalSec != null ? formatPace(goalSec) : '—'}</span></>
+            )}
           </div>
           <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
             Goal date {formatDate(plan.goal_date)}
@@ -292,7 +378,9 @@ function PlanSection() {
           {todayWorkout ? (() => {
             const w = todayWorkout;
             const dt = w.day_type || 'easy';
-            const dc = DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy;
+            const meta = isSprint ? (SPRINT_DAY_TYPE[dt] || SPRINT_DAY_TYPE.rest) : null;
+            const dc = isSprint ? meta.color : (DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy);
+            const dtLabel = isSprint ? meta.label : dt;
             const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
             const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
             const status = w.status || 'upcoming';
@@ -306,7 +394,7 @@ function PlanSection() {
                     color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
                     fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
                   }}>
-                    {dt}
+                    {dtLabel}
                   </span>
                   <span style={{ marginLeft: 'auto', fontSize: '15px', color: done ? '#22c55e' : '#64748b' }}>
                     {done ? '●' : '○'}
@@ -315,12 +403,24 @@ function PlanSection() {
                 <div style={{ fontSize: '17px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
                   {w.title || 'Workout'}
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e0e0e0' }}>
-                  {km != null && <span>{km} km</span>}
-                  {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
-                  {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
-                </div>
-                {done && actual && (
+                {isSprint ? (
+                  <SprintSummary structure={w.structure} dc={dc} />
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e0e0e0' }}>
+                    {km != null && <span>{km} km</span>}
+                    {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
+                    {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
+                  </div>
+                )}
+                {isSprint && done && actual && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+                    <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                      Best 100m: {actual.best_100m_sec != null ? `${actual.best_100m_sec}s` : '—'}
+                      {actual.fade_pct != null ? ` · fade ${actual.fade_pct}%` : ''}
+                    </span>
+                  </div>
+                )}
+                {!isSprint && done && actual && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
                     <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
                       Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
@@ -372,8 +472,36 @@ function PlanSection() {
           </div>
         )}
 
+        {/* b) Sprint progress strip */}
+        {isSprint && progress && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '18px' }}>
+            <span style={{
+              fontSize: '12px', fontWeight: 600, color: '#e0e0e0', backgroundColor: '#16213e',
+              borderRadius: '20px', padding: '5px 12px',
+            }}>
+              {progress.sessions_done != null ? progress.sessions_done : 0}/{progress.sessions_planned_past != null ? progress.sessions_planned_past : 0} done
+            </span>
+            {progress.adherence_pct != null && (
+              <span style={{
+                fontSize: '12px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e18',
+                borderRadius: '20px', padding: '5px 12px',
+              }}>
+                {progress.adherence_pct}%
+              </span>
+            )}
+            {progress.latest_best_100m_sec != null && (
+              <span style={{
+                fontSize: '12px', fontWeight: 700, color: '#fc5200', backgroundColor: '#fc520018',
+                borderRadius: '20px', padding: '5px 12px',
+              }}>
+                Best 100m: {progress.latest_best_100m_sec}s
+              </span>
+            )}
+          </div>
+        )}
+
         {/* b) Adherence summary strip */}
-        {showAdherence && (
+        {!isSprint && showAdherence && (
           adh.planned_past > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '18px' }}>
               <span style={{
@@ -416,7 +544,7 @@ function PlanSection() {
         )}
 
         {/* c) Suggestions panel */}
-        {visibleSuggestions.length > 0 && (
+        {!isSprint && visibleSuggestions.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
             {visibleSuggestions.map((s) => {
               const isOnTrack = s.type === 'on_track';
@@ -548,7 +676,9 @@ function PlanSection() {
             <div style={{ fontSize: '13px', color: '#666' }}>No workouts scheduled this week.</div>
           ) : selWorkouts.map((w) => {
             const dt = w.day_type || 'easy';
-            const dc = DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy;
+            const meta = isSprint ? (SPRINT_DAY_TYPE[dt] || SPRINT_DAY_TYPE.rest) : null;
+            const dc = isSprint ? meta.color : (DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy);
+            const dtLabel = isSprint ? meta.label : dt;
             const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
             const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
             const status = w.status || 'upcoming';
@@ -584,21 +714,36 @@ function PlanSection() {
                       color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
                       fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
                     }}>
-                      {dt}
+                      {dtLabel}
                     </span>
                   </div>
                   <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>
                     {w.title || 'Workout'}
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '12px', color: '#e0e0e0', marginBottom: w.description ? '8px' : 0 }}>
-                    {km != null && <span>{km} km</span>}
-                    {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
-                    {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
-                  </div>
+                  {isSprint ? (
+                    <div style={{ marginBottom: w.description ? '8px' : 0 }}>
+                      <SprintSummary structure={w.structure} dc={dc} />
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '12px', color: '#e0e0e0', marginBottom: w.description ? '8px' : 0 }}>
+                      {km != null && <span>{km} km</span>}
+                      {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
+                      {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
+                    </div>
+                  )}
                   {w.description && (
                     <div style={{ fontSize: '11px', color: '#777', lineHeight: 1.4 }}>{w.description}</div>
                   )}
-                  {status === 'done' && actual && (
+                  {isSprint && status === 'done' && actual && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                      <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                        Best 100m: {actual.best_100m_sec != null ? `${actual.best_100m_sec}s` : '—'}
+                        {actual.fade_pct != null ? ` · fade ${actual.fade_pct}%` : ''}
+                        {actual.fastest_rep_sec != null ? ` · fastest ${actual.fastest_rep_sec}s` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {!isSprint && status === 'done' && actual && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
                       <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
                         Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
@@ -691,58 +836,161 @@ function PlanSection() {
   const confidence = projections ? projections.confidence : null;
   const hasEstimate = currentSec != null;
 
+  const sprintProfile = sprintProjections ? sprintProjections.profile : null;
+  const sprintHorizons = (sprintProjections && sprintProjections.horizons) || [];
+  const hasSprintBaseline = sprintProfile && sprintProfile.best_100m_sec != null;
+
+  const segBtn = (active) => ({
+    flex: 1, minHeight: 44, borderRadius: '8px', border: '1px solid ' + (active ? '#fc5200' : '#2a2a45'),
+    backgroundColor: active ? '#fc5200' : '#16213e', color: active ? '#fff' : '#a0a0b0',
+    fontSize: '14px', fontWeight: 700, cursor: 'pointer',
+  });
+
+  const horizonBtnStyle = (isBuilding) => ({
+    textAlign: 'left', backgroundColor: '#16213e', border: '1px solid #333',
+    borderRadius: '8px', padding: '14px', cursor: building != null ? 'default' : 'pointer',
+    color: 'inherit', minHeight: '44px', opacity: building != null && !isBuilding ? 0.5 : 1,
+  });
+
   return (
     <div style={cardStyle}>
-      <h2 style={sectionTitle}>Build your 5K plan</h2>
-
-      <div style={{ marginBottom: hasEstimate ? '18px' : 0 }}>
-        {hasEstimate ? (
-          <div style={{ fontSize: '14px', color: '#e0e0e0' }}>
-            Projected 5K now: <span style={{ fontSize: '20px', fontWeight: 700, color: '#fc5200' }}>{formatPace(currentSec)}</span>
-            <span style={{ marginLeft: '8px', color: '#666', fontSize: '11px' }}>
-              estimate{confidence === 'low' ? ' (rough — improves as you log runs)' : ''}
-            </span>
-          </div>
-        ) : (
-          <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
-            Log a few runs and I'll project a 5K target.
-          </div>
-        )}
+      {/* Goal-type toggle */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+        <button onClick={() => selectGoal('5k')} style={segBtn(goalType === '5k')}>5K</button>
+        <button onClick={() => selectGoal('sprint')} style={segBtn(goalType === 'sprint')}>100m Sprint</button>
       </div>
 
-      {hasEstimate && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
-          {horizons.map((h) => {
-            const impliedPace = h.target_time_sec != null ? Math.round(h.target_time_sec / 5) : null;
-            const isBuilding = building === h.weeks;
-            return (
-              <button
-                key={h.weeks}
-                onClick={() => buildPlan(h.weeks, h.target_time_sec)}
-                disabled={building != null}
-                style={{
-                  textAlign: 'left', backgroundColor: '#16213e', border: '1px solid #333',
-                  borderRadius: '8px', padding: '14px', cursor: building != null ? 'default' : 'pointer',
-                  color: 'inherit', minHeight: '44px', opacity: building != null && !isBuilding ? 0.5 : 1,
-                }}
-              >
-                {isBuilding ? (
-                  <div style={{ fontSize: '13px', color: '#fc5200', fontWeight: 600 }}>Building your plan…</div>
-                ) : (
+      {goalType === '5k' ? (
+        <>
+          <h2 style={sectionTitle}>Build your 5K plan</h2>
+
+          <div style={{ marginBottom: hasEstimate ? '18px' : 0 }}>
+            {hasEstimate ? (
+              <div style={{ fontSize: '14px', color: '#e0e0e0' }}>
+                Projected 5K now: <span style={{ fontSize: '20px', fontWeight: 700, color: '#fc5200' }}>{formatPace(currentSec)}</span>
+                <span style={{ marginLeft: '8px', color: '#666', fontSize: '11px' }}>
+                  estimate{confidence === 'low' ? ' (rough — improves as you log runs)' : ''}
+                </span>
+              </div>
+            ) : (
+              <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+                Log a few runs and I'll project a 5K target.
+              </div>
+            )}
+          </div>
+
+          {hasEstimate && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
+              {horizons.map((h) => {
+                const impliedPace = h.target_time_sec != null ? Math.round(h.target_time_sec / 5) : null;
+                const isBuilding = building === h.weeks;
+                return (
+                  <button
+                    key={h.weeks}
+                    onClick={() => buildPlan(h.weeks, h.target_time_sec)}
+                    disabled={building != null}
+                    style={horizonBtnStyle(isBuilding)}
+                  >
+                    {isBuilding ? (
+                      <div style={{ fontSize: '13px', color: '#fc5200', fontWeight: 600 }}>Building your plan…</div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: '14px', color: '#e0e0e0', marginBottom: '4px' }}>
+                          {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{formatPace(h.target_time_sec)}</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>
+                          {impliedPace != null && <>≈{formatPace(impliedPace)}/km</>}
+                          {h.improvement_pct != null && <>, {h.improvement_pct}% faster</>}
+                        </div>
+                      </>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <h2 style={sectionTitle}>Build your 100m sprint plan</h2>
+
+          {sprintLoading && !sprintProjections ? (
+            <div style={{ fontSize: '13px', color: '#a0a0b0' }}>Loading sprint profile…</div>
+          ) : (
+            <>
+              {/* Baseline card */}
+              <div style={{ marginBottom: '18px' }}>
+                {hasSprintBaseline ? (
                   <>
-                    <div style={{ fontSize: '14px', color: '#e0e0e0', marginBottom: '4px' }}>
-                      {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{formatPace(h.target_time_sec)}</span>
+                    <div style={{ fontSize: '14px', color: '#e0e0e0' }}>
+                      Best 100m: <span style={{ fontSize: '28px', fontWeight: 800, color: '#fc5200' }}>{sprintProfile.best_100m_sec}s</span>
+                      {sprintProfile.best_100m_date && (
+                        <span style={{ marginLeft: '8px', color: '#666', fontSize: '11px' }}>
+                          {formatDate(sprintProfile.best_100m_date)}
+                        </span>
+                      )}
                     </div>
-                    <div style={{ fontSize: '11px', color: '#666' }}>
-                      {impliedPace != null && <>≈{formatPace(impliedPace)}/km</>}
-                      {h.improvement_pct != null && <>, {h.improvement_pct}% faster</>}
-                    </div>
+                    {sprintProfile.diagnosis_detail && (
+                      <div style={{ fontSize: '12.5px', color: '#a0a0b0', marginTop: '6px', lineHeight: 1.45 }}>
+                        {sprintProfile.diagnosis_detail}
+                      </div>
+                    )}
+                    {Array.isArray(sprintProfile.supporting_efforts) && sprintProfile.supporting_efforts.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                        {sprintProfile.supporting_efforts.map((e, i) => (
+                          <span key={i} style={{
+                            fontSize: '11px', color: '#c8c8d4', backgroundColor: '#16213e',
+                            borderRadius: '20px', padding: '4px 10px',
+                          }}>
+                            {e.distance_m}m {e.time_sec}s
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </>
+                ) : (
+                  <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+                    Not enough sprint data — pick a horizon and we'll estimate.
+                  </div>
                 )}
-              </button>
-            );
-          })}
-        </div>
+              </div>
+
+              {/* Horizon cards */}
+              {sprintHorizons.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
+                  {sprintHorizons.map((h) => {
+                    const isBuilding = building === h.weeks;
+                    return (
+                      <button
+                        key={h.weeks}
+                        onClick={() => buildSprintPlan(h.weeks, h.target_100m_sec)}
+                        disabled={building != null}
+                        style={horizonBtnStyle(isBuilding)}
+                      >
+                        {isBuilding ? (
+                          <div style={{ fontSize: '13px', color: '#fc5200', fontWeight: 600 }}>Building your plan…</div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: '14px', color: '#e0e0e0', marginBottom: '4px' }}>
+                              {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{h.target_100m_sec != null ? `${h.target_100m_sec}s` : '—'}</span>
+                            </div>
+                            {h.improvement_pct != null && (
+                              <div style={{ fontSize: '11px', color: '#666' }}>{h.improvement_pct}%</div>
+                            )}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                !sprintLoading && (
+                  <div style={{ fontSize: '13px', color: '#666' }}>No horizons available yet.</div>
+                )
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   );

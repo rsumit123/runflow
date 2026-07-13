@@ -96,3 +96,52 @@ async def generate_plan_narrative(
     if not isinstance(weekly, list):
         weekly = []
     return {"overview": str(data["overview"]), "weekly": weekly}
+
+
+SPRINT_SYSTEM_PROMPT = (
+    "You are an encouraging, plain-spoken sprint coach. You explain a 100m sprint "
+    "training plan that was already built by a deterministic engine. NEVER change, "
+    "invent, or contradict any numbers — rep distances, counts, times, dates, or "
+    "week counts. Speak to the athlete directly, warmly, and reference their own "
+    "data (their best 100m, and their tendency to fade late) so the plan feels "
+    "personal. Sprinting is about quality and full recovery, not grinding volume."
+)
+
+
+async def generate_sprint_narrative(
+    goal: dict[str, Any], profile: dict[str, Any], weeks_overview: list[dict[str, Any]]
+) -> Optional[dict[str, Any]]:
+    """Return {overview, weekly: [{week, focus}]} or None (fail-safe).
+
+    `goal` = {target_str, current_str, weeks}; `profile` = the sprint fitness
+    profile (diagnosis, fade_pct, best_100m_sec); `weeks_overview` =
+    [{week, phase, focus}] the model phrases. It computes nothing.
+    """
+    diag = profile.get("diagnosis")
+    fade = profile.get("fade_pct")
+    diag_line = profile.get("diagnosis_detail") or ""
+    user = (
+        "Here is an athlete's 100m sprint plan built by our engine. Respond with a "
+        "JSON object only, no prose outside it:\n"
+        '  "overview": 2-3 warm sentences on the plan and how it should feel. If the '
+        "athlete's limiter is speed-endurance (fading late), name that plainly and say "
+        "how the plan attacks it.\n"
+        '  "weekly": a list of {"week": <int>, "focus": "<ONE short sentence, max 12 '
+        'words>"} — one per week, punchy.\n'
+        "Do NOT change any numbers.\n\n"
+        f"Goal: run 100m in {goal.get('target_str')} (from about {goal.get('current_str')}) "
+        f"across {goal.get('weeks')} weeks.\n"
+        f"Athlete diagnosis: {diag} — {diag_line} (fade ~{fade}%).\n"
+        f"Weeks: {json.dumps(weeks_overview)}"
+    )
+    content = await _chat(
+        [{"role": "system", "content": SPRINT_SYSTEM_PROMPT}, {"role": "user", "content": user}],
+        max_tokens=1800,
+    )
+    data = _extract_json(content)
+    if not isinstance(data, dict) or "overview" not in data:
+        return None
+    weekly = data.get("weekly")
+    if not isinstance(weekly, list):
+        weekly = []
+    return {"overview": str(data["overview"]), "weekly": weekly}
