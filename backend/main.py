@@ -109,6 +109,12 @@ def _activity_to_dict(act: Activity) -> dict[str, Any]:
         "has_detailed_data": act.has_detailed_data,
         "is_interval": act.is_interval,
         "interval_config": act.interval_config,
+        "source": act.source,
+        "average_heartrate": act.average_heartrate,
+        "max_heartrate": act.max_heartrate,
+        "average_cadence": act.average_cadence,
+        "hr_zones": act.hr_zones,
+        "running_dynamics": act.running_dynamics,
     }
 
 
@@ -124,6 +130,7 @@ def _split_to_dict(s: Split) -> dict[str, Any]:
         "pace_zone": s.pace_zone,
         "elevation_difference": s.elevation_difference,
         "average_heartrate": s.average_heartrate,
+        "average_cadence": s.average_cadence,
     }
 
 
