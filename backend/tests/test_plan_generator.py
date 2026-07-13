@@ -67,6 +67,16 @@ def test_long_run_is_the_longest_of_its_week():
             )
 
 
+def test_steady_runs_carry_warmup_cooldown():
+    out = pg.generate_plan(MODEL, 8, 1650, START)
+    for w in out["workouts"]:
+        if w["day_type"] in ("easy", "long", "strides"):
+            assert w["structure"] and w["structure"].get("warmup") and w["structure"].get("cooldown")
+        if w["day_type"] == "quality" and not w["title"].startswith("Race"):
+            # quality carries its own warm-up/cool-down in the description text
+            assert "warm-up" in w["description"].lower() and "cool-down" in w["description"].lower()
+
+
 def test_easy_runs_carry_hr_ceiling():
     out = pg.generate_plan(MODEL, 8, 1650, START)
     for w in out["workouts"]:
