@@ -574,6 +574,59 @@ class SuggestionApplyRequest(BaseModel):
     id: str
 
 
+class WorkoutMoveRequest(BaseModel):
+    date: str  # YYYY-MM-DD
+
+
+HARD_DAY_TYPES = {"quality", "long"}
+
+
+@app.patch("/api/plan/workout/{workout_id}")
+async def move_workout(workout_id: int, req: WorkoutMoveRequest,
+                       session: AsyncSession = Depends(get_session)):
+    """Move a single planned workout to a new date (per-workout override).
+
+    Warns (does not block) if the move stacks two hard sessions back-to-back.
+    Re-derives the workout's week_number so the calendar regroups it.
+    """
+    w = await session.get(PlannedWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    try:
+        new_date = datetime.strptime(req.date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date — use YYYY-MM-DD")
+
+    plan = await session.get(Plan, w.plan_id)
+
+    warning = None
+    if w.day_type in HARD_DAY_TYPES:
+        others = (await session.execute(
+            select(PlannedWorkout).where(
+                PlannedWorkout.plan_id == w.plan_id, PlannedWorkout.id != workout_id
+            )
+        )).scalars().all()
+        for o in others:
+            if o.day_type in HARD_DAY_TYPES and o.date and \
+                    abs((o.date.date() - new_date.date()).days) <= 1:
+                warning = (f"Heads up — this puts two hard sessions within a day of each "
+                           f"other (\"{o.title}\" on {o.date.date().isoformat()}).")
+                break
+
+    w.date = new_date
+    # regroup into the right plan week
+    if plan and plan.start_date:
+        w0_mon = plan.start_date - timedelta(days=plan.start_date.weekday())
+        nd_mon = new_date - timedelta(days=new_date.weekday())
+        wk = int((nd_mon - w0_mon).days / 7) + 1
+        w.week_number = max(1, min(plan.weeks, wk))
+
+    await session.commit()
+    resp = await _plan_response(session, plan)
+    resp["warning"] = warning
+    return resp
+
+
 async def _active_plan(session: AsyncSession) -> Optional[Plan]:
     return (await session.execute(
         select(Plan).where(Plan.status == "active").order_by(Plan.id.desc())
