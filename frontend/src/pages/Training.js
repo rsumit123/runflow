@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
@@ -244,6 +243,15 @@ function PlanSection() {
     const adh = adherence || null;
     const showAdherence = adh && adh.planned_past != null;
 
+    // Today's workout (or the next upcoming one) for the focal "Today" card
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const dateKey = (w) => (w && w.date ? String(w.date).slice(0, 10) : null);
+    const todayWorkout = workouts.find((w) => dateKey(w) === todayStr) || null;
+    const nextWorkout = workouts
+      .filter((w) => dateKey(w) && dateKey(w) > todayStr && (w.day_type || 'easy') !== 'rest')
+      .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))[0] || null;
+
     return (
       <div style={cardStyle}>
         {/* a) Header */}
@@ -268,11 +276,89 @@ function PlanSection() {
           </button>
         </div>
 
+        {/* a2) Today — the primary focal point */}
+        <div style={{
+          backgroundColor: '#16213e', border: '1px solid #fc520055', borderLeft: '4px solid #fc5200',
+          borderRadius: '8px', padding: '16px', marginBottom: '18px',
+        }}>
+          {todayWorkout ? (() => {
+            const w = todayWorkout;
+            const dt = w.day_type || 'easy';
+            const dc = DAY_TYPE_COLORS[dt] || DAY_TYPE_COLORS.easy;
+            const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
+            const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
+            const status = w.status || 'upcoming';
+            const actual = w.actual || null;
+            const done = status === 'done';
+            return (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#fc5200' }}>Today</span>
+                  <span style={{
+                    color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
+                    fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
+                  }}>
+                    {dt}
+                  </span>
+                  <span style={{ marginLeft: 'auto', fontSize: '15px', color: done ? '#22c55e' : '#64748b' }}>
+                    {done ? '●' : '○'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+                  {w.title || 'Workout'}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e0e0e0' }}>
+                  {km != null && <span>{km} km</span>}
+                  {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
+                  {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
+                </div>
+                {done && actual && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+                    <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                      Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
+                      {actual.avg_hr != null ? ` · ${Math.round(actual.avg_hr)} bpm` : ''}
+                    </span>
+                    {w.compliance === 'ran_hard' && (
+                      <span style={{
+                        fontSize: '10px', fontWeight: 700, color: '#ef4444', backgroundColor: '#ef444422',
+                        padding: '2px 7px', borderRadius: '4px',
+                      }}>
+                        ran hard
+                      </span>
+                    )}
+                    {w.compliance === 'on_target' && (
+                      <span style={{
+                        fontSize: '10px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e22',
+                        padding: '2px 7px', borderRadius: '4px',
+                      }}>
+                        ✓ easy
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })() : nextWorkout ? (
+            <>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#fc5200', marginBottom: '8px' }}>
+                Next · {formatDate(nextWorkout.date)}
+              </div>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
+                {nextWorkout.title || 'Workout'}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+              <span style={{ color: '#fc5200' }}>Today</span> · Rest day 😌
+            </div>
+          )}
+        </div>
+
         {narrative && narrative.overview && (
           <div style={{
             backgroundColor: '#16213e', borderLeft: '4px solid #fc5200', borderRadius: '6px',
-            padding: '12px 14px', marginBottom: '18px', fontSize: '13px', color: '#c8c8d4',
-            fontStyle: 'italic', lineHeight: 1.5,
+            padding: '10px 12px', marginBottom: '16px', fontSize: '12.5px', color: '#c8c8d4',
+            lineHeight: 1.45,
           }}>
             {narrative.overview}
           </div>
@@ -654,6 +740,9 @@ function Training() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState('plan');
+  const [hasActivePlan, setHasActivePlan] = useState(false);
+  const [flagsExpanded, setFlagsExpanded] = useState(false);
 
   useEffect(() => {
     api.get('/training')
@@ -665,6 +754,13 @@ function Training() {
         setError(err.response?.data?.detail || 'Failed to load training data');
         setLoading(false);
       });
+  }, []);
+
+  // Lightweight second fetch so the Fitness tab can make coaching flags plan-aware.
+  useEffect(() => {
+    api.get('/plan')
+      .then((res) => setHasActivePlan(!!res.data.plan))
+      .catch(() => setHasActivePlan(false));
   }, []);
 
   if (loading) {
@@ -714,16 +810,38 @@ function Training() {
       runs: t.runs,
     }));
 
-  const recentRuns = gz.recent_runs || [];
   const acwr = fm.acwr;
+
+  const warningItems = warnings.map((w, i) => {
+    const c = WARN_COLORS[w.level] || WARN_COLORS.info;
+    return (
+      <div key={i} style={{ backgroundColor: '#16213e', borderLeft: `4px solid ${c}`, borderRadius: '6px', padding: '12px 14px' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>{w.title}</div>
+        <div style={{ fontSize: '13px', color: '#a0a0b0' }}>{w.detail}</div>
+      </div>
+    );
+  });
+
+  const tabBtn = (active) => ({
+    flex: 1, minHeight: 44, borderRadius: '8px', border: '1px solid ' + (active ? '#fc5200' : '#2a2a45'),
+    backgroundColor: active ? '#fc5200' : '#16213e', color: active ? '#fff' : '#a0a0b0',
+    fontSize: '14px', fontWeight: 700, cursor: 'pointer',
+  });
 
   return (
     <div>
-      <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '24px' }}>Training</h1>
+      <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '16px' }}>Training</h1>
 
-      {/* Plan section */}
-      <PlanSection />
+      {/* Tab bar */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+        <button onClick={() => setActiveTab('plan')} style={tabBtn(activeTab === 'plan')}>Plan</button>
+        <button onClick={() => setActiveTab('fitness')} style={tabBtn(activeTab === 'fitness')}>Fitness</button>
+      </div>
 
+      {activeTab === 'plan' ? (
+        <PlanSection />
+      ) : (
+        <>
       {/* a) Headline hero */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center' }}>
@@ -762,23 +880,41 @@ function Training() {
         </div>
       </div>
 
-      {/* b) Warnings */}
+      {/* b) Coaching flags — plan-aware (collapsed when a plan is active) */}
       <div style={cardStyle}>
-        <h2 style={sectionTitle}>Coaching Flags</h2>
         {warnings.length === 0 ? (
-          <div style={{ color: '#22c55e', fontSize: '13px' }}>No flags — nice work.</div>
+          <>
+            <h2 style={sectionTitle}>Coaching Flags</h2>
+            <div style={{ color: '#22c55e', fontSize: '13px' }}>No flags — nice work.</div>
+          </>
+        ) : hasActivePlan ? (
+          <>
+            <button
+              onClick={() => setFlagsExpanded((v) => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer', minHeight: 44,
+              }}
+              aria-expanded={flagsExpanded}
+            >
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#f59e0b' }}>
+                ⚠ {warnings.length} coaching flag{warnings.length === 1 ? '' : 's'}
+              </span>
+              <span style={{ fontSize: '13px', color: '#a0a0b0' }}>{flagsExpanded ? '▲' : '▼'}</span>
+            </button>
+            {flagsExpanded && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
+                {warningItems}
+              </div>
+            )}
+          </>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {warnings.map((w, i) => {
-              const c = WARN_COLORS[w.level] || WARN_COLORS.info;
-              return (
-                <div key={i} style={{ backgroundColor: '#16213e', borderLeft: `4px solid ${c}`, borderRadius: '6px', padding: '12px 14px' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>{w.title}</div>
-                  <div style={{ fontSize: '13px', color: '#a0a0b0' }}>{w.detail}</div>
-                </div>
-              );
-            })}
-          </div>
+          <>
+            <h2 style={sectionTitle}>Coaching Flags</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {warningItems}
+            </div>
+          </>
         )}
       </div>
 
@@ -857,58 +993,8 @@ function Training() {
         )}
       </div>
 
-      {/* f) Recent runs list */}
-      <div style={cardStyle}>
-        <h2 style={sectionTitle}>Recent Runs</h2>
-        {recentRuns.length === 0 ? (
-          <div style={{ color: '#666', fontSize: '13px' }}>No recent runs.</div>
-        ) : (
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <div style={{
-              display: 'grid', gridTemplateColumns: '90px 1fr 70px 80px 70px 90px', gap: '6px',
-              padding: '8px 10px', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase',
-              letterSpacing: '0.5px', color: '#666', borderBottom: '1px solid #252540', minWidth: '520px',
-            }}>
-              <div>Date</div>
-              <div>Name</div>
-              <div style={{ textAlign: 'right' }}>Dist</div>
-              <div style={{ textAlign: 'right' }}>Pace</div>
-              <div style={{ textAlign: 'right' }}>HR</div>
-              <div style={{ textAlign: 'right' }}>Zone</div>
-            </div>
-            {recentRuns.map((r) => {
-              const zone = r.zone || 'unknown';
-              const zc = ZONE_COLORS[zone] || ZONE_COLORS.unknown;
-              return (
-                <Link key={r.id} to={`/activity/${r.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={{
-                    display: 'grid', gridTemplateColumns: '90px 1fr 70px 80px 70px 90px', gap: '6px',
-                    padding: '10px', alignItems: 'center', borderBottom: '1px solid #1e1e35',
-                    fontSize: '13px', minWidth: '520px', minHeight: '44px', cursor: 'pointer',
-                  }}>
-                    <div style={{ color: '#a0a0b0', fontSize: '12px', whiteSpace: 'nowrap' }}>{formatDate(r.start_date)}</div>
-                    <div style={{ color: '#fc5200', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {r.name || 'Untitled'}
-                    </div>
-                    <div style={{ textAlign: 'right', color: '#e0e0e0' }}>{r.distance_km != null ? `${r.distance_km}` : '—'}</div>
-                    <div style={{ textAlign: 'right', color: '#e0e0e0' }}>{r.pace_sec != null ? formatPace(r.pace_sec) : '—'}</div>
-                    <div style={{ textAlign: 'right', color: '#e0e0e0' }}>{r.avg_hr != null ? Math.round(r.avg_hr) : '—'}</div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ color: zc, backgroundColor: `${zc}22`, padding: '2px 7px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, textTransform: 'capitalize' }}>
-                        {zone}
-                      </span>
-                      {r.basis === 'pace' && (
-                        <span title="No HR for this run — zone inferred from pace"
-                              style={{ marginLeft: '6px', color: '#777', fontSize: '10px', fontStyle: 'italic' }}>(pace-est)</span>
-                      )}
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }
