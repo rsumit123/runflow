@@ -46,6 +46,27 @@ def test_no_quality_before_base_is_laid():
     assert early_quality == []
 
 
+def test_long_run_is_the_longest_of_its_week():
+    # A "long run" must never be shorter than that week's easy/quality runs —
+    # even in early weeks when the runner's base is tiny.
+    out = pg.generate_plan(MODEL, 8, 1650, START)
+    by_week: dict[int, list] = {}
+    for w in out["workouts"]:
+        by_week.setdefault(w["week_number"], []).append(w)
+    for wk, wos in by_week.items():
+        longs = [w for w in wos if w["day_type"] == "long"]
+        if not longs:  # taper week has no long run
+            continue
+        long_km = longs[0]["target_distance_m"] / 1000.0
+        for w in wos:
+            if w["day_type"] == "long" or not w.get("target_distance_m"):
+                continue
+            other_km = w["target_distance_m"] / 1000.0
+            assert other_km <= long_km, (
+                f"week {wk}: {w['day_type']} run {other_km}km exceeds long run {long_km}km"
+            )
+
+
 def test_easy_runs_carry_hr_ceiling():
     out = pg.generate_plan(MODEL, 8, 1650, START)
     for w in out["workouts"]:
