@@ -26,6 +26,7 @@ import sprint_projection as sproj
 import sprint_plan_generator as spgen
 import sprint_tracking as strack
 import warmup_cooldown as wcd
+import run_chat as rchat
 from intervals import analyze_intervals, analyze_intervals_timed
 from laps import detect_laps
 from insights import generate_run_insight
@@ -2594,3 +2595,178 @@ async def import_status(
         ]
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# Chat about this run — tool-calling analyst
+# ---------------------------------------------------------------------------
+
+def _pace_from(distance_m: Optional[float], moving_time_s: Optional[int]) -> Optional[int]:
+    if not distance_m or not moving_time_s or distance_m <= 0:
+        return None
+    return round(moving_time_s / (distance_m / 1000.0))
+
+
+async def _tool_get_run(session: AsyncSession, activity_id: int) -> dict[str, Any]:
+    a = await session.get(Activity, activity_id)
+    if a is None:
+        return {"error": "run not found"}
+    splits = (await session.execute(
+        select(Split).where(Split.activity_id == activity_id).order_by(Split.split_number)
+    )).scalars().all()
+    bes = (await session.execute(
+        select(BestEffort).where(BestEffort.activity_id == activity_id)
+    )).scalars().all()
+    out: dict[str, Any] = {
+        "id": a.id, "name": a.name,
+        "date": a.start_date.date().isoformat() if a.start_date else None,
+        "distance_km": round((a.distance or 0) / 1000, 2),
+        "moving_time_s": a.moving_time,
+        "pace_sec_per_km": _pace_from(a.distance, a.moving_time),
+        "avg_hr": a.average_heartrate, "max_hr": a.max_heartrate,
+        "avg_cadence": a.average_cadence, "elevation_gain_m": a.total_elevation_gain,
+        "source": a.source, "is_interval": a.is_interval, "hr_zones": a.hr_zones,
+        "splits": [{"km": s.split_number,
+                    "pace_sec_per_km": _pace_from(s.distance, s.moving_time),
+                    "avg_hr": s.average_heartrate} for s in splits][:25],
+        "best_efforts": [{"distance_m": b.distance_target, "time_sec": b.time_seconds} for b in bes],
+    }
+    if a.is_interval and isinstance(a.interval_config, dict):
+        out["interval_summary"] = (a.interval_config.get("result") or {}).get("summary")
+    return out
+
+
+async def _tool_find_runs(session: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
+    since = int(args.get("since_days") or 120)
+    limit = min(int(args.get("limit") or 15), 25)
+    cutoff = datetime.utcnow() - timedelta(days=since)
+    rows = (await session.execute(
+        select(Activity).where(Activity.start_date >= cutoff, Activity.distance.isnot(None))
+        .order_by(Activity.start_date.desc())
+    )).scalars().all()
+    min_km, max_km = args.get("min_km"), args.get("max_km")
+    nc = (args.get("name_contains") or "").lower()
+    out = []
+    for a in rows:
+        km = (a.distance or 0) / 1000
+        if min_km and km < min_km:
+            continue
+        if max_km and km > max_km:
+            continue
+        if nc and nc not in (a.name or "").lower():
+            continue
+        out.append({"id": a.id, "name": a.name,
+                    "date": a.start_date.date().isoformat() if a.start_date else None,
+                    "distance_km": round(km, 2),
+                    "pace_sec_per_km": _pace_from(a.distance, a.moving_time),
+                    "avg_hr": a.average_heartrate, "is_interval": a.is_interval})
+        if len(out) >= limit:
+            break
+    return {"count": len(out), "runs": out}
+
+
+async def _tool_best_efforts(session: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
+    dist = args.get("distance_m")
+    q = select(BestEffort.distance_target, func.min(BestEffort.time_seconds)).group_by(BestEffort.distance_target)
+    if dist:
+        q = q.where(BestEffort.distance_target == int(dist))
+    rows = (await session.execute(q)).all()
+    out = []
+    for d, t in rows:
+        r = (await session.execute(
+            select(Activity.start_date).join(BestEffort, BestEffort.activity_id == Activity.id)
+            .where(BestEffort.distance_target == d, BestEffort.time_seconds == t).limit(1)
+        )).first()
+        out.append({"distance_m": d, "best_time_sec": t,
+                    "date": r[0].date().isoformat() if r and r[0] else None})
+    out.sort(key=lambda x: x["distance_m"])
+    return {"best_efforts": out}
+
+
+async def _tool_trend(session: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
+    metric = args.get("metric") or "weekly_distance"
+    weeks = min(int(args.get("weeks") or 12), 52)
+    cutoff = datetime.utcnow() - timedelta(weeks=weeks)
+    rows = (await session.execute(
+        select(Activity).where(Activity.start_date >= cutoff, Activity.distance.isnot(None))
+    )).scalars().all()
+    buckets: dict[str, dict[str, float]] = {}
+    for a in rows:
+        iso = a.start_date.isocalendar()
+        key = f"{iso[0]}-W{iso[1]:02d}"
+        b = buckets.setdefault(key, {"dist": 0.0, "time": 0.0, "hr_sum": 0.0, "hr_n": 0.0})
+        b["dist"] += (a.distance or 0) / 1000
+        b["time"] += a.moving_time or 0
+        if a.average_heartrate:
+            b["hr_sum"] += a.average_heartrate
+            b["hr_n"] += 1
+    series = []
+    for key in sorted(buckets):
+        b = buckets[key]
+        if metric == "weekly_distance":
+            val: Optional[float] = round(b["dist"], 1)
+        elif metric == "avg_pace":
+            val = round(b["time"] / b["dist"]) if b["dist"] else None
+        else:
+            val = round(b["hr_sum"] / b["hr_n"]) if b["hr_n"] else None
+        series.append({"week": key, "value": val})
+    return {"metric": metric, "series": series}
+
+
+async def _tool_active_plan(session: AsyncSession) -> dict[str, Any]:
+    plan = (await session.execute(
+        select(Plan).where(Plan.status == "active").order_by(Plan.id.desc())
+    )).scalars().first()
+    if plan is None:
+        return {"active_plan": None}
+    resp = await _plan_response(session, plan)
+    p = resp["plan"]
+    upcoming = [w for w in resp["workouts"] if w.get("status") == "upcoming"]
+    nxt = upcoming[0] if upcoming else None
+    return {
+        "goal_type": p["goal_type"], "target_time_sec": p.get("target_time_sec"),
+        "sprint_target_sec": p.get("sprint_target_sec"), "weeks": p["weeks"],
+        "goal_date": p.get("goal_date"),
+        "adherence": resp.get("adherence") or resp.get("progress"),
+        "next_workout": ({"date": nxt.get("date"), "day_type": nxt.get("day_type"),
+                          "title": nxt.get("title")} if nxt else None),
+    }
+
+
+async def _run_chat_tool(session: AsyncSession, ctx_activity_id: int,
+                         name: str, args: dict[str, Any]) -> dict[str, Any]:
+    if name == "get_run":
+        return await _tool_get_run(session, int(args.get("activity_id") or ctx_activity_id))
+    if name == "find_runs":
+        return await _tool_find_runs(session, args)
+    if name == "get_best_efforts":
+        return await _tool_best_efforts(session, args)
+    if name == "get_trend":
+        return await _tool_trend(session, args)
+    if name == "get_active_plan":
+        return await _tool_active_plan(session)
+    return {"error": f"unknown tool {name}"}
+
+
+class RunChatRequest(BaseModel):
+    messages: list[dict[str, Any]]
+
+
+@app.post("/api/activities/{activity_id}/chat")
+async def run_chat_endpoint(activity_id: int, req: RunChatRequest,
+                            session: AsyncSession = Depends(get_session)):
+    """Grounded, tool-calling Q&A about a run and the athlete's history."""
+    act = await session.get(Activity, activity_id)
+    if act is None:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    msgs = [{"role": m.get("role"), "content": str(m.get("content"))[:2000]}
+            for m in req.messages
+            if m.get("role") in ("user", "assistant") and m.get("content")][-12:]
+    if not msgs or msgs[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="last message must be from the user")
+
+    async def execute_tool(tname: str, targs: dict[str, Any]) -> dict[str, Any]:
+        return await _run_chat_tool(session, activity_id, tname, targs)
+
+    result = await rchat.chat(activity_id, msgs, execute_tool, datetime.utcnow().date().isoformat())
+    return {"reply": result["reply"], "ok": result.get("ok", True)}
