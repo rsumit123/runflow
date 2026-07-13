@@ -6,6 +6,7 @@ import Import from './pages/Import';
 import Phases from './pages/Phases';
 import Stats from './pages/Stats';
 import Training from './pages/Training';
+import PlanWorkoutDetail from './pages/PlanWorkoutDetail';
 import RoutesPage from './pages/Routes';
 import Goals from './pages/Goals';
 
@@ -133,6 +134,7 @@ function App() {
           <Route path="/activity/:id" element={<ActivityDetail />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/training" element={<Training />} />
+          <Route path="/plan/workout/:id" element={<PlanWorkoutDetail />} />
           <Route path="/goals" element={<Goals />} />
           <Route path="/routes" element={<RoutesPage />} />
           <Route path="/phases" element={<Phases />} />

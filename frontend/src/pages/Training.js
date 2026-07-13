@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
@@ -51,6 +52,7 @@ function StatCard({ label, value, sub, color }) {
 }
 
 function PlanSection() {
+  const navigate = useNavigate();
   const [plan, setPlan] = useState(null);
   const [workouts, setWorkouts] = useState([]);
   const [adherence, setAdherence] = useState(null);
@@ -251,6 +253,8 @@ function PlanSection() {
     const nextWorkout = workouts
       .filter((w) => dateKey(w) && dateKey(w) > todayStr && (w.day_type || 'easy') !== 'rest')
       .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))[0] || null;
+    const todayCardWorkout = todayWorkout || nextWorkout || null;
+    const todayCardId = todayCardWorkout ? todayCardWorkout.id : null;
 
     return (
       <div style={cardStyle}>
@@ -277,10 +281,14 @@ function PlanSection() {
         </div>
 
         {/* a2) Today — the primary focal point */}
-        <div style={{
-          backgroundColor: '#16213e', border: '1px solid #fc520055', borderLeft: '4px solid #fc5200',
-          borderRadius: '8px', padding: '16px', marginBottom: '18px',
-        }}>
+        <div
+          onClick={todayCardId != null ? () => navigate('/plan/workout/' + todayCardId) : undefined}
+          style={{
+            backgroundColor: '#16213e', border: '1px solid #fc520055', borderLeft: '4px solid #fc5200',
+            borderRadius: '8px', padding: '16px', marginBottom: '18px',
+            cursor: todayCardId != null ? 'pointer' : 'default',
+          }}
+        >
           {todayWorkout ? (() => {
             const w = todayWorkout;
             const dt = w.day_type || 'easy';
@@ -555,10 +563,14 @@ function PlanSection() {
             else if (status === 'upcoming') marker = { ch: '○', color: '#64748b' };
 
             return (
-              <div key={w.id} style={{
-                display: 'flex', gap: '10px', backgroundColor: '#16213e', borderRadius: '8px',
-                padding: '12px', borderLeft: `3px solid ${dc}`,
-              }}>
+              <div
+                key={w.id}
+                onClick={() => navigate('/plan/workout/' + w.id)}
+                style={{
+                  display: 'flex', gap: '10px', backgroundColor: '#16213e', borderRadius: '8px',
+                  padding: '12px', borderLeft: `3px solid ${dc}`, cursor: 'pointer',
+                }}
+              >
                 <div style={{
                   width: '18px', flex: '0 0 18px', textAlign: 'center', fontSize: '15px',
                   color: marker ? marker.color : 'transparent', lineHeight: '20px',
@@ -613,7 +625,7 @@ function PlanSection() {
                   {!isRest && !isEditing && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
                       <button
-                        onClick={() => startEditMove(w)}
+                        onClick={(e) => { e.stopPropagation(); startEditMove(w); }}
                         style={{
                           background: 'none', border: 'none', color: '#a0a0b0',
                           fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '4px 0',
@@ -624,7 +636,7 @@ function PlanSection() {
                     </div>
                   )}
                   {!isRest && isEditing && (
-                    <div style={{ marginTop: '8px' }}>
+                    <div style={{ marginTop: '8px' }} onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
                         <input
                           type="date"
