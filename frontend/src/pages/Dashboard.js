@@ -107,6 +107,7 @@ function Dashboard() {
   const [pulling, setPulling] = useState(false);
   const [pullResult, setPullResult] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [training, setTraining] = useState(null);
 
   const loadActivities = (p = page) => {
     setLoading(true);
@@ -124,6 +125,12 @@ function Dashboard() {
   };
 
   useEffect(() => { loadActivities(1); }, []); // eslint-disable-line
+
+  useEffect(() => {
+    api.get('/training')
+      .then((res) => setTraining(res.data))
+      .catch(() => setTraining(null));
+  }, []);
 
   const totalPages = Math.ceil(total / PER_PAGE);
 
@@ -174,6 +181,35 @@ function Dashboard() {
           &#x21bb; Refresh
         </button>
       </div>
+
+      {/* Training summary card */}
+      {training && training.gray_zone && (() => {
+        const pctEasy = training.gray_zone.pct_easy_14d;
+        const hasEasy = pctEasy !== null && pctEasy !== undefined;
+        const flags = (training.warnings || []).length;
+        let easyColor = '#4ade80';
+        if (hasEasy) {
+          if (pctEasy === 0) easyColor = '#ef4444';
+          else if (pctEasy < 50) easyColor = '#f59e0b';
+          else if (pctEasy < 70) easyColor = '#fbbf24';
+        }
+        return (
+          <Link to="/training" style={{ textDecoration: 'none' }}>
+            <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', cursor: 'pointer', minHeight: '44px', border: '1px solid #252540' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <div>
+                  <span style={{ fontSize: '22px', fontWeight: 700, color: easyColor }}>{hasEasy ? `${pctEasy}%` : '—'}</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginLeft: '6px' }}>Easy (14d)</span>
+                </div>
+                <div style={{ fontSize: '13px', color: flags > 0 ? '#f59e0b' : '#666' }}>
+                  {flags} coaching flag{flags !== 1 ? 's' : ''}
+                </div>
+              </div>
+              <span style={{ color: '#fc5200', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap' }}>Training &rsaquo;</span>
+            </div>
+          </Link>
+        );
+      })()}
 
       {/* Pull from Strava */}
       <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px' }}>
