@@ -22,3 +22,7 @@ dist/
 # OS
 .DS_Store
 .vercel
+
+# local test/dev databases
+backend/*.db
+*.db

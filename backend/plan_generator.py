@@ -70,16 +70,23 @@ def generate_plan(model: dict[str, Any], weeks: int, target_time_sec: int,
         if is_down:
             long_km = round(long_km * DOWN_WEEK_FACTOR, 1)
 
+        # Easy runs must never out-distance the week's long run. In early weeks the
+        # base is tiny, so cap the easy runs just below the long run (min 2 km floor)
+        # to keep the long run the clear longest session of the week.
+        easy_cap = max(2.0, round(long_km - 0.5, 1))
+        easy_short_km = min(3.0, easy_cap)
+        easy_long_km = min(3.5, easy_cap)
+
         # Mon — easy (always)
-        workouts.append(_wo(wk_mon, 0, w, "easy", 3.0, easy_low, easy_high, ceiling,
+        workouts.append(_wo(wk_mon, 0, w, "easy", easy_short_km, easy_low, easy_high, ceiling,
                             "Easy run", f"Conversational, nose-breathing. Keep HR ≤{ceiling} bpm — if it climbs, slow down."))
         # Wed — quality (once base supports it, not on down weeks)
         if not is_down and w >= QUALITY_START_WEEK:
-            workouts.append(_wo(wk_mon, 2, w, "quality", 4.0, goal_pace - 10, goal_pace + 5, None,
+            workouts.append(_wo(wk_mon, 2, w, "quality", min(4.0, long_km), goal_pace - 10, goal_pace + 5, None,
                                 "Speed session", f"1.5 km easy warm-up, 6 × 400 m at ~{_fmt_pace(goal_pace)}/km (5K effort) with 90 s jog recovery, easy cool-down."))
         # Thu — easy (not on down weeks)
         if not is_down:
-            workouts.append(_wo(wk_mon, 3, w, "easy", 3.5, easy_low, easy_high, ceiling,
+            workouts.append(_wo(wk_mon, 3, w, "easy", easy_long_km, easy_low, easy_high, ceiling,
                                 "Easy run", f"Easy aerobic. HR ≤{ceiling} bpm."))
         # Sat — long
         workouts.append(_wo(wk_mon, 5, w, "long", long_km, long_low, long_high, ceiling + 5,
