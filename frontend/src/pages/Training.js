@@ -62,6 +62,11 @@ function PlanSection() {
   const [dismissedIds, setDismissedIds] = useState(() => new Set());
   const [applyingId, setApplyingId] = useState(null);
   const [selectedWeek, setSelectedWeek] = useState(null);
+  const [editingId, setEditingId] = useState(null); // workout id whose move-editor is open
+  const [editDate, setEditDate] = useState('');
+  const [moving, setMoving] = useState(false);
+  const [moveError, setMoveError] = useState(null);
+  const [moveWarning, setMoveWarning] = useState(null);
 
   const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
 
@@ -119,6 +124,36 @@ function PlanSection() {
     next.add(id);
     return next;
   });
+
+  // Open the inline move-editor for a single workout (closes any other open one).
+  const startEditMove = (w) => {
+    setEditingId(w.id);
+    setEditDate(w.date ? String(w.date).slice(0, 10) : '');
+    setMoveError(null);
+  };
+
+  const cancelEditMove = () => {
+    setEditingId(null);
+    setEditDate('');
+    setMoveError(null);
+  };
+
+  const saveMove = (id) => {
+    if (!editDate) return;
+    setMoving(true);
+    setMoveError(null);
+    api.patch('/plan/workout/' + id, { date: editDate })
+      .then((res) => {
+        setPlan(res.data.plan || null);
+        setWorkouts(res.data.workouts || []);
+        setAdherence(res.data.adherence || null);
+        setEditingId(null);
+        setEditDate('');
+        setMoveWarning(res.data.warning || null);
+      })
+      .catch(() => setMoveError("Couldn't move — try again."))
+      .finally(() => setMoving(false));
+  };
 
   const buildPlan = (weeks, targetTimeSec) => {
     setBuilding(weeks);
@@ -270,6 +305,15 @@ function PlanSection() {
                 </span>
               )}
             </div>
+          ) : (adh.done || 0) > 0 ? (
+            <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '18px' }}>
+              {adh.done} run{adh.done === 1 ? '' : 's'} logged so far
+              {adh.easy_run_hard > 0 && (
+                <span style={{ color: '#f59e0b' }}>
+                  {' · '}{adh.easy_run_hard} run hard — ease up
+                </span>
+              )}
+            </div>
           ) : (
             <div style={{ fontSize: '12px', color: '#777', marginBottom: '18px' }}>
               Your plan starts now — track your runs here as you go.
@@ -384,6 +428,26 @@ function PlanSection() {
           </button>
         </div>
 
+        {/* Move warning (amber, dismissible) */}
+        {moveWarning && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: '8px', backgroundColor: '#f59e0b18',
+            border: '1px solid #f59e0b55', borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
+          }}>
+            <span style={{ flex: 1, fontSize: '12px', color: '#f59e0b', lineHeight: 1.4 }}>{moveWarning}</span>
+            <button
+              onClick={() => setMoveWarning(null)}
+              style={{
+                background: 'none', border: 'none', color: '#f59e0b', fontSize: '14px',
+                fontWeight: 700, cursor: 'pointer', padding: '0 2px', lineHeight: 1,
+              }}
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Day cards for the selected week */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {selWorkouts.length === 0 ? (
@@ -395,6 +459,8 @@ function PlanSection() {
             const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
             const status = w.status || 'upcoming';
             const actual = w.actual || null;
+            const isRest = dt === 'rest' || status === 'rest';
+            const isEditing = editingId === w.id;
 
             // Left status marker
             let marker = null;
@@ -455,6 +521,60 @@ function PlanSection() {
                         }}>
                           ✓ easy
                         </span>
+                      )}
+                    </div>
+                  )}
+                  {!isRest && !isEditing && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                      <button
+                        onClick={() => startEditMove(w)}
+                        style={{
+                          background: 'none', border: 'none', color: '#a0a0b0',
+                          fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '4px 0',
+                        }}
+                      >
+                        Move
+                      </button>
+                    </div>
+                  )}
+                  {!isRest && isEditing && (
+                    <div style={{ marginTop: '8px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="date"
+                          value={editDate}
+                          onChange={(e) => setEditDate(e.target.value)}
+                          style={{
+                            colorScheme: 'dark', backgroundColor: '#0f0f1a', color: '#e0e0e0',
+                            border: '1px solid #2a2a45', borderRadius: '6px', padding: '8px 10px',
+                            fontSize: '16px', minHeight: '44px', flex: '1 1 140px', minWidth: 0,
+                          }}
+                        />
+                        <button
+                          onClick={() => saveMove(w.id)}
+                          disabled={moving || !editDate}
+                          style={{
+                            backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                            fontSize: '12px', fontWeight: 700, padding: '8px 16px', minHeight: '44px',
+                            cursor: moving || !editDate ? 'default' : 'pointer', opacity: moving || !editDate ? 0.5 : 1,
+                          }}
+                        >
+                          {moving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          onClick={cancelEditMove}
+                          disabled={moving}
+                          style={{
+                            backgroundColor: 'transparent', border: '1px solid #333', borderRadius: '6px', color: '#a0a0b0',
+                            fontSize: '12px', fontWeight: 600, padding: '8px 16px', minHeight: '44px',
+                            cursor: moving ? 'default' : 'pointer',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      {moveError && (
+                        <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px' }}>{moveError}</div>
                       )}
                     </div>
                   )}
