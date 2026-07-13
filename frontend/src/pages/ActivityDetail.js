@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ResponsiveContainer, LineChart, Line,
@@ -299,6 +299,11 @@ function ActivityDetail() {
   const [runMetrics, setRunMetrics] = useState(null);
   const [showMarkPrompt, setShowMarkPrompt] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef(null);
 
   const isInterval = activity?.is_interval || false;
   const savedConfig = activity?.interval_config || null;
@@ -378,6 +383,32 @@ function ActivityDetail() {
     }
     setIntervalsLoading(false);
   };
+
+  const sendChat = async (text) => {
+    const content = (text || '').trim();
+    if (!content || sending) return;
+    const nextMessages = [...messages, { role: 'user', content }];
+    setMessages(nextMessages);
+    setChatInput('');
+    setSending(true);
+    try {
+      const res = await api.post(`/activities/${id}/chat`, { messages: nextMessages });
+      const reply = res.data && res.data.reply
+        ? res.data.reply
+        : 'Sorry — something went wrong. Try again.';
+      setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+    } catch {
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry — something went wrong. Try again.' }]);
+    }
+    setSending(false);
+  };
+
+  // Auto-scroll the messages area to the bottom on new messages / thinking state.
+  useEffect(() => {
+    if (chatOpen && messagesEndRef.current) {
+      messagesEndRef.current.scrollTop = messagesEndRef.current.scrollHeight;
+    }
+  }, [messages, sending, chatOpen]);
 
   useEffect(() => {
     api
@@ -488,6 +519,124 @@ function ActivityDetail() {
           </span>
         )}
       </div>
+
+      {/* ── Chat about this run ── */}
+      <div style={{ marginBottom: '24px' }}>
+        <button
+          onClick={() => setChatOpen((o) => !o)}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: '8px',
+            minHeight: '44px', padding: '0 20px', borderRadius: '8px', border: 'none',
+            backgroundColor: '#fc5200', color: '#fff', fontSize: '15px', fontWeight: 600,
+            cursor: 'pointer',
+          }}>
+          <span>&#128172;</span>
+          <span>{chatOpen ? 'Hide chat' : 'Chat about this run'}</span>
+        </button>
+
+        {chatOpen && (
+          <div style={{
+            marginTop: '12px', backgroundColor: '#1a1a2e', borderRadius: '8px',
+            border: '1px solid #252540', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Messages area */}
+            <div ref={messagesEndRef} style={{
+              maxHeight: '380px', overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+              padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px',
+            }}>
+              {messages.length === 0 && !sending && (
+                <div>
+                  <div style={{ fontSize: '13px', color: '#a0a0b0', lineHeight: 1.6, marginBottom: '12px' }}>
+                    Ask me anything about this run — pacing, heart rate, how it stacks up against your recent runs.
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {[
+                      'How does this run compare to my recent runs?',
+                      'Was my pace even, or did I fade?',
+                      'Was my heart rate too high for an easy run?',
+                      'How am I trending lately?',
+                    ].map((chip) => (
+                      <button
+                        key={chip}
+                        onClick={() => sendChat(chip)}
+                        style={{
+                          textAlign: 'left', minHeight: '44px', padding: '8px 14px',
+                          borderRadius: '8px', border: '1px solid #fc520044',
+                          backgroundColor: '#fc520012', color: '#fc5200',
+                          fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                        }}>
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {messages.map((m, i) => {
+                const isUser = m.role === 'user';
+                return (
+                  <div key={i} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
+                    <div style={{
+                      maxWidth: '85%', padding: '10px 14px', borderRadius: '12px',
+                      fontSize: '14px', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                      backgroundColor: isUser ? '#fc5200' : '#16213e',
+                      color: isUser ? '#fff' : '#e0e0e0',
+                      borderTopRightRadius: isUser ? '4px' : '12px',
+                      borderTopLeftRadius: isUser ? '12px' : '4px',
+                    }}>
+                      {m.content}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {sending && (
+                <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                  <div style={{
+                    padding: '10px 14px', borderRadius: '12px', borderTopLeftRadius: '4px',
+                    fontSize: '14px', color: '#a0a0b0', backgroundColor: '#16213e', fontStyle: 'italic',
+                  }}>
+                    Analyzing your run&hellip;
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Input row */}
+            <div style={{
+              display: 'flex', gap: '8px', padding: '12px 16px',
+              borderTop: '1px solid #252540',
+            }}>
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); sendChat(chatInput); } }}
+                placeholder="Ask about this run…"
+                style={{
+                  flex: 1, minWidth: 0, minHeight: '44px', padding: '0 14px', borderRadius: '8px',
+                  border: '1px solid #333', backgroundColor: '#0f0f1a', color: '#fff',
+                  fontSize: '16px',
+                }}
+              />
+              <button
+                onClick={() => sendChat(chatInput)}
+                disabled={sending || !chatInput.trim()}
+                style={{
+                  minHeight: '44px', padding: '0 20px', borderRadius: '8px', border: 'none',
+                  backgroundColor: '#fc5200', color: '#fff', fontSize: '14px', fontWeight: 600,
+                  cursor: (sending || !chatInput.trim()) ? 'default' : 'pointer',
+                  opacity: (sending || !chatInput.trim()) ? 0.5 : 1,
+                  flexShrink: 0,
+                }}>
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {activity.gps_glitch_count > 0 && (
         <div style={{
           backgroundColor: '#3d2515', border: '1px solid #6b4020', borderRadius: '8px',
