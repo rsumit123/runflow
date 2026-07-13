@@ -548,7 +548,8 @@ function ActivityDetail() {
           {activity.average_cadence && (
             <div style={statCard}>
               <div style={statLabel}>Avg Cadence</div>
-              <div style={statValue}>{Math.round(activity.average_cadence * 2)}</div>
+              {/* Strava stores cadence as per-foot RPM (×2 = spm); Garmin already stores spm */}
+              <div style={statValue}>{Math.round(activity.average_cadence * (activity.source === 'garmin' ? 1 : 2))}</div>
               <div style={statUnit}>spm</div>
             </div>
           )}
