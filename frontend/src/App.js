@@ -5,12 +5,14 @@ import ActivityDetail from './pages/ActivityDetail';
 import Import from './pages/Import';
 import Phases from './pages/Phases';
 import Stats from './pages/Stats';
+import Training from './pages/Training';
 import RoutesPage from './pages/Routes';
 import Goals from './pages/Goals';
 
 const navLinks = [
   { path: '/', label: 'Dashboard' },
   { path: '/stats', label: 'Stats' },
+  { path: '/training', label: 'Training' },
   { path: '/goals', label: 'Goals' },
   { path: '/routes', label: 'Routes' },
   { path: '/phases', label: 'Phases' },
@@ -130,6 +132,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/activity/:id" element={<ActivityDetail />} />
           <Route path="/stats" element={<Stats />} />
+          <Route path="/training" element={<Training />} />
           <Route path="/goals" element={<Goals />} />
           <Route path="/routes" element={<RoutesPage />} />
           <Route path="/phases" element={<Phases />} />
