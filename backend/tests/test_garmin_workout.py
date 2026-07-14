@@ -70,6 +70,22 @@ def test_no_target_step_uses_no_target():
     assert step["endCondition"]["conditionTypeKey"] == "time"
 
 
+def test_pushed_workouts_are_prefixed_so_garmin_coach_is_distinguishable():
+    steps = [{"type": "warmup", "end_kind": "time", "end_value": 120, "target_kind": "none"}]
+    d = gw.build_running_workout("Easy run", steps).to_dict()
+    assert d["workoutName"] == "RunFlow — Easy run"
+
+
+def test_prefix_is_not_applied_twice_on_a_re_push():
+    assert gw.workout_name("RunFlow — Easy run") == "RunFlow — Easy run"
+
+
+def test_prefixed_name_is_capped_at_garmin_limit():
+    name = gw.workout_name("x" * 200)
+    assert len(name) == gw.MAX_NAME_LEN
+    assert name.startswith(gw.NAME_PREFIX)
+
+
 def test_duration_estimate_counts_repeats():
     steps = [
         {"type": "warmup", "end_kind": "time", "end_value": 120, "target_kind": "none"},

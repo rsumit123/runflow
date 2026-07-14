@@ -30,6 +30,9 @@ from garminconnect.workout import (
 
 DEFAULT_PACE_SEC = 360  # 6:00/km — only used to estimate duration of distance steps
 
+NAME_PREFIX = "RunFlow — "
+MAX_NAME_LEN = 80  # Garmin truncates beyond this
+
 _STEP_TYPES = {
     "warmup": (StepType.WARMUP, "warmup", 1),
     "cooldown": (StepType.COOLDOWN, "cooldown", 2),
@@ -92,6 +95,16 @@ def estimate_seconds(steps: list[dict[str, Any]]) -> int:
     return int(round(total))
 
 
+def workout_name(title: str | None) -> str:
+    """Garmin shows every workout in one flat library, so ours must announce
+    themselves — otherwise a RunFlow "Easy run" is indistinguishable from the
+    Garmin Coach "Easy Run" sitting next to it."""
+    title = (title or "workout").strip()
+    if title.lower().startswith(NAME_PREFIX.lower()):
+        return title[:MAX_NAME_LEN]
+    return f"{NAME_PREFIX}{title}"[:MAX_NAME_LEN]
+
+
 def build_running_workout(name: str, steps: list[dict[str, Any]]) -> RunningWorkout:
     """Our steps -> a Garmin RunningWorkout ready for upload."""
     counter = {"n": 0}
@@ -110,7 +123,7 @@ def build_running_workout(name: str, steps: list[dict[str, Any]]) -> RunningWork
             top.append(_exec_step(s, nxt()))
 
     return RunningWorkout(
-        workoutName=(name or "RunFlow workout")[:80],
+        workoutName=workout_name(name),
         estimatedDurationInSecs=estimate_seconds(steps),
         workoutSegments=[WorkoutSegment(
             segmentOrder=1,
