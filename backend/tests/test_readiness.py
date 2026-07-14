@@ -112,6 +112,24 @@ def test_sprint_hard_days_downgrade_to_technique():
     assert rd.adjust("max_velocity", a)["swap_to"] == "technique"
 
 
+# --- the storable facts behind the assessment -------------------------------
+
+def test_facts_flattens_the_payloads_for_the_daily_cache():
+    f = rd.facts({"readiness": READY, "hrv": HRV_ONBOARDING, "sleep": SLEEP,
+                  "body_battery": BB, "rhr": RHR})
+    assert f["sleep_hours"] == 7.7
+    assert f["sleep_score"] == 80
+    assert f["body_battery_peak"] == 88
+    assert f["hrv_last_night"] == 64
+    assert f["hrv_status"] == "NONE"     # stored, so we can see the day it changes
+    assert f["resting_hr"] == 53
+
+
+def test_facts_survives_a_watch_that_reports_nothing():
+    f = rd.facts({})
+    assert all(v is None for v in f.values())
+
+
 # --- heat -------------------------------------------------------------------
 
 def test_cool_dry_air_costs_nothing():

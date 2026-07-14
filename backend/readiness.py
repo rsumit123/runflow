@@ -168,6 +168,21 @@ def assess(readiness: Optional[list | dict], hrv: Optional[dict],
     }
 
 
+def facts(wellness: dict[str, Any]) -> dict[str, Any]:
+    """The flat, storable numbers behind an assessment — for the daily cache/trend."""
+    r = wellness.get("readiness")
+    r = r[0] if isinstance(r, list) and r else (r if isinstance(r, dict) else {})
+    h = (wellness.get("hrv") or {}).get("hrvSummary") or {}
+    return {
+        "sleep_hours": _sleep_hours(wellness.get("sleep")),
+        "sleep_score": _sleep_score(wellness.get("sleep"), r),
+        "body_battery_peak": _body_battery(wellness.get("body_battery")),
+        "hrv_last_night": h.get("lastNightAvg"),
+        "hrv_status": h.get("status"),
+        "resting_hr": _rhr(wellness.get("rhr")),
+    }
+
+
 def adjust(day_type: str, assessment: dict[str, Any]) -> dict[str, Any]:
     """Should today's session stand? Returns the call, the reason, and the swap."""
     level = assessment.get("level")

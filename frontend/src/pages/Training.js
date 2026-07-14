@@ -131,6 +131,7 @@ function PlanSection() {
   const [calOpen, setCalOpen] = useState(false); // evidence drawer
   const [guidance, setGuidance] = useState(null); // { readiness, recommendation, heat }
   const [guidanceApplying, setGuidanceApplying] = useState(false);
+  const [guidanceRefreshing, setGuidanceRefreshing] = useState(false);
   const [guidanceNotice, setGuidanceNotice] = useState(null);
 
   const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
@@ -139,9 +140,14 @@ function PlanSection() {
     .then((res) => setCalibration(res.data))
     .catch(() => setCalibration(null));
 
-  const loadGuidance = () => api.get('/plan/today-guidance')
+  const loadGuidance = (refresh) => api.get('/plan/today-guidance' + (refresh ? '?refresh=true' : ''))
     .then((res) => setGuidance(res.data))
     .catch(() => setGuidance(null));
+
+  const refreshGuidance = () => {
+    setGuidanceRefreshing(true);
+    loadGuidance(true).finally(() => setGuidanceRefreshing(false));
+  };
 
   const acceptGuidance = () => {
     setGuidanceApplying(true);
@@ -506,6 +512,18 @@ function PlanSection() {
                 <div style={{ fontSize: '11px', color: tone, fontWeight: 600, textTransform: 'capitalize' }}>
                   {(r.garmin_level || r.level || '').toLowerCase().replace('_', ' ')}
                 </div>
+                <button
+                  onClick={refreshGuidance}
+                  disabled={guidanceRefreshing}
+                  title="Re-pull today's numbers from Garmin"
+                  style={{
+                    marginLeft: 'auto', background: 'none', border: 'none', color: '#94a3b8',
+                    fontSize: '12px', cursor: guidanceRefreshing ? 'default' : 'pointer',
+                    padding: '4px 0', minHeight: '44px',
+                  }}
+                >
+                  {guidanceRefreshing ? 'Refreshing…' : '↻ Refresh'}
+                </button>
               </div>
 
               <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: 1.5, marginTop: '6px' }}>
