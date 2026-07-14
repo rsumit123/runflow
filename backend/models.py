@@ -149,6 +149,7 @@ class PlannedWorkout(Base):
     hr_ceiling = Column(Integer, nullable=True)
     title = Column(String, nullable=True)
     description = Column(Text, nullable=True)
-    structure = Column(JSON, nullable=True)             # sprint rep scheme {warmup, main_set, finisher, cues, total_volume_m}
+    structure = Column(JSON, nullable=True)             # rep scheme / step list {warmup, cooldown, steps, main_set, ...}
+    garmin_workout_id = Column(BigInteger, nullable=True)  # pushed to the watch
 
     plan = relationship("Plan", back_populates="workouts")

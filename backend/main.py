@@ -493,7 +493,8 @@ async def _workout_dicts(session: AsyncSession, plan: Plan) -> list[dict[str, An
         {"id": w.id, "date": w.date, "week_number": w.week_number, "day_type": w.day_type,
          "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
          "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
-         "title": w.title, "description": w.description, "structure": w.structure}
+         "title": w.title, "description": w.description, "structure": w.structure,
+         "garmin_workout_id": w.garmin_workout_id}
         for w in wos
     ]
 
@@ -833,6 +834,7 @@ async def _sprint_workout_detail(w: PlannedWorkout, plan: Plan,
             "id": w.id, "date": w.date.isoformat() if w.date else None,
             "week_number": w.week_number, "day_type": w.day_type,
             "title": w.title, "description": w.description, "structure": w.structure,
+            "garmin_workout_id": w.garmin_workout_id,
             "status": ew.get("status") if ew else None,
         },
         "plan": {"goal_type": "sprint_100m", "sprint_target_sec": plan.sprint_target_sec,
@@ -889,6 +891,7 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
             "target_distance_m": w.target_distance_m, "pace_low_sec": w.pace_low_sec,
             "pace_high_sec": w.pace_high_sec, "hr_ceiling": w.hr_ceiling,
             "title": w.title, "description": w.description, "structure": w.structure,
+            "garmin_workout_id": w.garmin_workout_id,
             "status": ew.get("status") if ew else None,
             "compliance": ew.get("compliance") if ew else None,
         },
@@ -2770,3 +2773,59 @@ async def run_chat_endpoint(activity_id: int, req: RunChatRequest,
 
     result = await rchat.chat(activity_id, msgs, execute_tool, datetime.utcnow().date().isoformat())
     return {"reply": result["reply"], "ok": result.get("ok", True)}
+
+
+# ---------------------------------------------------------------------------
+# Push a structured workout to the Garmin watch
+# ---------------------------------------------------------------------------
+
+@app.post("/api/plan/workout/{workout_id}/push")
+async def push_workout_to_garmin(workout_id: int,
+                                 session: AsyncSession = Depends(get_session)):
+    """Upload this workout's steps to Garmin Connect and schedule it on its date,
+    so it lands on the watch and guides the run step-by-step."""
+    w = await session.get(PlannedWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    steps = (w.structure or {}).get("steps")
+    if not steps:
+        raise HTTPException(status_code=400,
+                            detail="This workout has no structured steps to send.")
+    if w.garmin_workout_id:
+        # Replace the previous push so we never leave duplicates on the watch.
+        try:
+            await garmin.remove_workout(w.garmin_workout_id)
+        except Exception as exc:  # noqa: BLE001 — stale id shouldn't block a re-push
+            logger.warning("Could not remove old Garmin workout %s: %s", w.garmin_workout_id, exc)
+        w.garmin_workout_id = None
+
+    try:
+        res = await garmin.push_workout(w.title or "RunFlow workout", steps,
+                                        w.date.date().isoformat())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Garmin push failed for workout %s: %s", workout_id, exc)
+        raise HTTPException(status_code=502, detail=f"Garmin push failed: {exc}")
+
+    w.garmin_workout_id = res["workout_id"]
+    await session.commit()
+    return {"garmin_workout_id": w.garmin_workout_id,
+            "date": w.date.date().isoformat(), "title": w.title}
+
+
+@app.delete("/api/plan/workout/{workout_id}/push")
+async def remove_workout_from_garmin(workout_id: int,
+                                     session: AsyncSession = Depends(get_session)):
+    """Remove this workout from the Garmin calendar/watch."""
+    w = await session.get(PlannedWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    if not w.garmin_workout_id:
+        return {"garmin_workout_id": None}
+    try:
+        await garmin.remove_workout(w.garmin_workout_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Garmin remove failed for workout %s: %s", workout_id, exc)
+        raise HTTPException(status_code=502, detail=f"Garmin remove failed: {exc}")
+    w.garmin_workout_id = None
+    await session.commit()
+    return {"garmin_workout_id": None}
