@@ -129,12 +129,38 @@ function PlanSection() {
   const [calError, setCalError] = useState(null);
   const [calNotice, setCalNotice] = useState(null);
   const [calOpen, setCalOpen] = useState(false); // evidence drawer
+  const [guidance, setGuidance] = useState(null); // { readiness, recommendation, heat }
+  const [guidanceApplying, setGuidanceApplying] = useState(false);
+  const [guidanceNotice, setGuidanceNotice] = useState(null);
 
   const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
 
   const loadCalibration = () => api.get('/plan/calibration')
     .then((res) => setCalibration(res.data))
     .catch(() => setCalibration(null));
+
+  const loadGuidance = () => api.get('/plan/today-guidance')
+    .then((res) => setGuidance(res.data))
+    .catch(() => setGuidance(null));
+
+  const acceptGuidance = () => {
+    setGuidanceApplying(true);
+    api.post('/plan/today-guidance/accept')
+      .then((res) => {
+        setPlan(res.data.plan || null);
+        setWorkouts(res.data.workouts || []);
+        setAdherence(res.data.adherence || null);
+        const a = res.data.adjustment || {};
+        setGuidanceNotice(
+          a.now === 'rest'
+            ? "Today is now a rest day, and it's off your watch."
+            : "Today is now an easy run, and your watch has been updated."
+        );
+        return loadGuidance();
+      })
+      .catch(() => {})
+      .finally(() => setGuidanceApplying(false));
+  };
 
   const applyCalibration = () => {
     setCalApplying(true);
@@ -172,7 +198,7 @@ function PlanSection() {
         if (!res.data.plan) return loadProjections();
         // Sprint plans have no suggestions or pace-calibration pipeline.
         if (res.data.plan.goal_type === 'sprint_100m') return undefined;
-        return Promise.all([loadSuggestions(), loadCalibration()]);
+        return Promise.all([loadSuggestions(), loadCalibration(), loadGuidance()]);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -455,6 +481,94 @@ function PlanSection() {
             )}
           </div>
         )}
+
+        {/* a1a) Today's conditions — readiness + heat, before you head out */}
+        {!isSprint && guidance && (guidance.readiness || {}).available && (() => {
+          const r = guidance.readiness;
+          const rec = guidance.recommendation || {};
+          const h = guidance.heat;
+          const TONE = {
+            high: '#22c55e', moderate: '#22c55e', low: '#f59e0b', very_low: '#ef4444',
+          };
+          const tone = TONE[r.level] || '#94a3b8';
+          const DOT = { good: '#22c55e', bad: '#ef4444', unknown: '#64748b', neutral: '#94a3b8' };
+          const alert = rec.action === 'downgrade' || rec.action === 'rest';
+          return (
+            <div style={{
+              backgroundColor: '#16213e', borderRadius: '8px', padding: '16px', marginBottom: '18px',
+              border: '1px solid ' + (alert ? '#f59e0b55' : '#2a3f5f'),
+              borderLeft: '4px solid ' + tone,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>
+                  Readiness {r.score}/100
+                </div>
+                <div style={{ fontSize: '11px', color: tone, fontWeight: 600, textTransform: 'capitalize' }}>
+                  {(r.garmin_level || r.level || '').toLowerCase().replace('_', ' ')}
+                </div>
+              </div>
+
+              <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: 1.5, marginTop: '6px' }}>
+                {rec.reason}
+              </div>
+
+              {/* the factors behind the score — never just a number */}
+              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {(r.factors || []).map((f, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
+                    <span style={{
+                      width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
+                      backgroundColor: DOT[f.verdict] || '#64748b', marginTop: '5px',
+                    }}
+                    />
+                    <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
+                      <strong style={{ color: '#cbd5e1' }}>{f.name}: {f.value}</strong>
+                      {' — '}{f.detail}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {h && (
+                <div style={{
+                  marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #2a3f5f',
+                }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#e2e8f0' }}>
+                    {h.adjusted
+                      ? `Heat: run ${h.adjusted_band}/km today (+${h.penalty_sec} s/km)`
+                      : `Heat: no adjustment needed`}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.5, marginTop: '4px' }}>
+                    {h.detail}
+                  </div>
+                </div>
+              )}
+
+              {guidance.can_apply && (
+                <button
+                  onClick={acceptGuidance}
+                  disabled={guidanceApplying}
+                  style={{
+                    backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                    fontSize: '13px', fontWeight: 700, padding: '10px 16px', minHeight: '44px',
+                    cursor: guidanceApplying ? 'default' : 'pointer',
+                    opacity: guidanceApplying ? 0.6 : 1, marginTop: '14px',
+                  }}
+                >
+                  {guidanceApplying
+                    ? 'Adjusting…'
+                    : rec.action === 'rest' ? 'Take today off' : 'Ease today back'}
+                </button>
+              )}
+
+              {guidanceNotice && (
+                <div style={{ fontSize: '12px', color: '#22c55e', marginTop: '10px' }}>
+                  ✓ {guidanceNotice}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* a1b) Pace calibration — why your targets are what they are */}
         {!isSprint && calibration && (calibration.insights || []).length > 0 && (() => {
