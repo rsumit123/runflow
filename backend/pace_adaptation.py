@@ -102,6 +102,33 @@ def measure_easy_pace(acts: list[dict[str, Any]], easy_hr_ceiling: int,
     }
 
 
+def historical_easy(acts: list[dict[str, Any]], easy_hr_ceiling: int,
+                    now: datetime) -> dict[str, Any]:
+    """Easy-HR runs of ANY age. Too stale to set a target, but they answer a
+    different and important question: has this runner ever done it?"""
+    old = [a for a in acts
+           if a.get("average_heartrate")
+           and a["average_heartrate"] <= easy_hr_ceiling + HR_TOLERANCE
+           and (a.get("distance") or 0) >= MIN_DIST_M
+           and _pace_sec_per_km(a.get("average_speed"))
+           and a.get("start_date")
+           and a["start_date"] < now - timedelta(days=LOOKBACK_DAYS)]
+    if not old:
+        return {"count": 0, "avg_pace": None, "last_date": None, "evidence": []}
+
+    old.sort(key=lambda a: a["start_date"], reverse=True)
+    paces = [_pace_sec_per_km(a["average_speed"]) for a in old]
+    avg = round(sum(paces) / len(paces))
+    return {
+        "count": len(old),
+        "avg_pace_sec": avg,
+        "avg_pace": _fmt_pace(avg),
+        "best_pace": _fmt_pace(round(min(paces))),
+        "last_date": old[0]["start_date"].date().isoformat(),
+        "evidence": [_evidence(a) for a in old[:5]],
+    }
+
+
 def measure_threshold(acts: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
     """Fastest sustained effort in the recent window — our read on top-end fitness."""
     pool = [a for a in _recent(acts, now, LOOKBACK_DAYS)
@@ -241,26 +268,41 @@ def calibrate(snapshot: dict[str, Any], acts: list[dict[str, Any]],
             "confidence": "low",
         })
     else:
-        # The most important insight this module can produce.
+        # The most important insight this module can produce — and it must not
+        # claim the runner has "never" run easy when their history says otherwise.
         hard = easy["too_hard"]
+        hist = historical_easy(acts, ceiling, now)
         detail = (
             f"None of your last {easy['runs_with_hr']} run(s) with heart-rate data stayed at or "
-            f"below your easy ceiling of {ceiling} bpm, so your easy pace has never been "
-            f"measured — it's still the conservative estimate the plan started with"
-            + (f" ({_fmt_pace(plan_easy)}/km)." if plan_easy else ".")
+            f"below your easy ceiling of {ceiling} bpm"
         )
         if hard:
             hrs = [e["avg_hr"] for e in hard if e["avg_hr"]]
             if hrs:
-                detail += (
-                    f" Those runs averaged {min(hrs)}–{max(hrs)} bpm. Running the easy days "
-                    f"genuinely easy is what unlocks a faster easy target here."
-                )
+                detail += f" — they averaged {min(hrs)}–{max(hrs)} bpm"
+        detail += "."
+
+        if hist["count"]:
+            detail += (
+                f" You are not incapable of it, though: you have {hist['count']} easy-HR runs in "
+                f"your history, averaging {hist['avg_pace']}/km, the most recent on "
+                f"{hist['last_date']}. They're older than the {LOOKBACK_DAYS}-day window, so they "
+                f"can't set your current target — but they show what you were doing before the "
+                f"heat and the training gap, and what you can get back to."
+            )
+        else:
+            detail += (
+                " Your easy pace has never been measured — it's still the conservative estimate "
+                "the plan started with"
+                + (f" ({_fmt_pace(plan_easy)}/km)." if plan_easy else ".")
+            )
         insights.append({
-            "kind": "no_easy_runs",
-            "title": "Your easy pace can't be measured yet",
+            "kind": "no_recent_easy_runs",
+            "title": ("Your easy pace hasn't been measured recently" if hist["count"]
+                      else "Your easy pace can't be measured yet"),
             "detail": detail,
             "evidence": hard,
+            "historical": hist,
             "confidence": "none",
         })
 

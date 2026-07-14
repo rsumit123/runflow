@@ -12,6 +12,61 @@ BASE_URL = "https://api.open-meteo.com/v1/forecast"
 TIMEOUT = 8.0
 
 
+async def conditions_at_hour(lat: float, lon: float,
+                             utc_hour: int) -> Optional[dict[str, Any]]:
+    """Conditions at the hour the runner actually runs, given in UTC.
+
+    Reading "now" is wrong whenever they aren't about to head out: open the app
+    at 5pm and you'd price a dawn run at the hottest slot of the day. We resolve
+    the runner's local hour from the location's own UTC offset, so this works
+    anywhere without us hardcoding a timezone.
+    """
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,cloud_cover",
+        "forecast_days": 2,
+        "timezone": "auto",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            res = await client.get(BASE_URL, params=params)
+            res.raise_for_status()
+            body = res.json() or {}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Hourly forecast failed for %s,%s: %s", lat, lon, exc)
+        return None
+
+    h = body.get("hourly") or {}
+    times = h.get("time") or []
+    if not times:
+        return None
+
+    offset_h = (body.get("utc_offset_seconds") or 0) / 3600.0
+    local_hour = int(round(utc_hour + offset_h)) % 24
+
+    idx = next((i for i, t in enumerate(times) if int(t[11:13]) == local_hour), None)
+    if idx is None:
+        return None
+
+    def at(key):
+        vals = h.get(key) or []
+        return vals[idx] if idx < len(vals) else None
+
+    if at("temperature_2m") is None or at("dew_point_2m") is None:
+        return None
+
+    return {
+        "temp_c": at("temperature_2m"),
+        "dew_point_c": at("dew_point_2m"),
+        "humidity_pct": at("relative_humidity_2m"),
+        "feels_like_c": at("apparent_temperature"),
+        "cloud_cover_pct": at("cloud_cover"),
+        "local_hour": local_hour,
+        "for_time": times[idx],
+    }
+
+
 async def conditions(lat: float, lon: float) -> Optional[dict[str, Any]]:
     """Temperature + dew point right now. None if the service is unreachable —
     a weather outage must never block the training plan."""

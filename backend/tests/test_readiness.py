@@ -139,14 +139,21 @@ def test_cool_dry_air_costs_nothing():
     assert out["level"] == "ideal"
 
 
-def test_jamshedpur_july_is_severe_and_widens_the_band():
-    # 30 C air, 26 C dew point — hot AND saturated.
+def test_jamshedpur_monsoon_is_severe_and_widens_the_band():
+    # 30 C air, 26 C dew point — hot AND saturated. Index = 86 + 78.8 = 164.8.
     out = heat.adjust(30, 26, 420, 455)
     assert out["level"] == "severe"
     assert out["adjusted"] is True
-    assert out["penalty_sec"] == 34          # 8% of 7:00/km
-    assert out["pace_low_sec"] == 454
-    assert out["adjusted_band"] == "7:34-8:09"
+    assert out["stress_index"] == 165
+    assert out["penalty_sec"] == 29          # ~7.0%, interpolated — NOT the 8% band ceiling
+
+
+def test_the_penalty_is_interpolated_not_rounded_up_to_the_worst_case():
+    # 160-170 on the table means 6-8%. An index of 161 must not be charged 8%.
+    low = heat.adjust(28.3, 22.2, 420, 455)   # index ~161
+    high = heat.adjust(33, 27, 420, 455)      # index ~172
+    assert low["slowdown_pct"] < 6.5
+    assert high["slowdown_pct"] > low["slowdown_pct"]
 
 
 def test_humidity_not_just_temperature_drives_the_penalty():
@@ -158,6 +165,13 @@ def test_humidity_not_just_temperature_drives_the_penalty():
 def test_the_explanation_says_same_effort_not_easier():
     out = heat.adjust(30, 26, 420, 455)
     assert "SAME effort" in out["detail"]
+
+
+def test_a_humid_day_blames_the_humidity_not_the_sun():
+    # The runner's own words: "it's rainy season, there's hardly any sun."
+    out = heat.adjust(30, 26, 420, 455)
+    assert "not the sun" in out["detail"]
+    assert "overcast" in out["detail"].lower()
 
 
 def test_a_trivial_penalty_is_not_worth_changing_targets_for():
