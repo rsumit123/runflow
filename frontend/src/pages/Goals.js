@@ -25,7 +25,7 @@ function formatDistanceLabel(meters) {
 const DISTANCES = [100, 200, 400, 500, 1000, 2000];
 
 const cardStyle = {
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#0b0f14',
   borderRadius: '8px',
   padding: '16px',
   marginBottom: '16px',
@@ -51,7 +51,7 @@ const btnBase = {
 
 const accentBtn = {
   ...btnBase,
-  backgroundColor: '#fc5200',
+  backgroundColor: '#ff5a1f',
   color: '#fff',
 };
 
@@ -59,32 +59,32 @@ const outlineBtn = {
   ...btnBase,
   backgroundColor: 'transparent',
   border: '1px solid #333',
-  color: '#a0a0b0',
+  color: '#93a1b1',
 };
 
 const selectedBtn = {
   ...btnBase,
-  backgroundColor: '#fc5200',
+  backgroundColor: '#ff5a1f',
   color: '#fff',
-  border: '1px solid #fc5200',
+  border: '1px solid #ff5a1f',
 };
 
 const unselectedBtn = {
   ...btnBase,
-  backgroundColor: '#16213e',
-  color: '#a0a0b0',
+  backgroundColor: '#111820',
+  color: '#93a1b1',
   border: '1px solid #333',
 };
 
 function ProgressBar({ current, target, achieved }) {
   const pct = target > 0 ? Math.min(100, Math.max(0, (current / target) * 100)) : 0;
   return (
-    <div style={{ width: '100%', height: '8px', backgroundColor: '#0f0f1a', borderRadius: '4px', overflow: 'hidden', marginTop: '8px' }}>
+    <div style={{ width: '100%', height: '8px', backgroundColor: '#0b0f14', borderRadius: '4px', overflow: 'hidden', marginTop: '8px' }}>
       <div
         style={{
           width: `${pct}%`,
           height: '100%',
-          backgroundColor: achieved ? '#4ade80' : '#fc5200',
+          backgroundColor: achieved ? '#3ddc84' : '#ff5a1f',
           borderRadius: '4px',
           transition: 'width 0.4s ease',
         }}
@@ -107,18 +107,18 @@ function GoalCard({ goal, onDelete }) {
       return (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <span style={{ color: '#a0a0b0', fontSize: '13px' }}>
+            <span style={{ color: '#93a1b1', fontSize: '13px' }}>
               {formatDistanceLabel(goal.distance_target)}
               <span style={{
                 marginLeft: '8px', fontSize: '10px', fontWeight: 600, padding: '1px 6px', borderRadius: '4px',
-                backgroundColor: (goal.mode || progress?.mode) === 'sprint' ? '#4ade8018' : '#fc520018',
-                color: (goal.mode || progress?.mode) === 'sprint' ? '#4ade80' : '#fc5200',
+                backgroundColor: (goal.mode || progress?.mode) === 'sprint' ? '#3ddc8418' : '#ff5a1f18',
+                color: (goal.mode || progress?.mode) === 'sprint' ? '#3ddc84' : '#ff5a1f',
               }}>
                 {(goal.mode || progress?.mode) === 'sprint' ? 'SPRINT' : 'SEGMENT'}
               </span>
             </span>
             {achieved && (
-              <span style={{ backgroundColor: '#4ade80', color: '#0f0f1a', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>
+              <span style={{ backgroundColor: '#3ddc84', color: '#0b0f14', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>
                 ACHIEVED
               </span>
             )}
@@ -137,7 +137,7 @@ function GoalCard({ goal, onDelete }) {
             {gap != null && !achieved && (
               <div>
                 <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>Gap</div>
-                <div style={{ color: '#fc5200', fontSize: '16px', fontWeight: 600 }}>+{gap.toFixed(1)}s</div>
+                <div style={{ color: '#ff5a1f', fontSize: '16px', fontWeight: 600 }}>+{gap.toFixed(1)}s</div>
               </div>
             )}
             {progress?.other_mode_best && (
@@ -145,7 +145,7 @@ function GoalCard({ goal, onDelete }) {
                 <div style={{ color: '#666', fontSize: '11px', textTransform: 'uppercase' }}>
                   {(goal.mode || progress?.mode) === 'sprint' ? 'Segment best' : 'Sprint best'}
                 </div>
-                <div style={{ color: '#a0a0b0', fontSize: '16px', fontWeight: 600 }}>{formatTime(progress.other_mode_best)}</div>
+                <div style={{ color: '#93a1b1', fontSize: '16px', fontWeight: 600 }}>{formatTime(progress.other_mode_best)}</div>
               </div>
             )}
           </div>
@@ -160,9 +160,9 @@ function GoalCard({ goal, onDelete }) {
       return (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <span style={{ color: '#a0a0b0', fontSize: '13px' }}>Consistency Goal</span>
+            <span style={{ color: '#93a1b1', fontSize: '13px' }}>Consistency Goal</span>
             {achieved && (
-              <span style={{ backgroundColor: '#4ade80', color: '#0f0f1a', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>
+              <span style={{ backgroundColor: '#3ddc84', color: '#0b0f14', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>
                 ACHIEVED
               </span>
             )}
@@ -188,9 +188,9 @@ function GoalCard({ goal, onDelete }) {
       return (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <span style={{ color: '#a0a0b0', fontSize: '13px' }}>Volume Goal</span>
+            <span style={{ color: '#93a1b1', fontSize: '13px' }}>Volume Goal</span>
             {achieved && (
-              <span style={{ backgroundColor: '#4ade80', color: '#0f0f1a', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>
+              <span style={{ backgroundColor: '#3ddc84', color: '#0b0f14', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>
                 ACHIEVED
               </span>
             )}
@@ -263,7 +263,7 @@ function EffortTimeline({ efforts }) {
                   width: '10px',
                   height: '10px',
                   borderRadius: '50%',
-                  backgroundColor: i === 0 ? '#fc5200' : '#4a4a6a',
+                  backgroundColor: i === 0 ? '#ff5a1f' : '#4a4a6a',
                 }}
                 title={`${formatTime(e.time_seconds)} on ${formatDate(e.date)}`}
               />
@@ -399,7 +399,7 @@ function AddGoalFlow({ onGoalCreated }) {
                 }
               }}
               style={{
-                backgroundColor: '#0f0f1a',
+                backgroundColor: '#0b0f14',
                 border: '1px solid #333',
                 borderRadius: '6px',
                 color: '#fff',
@@ -486,18 +486,18 @@ function AddGoalFlow({ onGoalCreated }) {
       )}
 
       {loading && (
-        <div style={{ color: '#a0a0b0', padding: '20px 0', textAlign: 'center' }}>Loading recommendation...</div>
+        <div style={{ color: '#93a1b1', padding: '20px 0', textAlign: 'center' }}>Loading recommendation...</div>
       )}
 
       {error && (
-        <div style={{ color: '#ef4444', fontSize: '13px', padding: '8px 0' }}>{error}</div>
+        <div style={{ color: '#ff4d4f', fontSize: '13px', padding: '8px 0' }}>{error}</div>
       )}
 
       {/* Step 3: Show Recommendation */}
       {step === 3 && recommendation && !loading && (
         <div>
           {goalType === 'speed' && (
-            <div style={{ backgroundColor: '#0f0f1a', borderRadius: '6px', padding: '14px', marginBottom: '12px' }}>
+            <div style={{ backgroundColor: '#0b0f14', borderRadius: '6px', padding: '14px', marginBottom: '12px' }}>
               {/* Mode toggle */}
               <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
                 <button onClick={() => {
@@ -505,7 +505,7 @@ function AddGoalFlow({ onGoalCreated }) {
                   setTargetSeconds(recommendation.recommended_target);
                 }} style={{
                   padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
-                  backgroundColor: goalMode === 'any' ? '#fc5200' : '#16213e', color: goalMode === 'any' ? '#fff' : '#a0a0b0',
+                  backgroundColor: goalMode === 'any' ? '#ff5a1f' : '#111820', color: goalMode === 'any' ? '#fff' : '#93a1b1',
                 }}>
                   Segment
                 </button>
@@ -514,7 +514,7 @@ function AddGoalFlow({ onGoalCreated }) {
                   setTargetSeconds(recommendation.sprint_recommended || recommendation.recommended_target);
                 }} style={{
                   padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
-                  backgroundColor: goalMode === 'sprint' ? '#4ade80' : '#16213e', color: goalMode === 'sprint' ? '#0a2a0a' : '#a0a0b0',
+                  backgroundColor: goalMode === 'sprint' ? '#3ddc84' : '#111820', color: goalMode === 'sprint' ? '#0a2a0a' : '#93a1b1',
                 }}>
                   Sprint Only
                 </button>
@@ -525,7 +525,7 @@ function AddGoalFlow({ onGoalCreated }) {
                   : 'Best segment found within any run (e.g. fastest 500m inside a 3km run)'}
               </div>
 
-              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.8 }}>
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#93a1b1', lineHeight: 1.8 }}>
                 <span>
                   Best ({goalMode === 'sprint' ? 'sprint' : 'segment'}): <strong style={{ color: '#fff' }}>
                     {formatTime(goalMode === 'sprint' ? recommendation.sprint_best : recommendation.all_time_best)}
@@ -539,14 +539,14 @@ function AddGoalFlow({ onGoalCreated }) {
                 </span>
                 {recommendation.trend_direction && (
                   <span>
-                    Trend: <strong style={{ color: recommendation.trend_direction === 'improving' ? '#4ade80' : '#fc5200' }}>
+                    Trend: <strong style={{ color: recommendation.trend_direction === 'improving' ? '#3ddc84' : '#ff5a1f' }}>
                       {recommendation.trend_direction}
                     </strong>
                   </span>
                 )}
               </div>
-              <div style={{ marginTop: '6px', fontSize: '13px', color: '#a0a0b0' }}>
-                Recommended: <strong style={{ color: '#fc5200' }}>
+              <div style={{ marginTop: '6px', fontSize: '13px', color: '#93a1b1' }}>
+                Recommended: <strong style={{ color: '#ff5a1f' }}>
                   {formatTime(goalMode === 'sprint' ? (recommendation.sprint_recommended || recommendation.recommended_target) : recommendation.recommended_target)}
                 </strong>
               </div>
@@ -558,8 +558,8 @@ function AddGoalFlow({ onGoalCreated }) {
           )}
 
           {goalType === 'consistency' && (
-            <div style={{ backgroundColor: '#0f0f1a', borderRadius: '6px', padding: '14px', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.8 }}>
+            <div style={{ backgroundColor: '#0b0f14', borderRadius: '6px', padding: '14px', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#93a1b1', lineHeight: 1.8 }}>
                 <span>
                   Avg runs/week: <strong style={{ color: '#fff' }}>{recommendation.current_avg_per_week?.toFixed(1)}</strong>
                 </span>
@@ -567,15 +567,15 @@ function AddGoalFlow({ onGoalCreated }) {
                   Best week: <strong style={{ color: '#fff' }}>{recommendation.best_week} runs</strong>
                 </span>
                 <span>
-                  Recommended: <strong style={{ color: '#fc5200' }}>{recommendation.recommended_target} runs/week</strong>
+                  Recommended: <strong style={{ color: '#ff5a1f' }}>{recommendation.recommended_target} runs/week</strong>
                 </span>
               </div>
             </div>
           )}
 
           {goalType === 'volume' && (
-            <div style={{ backgroundColor: '#0f0f1a', borderRadius: '6px', padding: '14px', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.8 }}>
+            <div style={{ backgroundColor: '#0b0f14', borderRadius: '6px', padding: '14px', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#93a1b1', lineHeight: 1.8 }}>
                 <span>
                   Avg km/week: <strong style={{ color: '#fff' }}>{recommendation.current_avg_km_per_week?.toFixed(1)}</strong>
                 </span>
@@ -583,7 +583,7 @@ function AddGoalFlow({ onGoalCreated }) {
                   Best week: <strong style={{ color: '#fff' }}>{recommendation.best_week_km?.toFixed(1)} km</strong>
                 </span>
                 <span>
-                  Recommended: <strong style={{ color: '#fc5200' }}>{recommendation.recommended_target} km/week</strong>
+                  Recommended: <strong style={{ color: '#ff5a1f' }}>{recommendation.recommended_target} km/week</strong>
                 </span>
               </div>
             </div>
@@ -632,14 +632,14 @@ function Goals() {
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0' }}>
+      <div style={{ textAlign: 'center', padding: '60px', color: '#93a1b1' }}>
         Loading goals...
       </div>
     );
   }
 
   return (
-    <div style={{ backgroundColor: '#0f0f1a', minHeight: '100vh', padding: '20px', maxWidth: '700px', margin: '0 auto' }}>
+    <div style={{ backgroundColor: '#0b0f14', minHeight: '100vh', padding: '20px', maxWidth: '700px', margin: '0 auto' }}>
       <h1 style={{ color: '#fff', fontSize: '24px', fontWeight: 700, marginBottom: '24px' }}>Goals</h1>
 
       {/* Active Goals */}

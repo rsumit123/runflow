@@ -12,14 +12,14 @@ L.Icon.Default.mergeOptions({
 });
 
 const startIcon = new L.DivIcon({
-  html: '<div style="background:#4ade80;width:12px;height:12px;border-radius:50%;border:2px solid #fff;"></div>',
+  html: '<div style="background:#3ddc84;width:12px;height:12px;border-radius:50%;border:2px solid #fff;"></div>',
   className: '',
   iconSize: [12, 12],
   iconAnchor: [6, 6],
 });
 
 const endIcon = new L.DivIcon({
-  html: '<div style="background:#ff6b6b;width:12px;height:12px;border-radius:50%;border:2px solid #fff;"></div>',
+  html: '<div style="background:#ff4d4f;width:12px;height:12px;border-radius:50%;border:2px solid #fff;"></div>',
   className: '',
   iconSize: [12, 12],
   iconAnchor: [6, 6],
@@ -60,7 +60,7 @@ function RouteMap({ latlng, polyline, height = 300, highlight }) {
   if (!positions || positions.length < 2) {
     return (
       <div style={{
-        backgroundColor: '#1a1a2e',
+        backgroundColor: '#0b0f14',
         borderRadius: '8px',
         height: `${height}px`,
         display: 'flex',
@@ -83,7 +83,7 @@ function RouteMap({ latlng, polyline, height = 300, highlight }) {
       <MapContainer
         center={startPos}
         zoom={15}
-        style={{ height: '100%', width: '100%', background: '#0f0f1a' }}
+        style={{ height: '100%', width: '100%', background: '#0b0f14' }}
         zoomControl={true}
         scrollWheelZoom={true}
       >
@@ -95,7 +95,7 @@ function RouteMap({ latlng, polyline, height = 300, highlight }) {
         <Polyline
           positions={positions}
           pathOptions={{
-            color: highlightPositions ? '#666' : '#fc5200',
+            color: highlightPositions ? '#666' : '#ff5a1f',
             weight: highlightPositions ? 2 : 3,
             opacity: highlightPositions ? 0.4 : 0.9,
           }}
@@ -104,7 +104,7 @@ function RouteMap({ latlng, polyline, height = 300, highlight }) {
         {highlightPositions && highlightPositions.length >= 2 && (
           <Polyline
             positions={highlightPositions}
-            pathOptions={{ color: '#4ade80', weight: 5, opacity: 1 }}
+            pathOptions={{ color: '#3ddc84', weight: 5, opacity: 1 }}
           />
         )}
         <Marker position={startPos} icon={startIcon} />

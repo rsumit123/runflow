@@ -38,14 +38,14 @@ function App() {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '12px 16px',
-        backgroundColor: '#1a1a2e',
-        borderBottom: '2px solid #fc5200',
+        backgroundColor: '#0b0f14',
+        borderBottom: '1px solid #1e2936',
         position: 'relative',
       }}>
         <Link to="/" style={{
           fontSize: '18px',
           fontWeight: 700,
-          color: '#fc5200',
+          color: '#ff5a1f',
           letterSpacing: '1px',
           whiteSpace: 'nowrap',
         }}>
@@ -56,7 +56,7 @@ function App() {
         <div style={{ display: 'flex', gap: '16px' }} className="desktop-nav">
           {navLinks.map(({ path, label }) => (
             <Link key={path} to={path} style={{
-              color: isActive(path) ? '#fc5200' : '#a0a0b0',
+              color: isActive(path) ? '#ff5a1f' : '#93a1b1',
               fontWeight: isActive(path) ? 600 : 400,
               fontSize: '14px',
             }}>
@@ -79,17 +79,17 @@ function App() {
         >
           <div style={{ width: '22px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <span style={{
-              display: 'block', height: '2px', backgroundColor: '#e0e0e0', borderRadius: '1px',
+              display: 'block', height: '2px', backgroundColor: '#e8edf2', borderRadius: '1px',
               transition: 'transform 0.2s',
               transform: menuOpen ? 'rotate(45deg) translate(4px, 4px)' : 'none',
             }} />
             <span style={{
-              display: 'block', height: '2px', backgroundColor: '#e0e0e0', borderRadius: '1px',
+              display: 'block', height: '2px', backgroundColor: '#e8edf2', borderRadius: '1px',
               transition: 'opacity 0.2s',
               opacity: menuOpen ? 0 : 1,
             }} />
             <span style={{
-              display: 'block', height: '2px', backgroundColor: '#e0e0e0', borderRadius: '1px',
+              display: 'block', height: '2px', backgroundColor: '#e8edf2', borderRadius: '1px',
               transition: 'transform 0.2s',
               transform: menuOpen ? 'rotate(-45deg) translate(4px, -4px)' : 'none',
             }} />
@@ -103,8 +103,8 @@ function App() {
             top: '100%',
             left: 0,
             right: 0,
-            backgroundColor: '#1a1a2e',
-            borderBottom: '2px solid #fc5200',
+            backgroundColor: '#0b0f14',
+            borderBottom: '1px solid #1e2936',
             zIndex: 100,
             display: 'none',
           }}>
@@ -112,10 +112,10 @@ function App() {
               <Link key={path} to={path} style={{
                 display: 'block',
                 padding: '14px 20px',
-                color: isActive(path) ? '#fc5200' : '#e0e0e0',
+                color: isActive(path) ? '#ff5a1f' : '#e8edf2',
                 fontWeight: isActive(path) ? 600 : 400,
                 fontSize: '15px',
-                borderBottom: '1px solid #252540',
+                borderBottom: '1px solid #1e2936',
               }}>
                 {label}
               </Link>

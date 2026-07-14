@@ -17,7 +17,7 @@ function getStreamData(activity, streamType) {
 }
 
 const chartTooltipStyle = {
-  backgroundColor: '#16213e',
+  backgroundColor: '#111820',
   border: '1px solid #333',
   borderRadius: '6px',
   fontSize: '13px',
@@ -26,7 +26,7 @@ const chartTooltipStyle = {
 const backLink = {
   display: 'inline-block',
   marginBottom: '20px',
-  color: '#a0a0b0',
+  color: '#93a1b1',
   fontSize: '14px',
 };
 
@@ -40,7 +40,7 @@ const titleStyle = {
 
 const dateStyle = {
   fontSize: '14px',
-  color: '#a0a0b0',
+  color: '#93a1b1',
   marginBottom: '24px',
 };
 
@@ -52,7 +52,7 @@ const statsGrid = {
 };
 
 const statCard = {
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#0b0f14',
   borderRadius: '8px',
   padding: '20px',
   textAlign: 'center',
@@ -63,19 +63,19 @@ const statLabel = {
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: '1px',
-  color: '#a0a0b0',
+  color: '#93a1b1',
   marginBottom: '6px',
 };
 
 const statValue = {
   fontSize: '24px',
   fontWeight: 700,
-  color: '#fc5200',
+  color: '#ff5a1f',
 };
 
 const statUnit = {
   fontSize: '13px',
-  color: '#a0a0b0',
+  color: '#93a1b1',
   marginTop: '2px',
 };
 
@@ -90,7 +90,7 @@ const sectionTitle = {
 const loadingStyle = {
   textAlign: 'center',
   padding: '60px',
-  color: '#a0a0b0',
+  color: '#93a1b1',
   fontSize: '16px',
 };
 
@@ -99,15 +99,15 @@ const errorStyle = {
   backgroundColor: '#3d1515',
   border: '1px solid #6b2020',
   borderRadius: '8px',
-  color: '#ff6b6b',
+  color: '#ff4d4f',
 };
 
 const bestSplitCard = {
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#0b0f14',
   borderRadius: '8px',
   padding: '20px',
   textAlign: 'center',
-  border: '1px solid #fc5200',
+  border: '1px solid #ff5a1f',
   marginBottom: '24px',
 };
 
@@ -164,7 +164,7 @@ const deleteButtonStyle = {
   borderRadius: '6px',
   border: '1px solid #6b2020',
   backgroundColor: 'transparent',
-  color: '#ff6b6b',
+  color: '#ff4d4f',
   fontSize: '13px',
   fontWeight: 600,
   cursor: 'pointer',
@@ -214,30 +214,30 @@ function IntervalBreakdown({ data }) {
   if (!data || !data.segments) return null;
   const summary = data.summary || {};
   return (
-    <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+    <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
       <h2 style={{ ...sectionTitle, marginTop: 0, marginBottom: '14px' }}>Interval Breakdown</h2>
       {/* Summary cards */}
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+        <div style={{ backgroundColor: '#111820', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
           <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Workout</div>
-          <div style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{summary.total_reps} x {summary.rep_distance_m}m</div>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#ff5a1f' }}>{summary.total_reps} x {summary.rep_distance_m}m</div>
         </div>
-        <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+        <div style={{ backgroundColor: '#111820', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
           <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Avg Rep Pace</div>
-          <div style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{formatPaceSeconds(summary.avg_rep_pace)}/km</div>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#ff5a1f' }}>{formatPaceSeconds(summary.avg_rep_pace)}/km</div>
         </div>
-        <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+        <div style={{ backgroundColor: '#111820', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
           <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Avg Rest</div>
-          <div style={{ fontSize: '18px', fontWeight: 700, color: '#a0a0b0' }}>{formatTime(summary.avg_rest_duration_s)}</div>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#93a1b1' }}>{formatTime(summary.avg_rest_duration_s)}</div>
         </div>
       </div>
       {/* Fastest/Slowest */}
       {summary.fastest_rep && summary.total_reps > 1 && (
-        <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '14px' }}>
-          Fastest: <span style={{ color: '#4ade80', fontWeight: 600 }}>Rep {summary.fastest_rep} ({formatPaceSeconds(summary.fastest_rep_pace)}/km)</span>
+        <div style={{ fontSize: '12px', color: '#93a1b1', marginBottom: '14px' }}>
+          Fastest: <span style={{ color: '#3ddc84', fontWeight: 600 }}>Rep {summary.fastest_rep} ({formatPaceSeconds(summary.fastest_rep_pace)}/km)</span>
           {summary.slowest_rep !== summary.fastest_rep && (
             <span style={{ marginLeft: '12px' }}>
-              Slowest: <span style={{ color: '#ff6b6b', fontWeight: 600 }}>Rep {summary.slowest_rep} ({formatPaceSeconds(summary.slowest_rep_pace)}/km)</span>
+              Slowest: <span style={{ color: '#ff4d4f', fontWeight: 600 }}>Rep {summary.slowest_rep} ({formatPaceSeconds(summary.slowest_rep_pace)}/km)</span>
             </span>
           )}
         </div>
@@ -254,20 +254,20 @@ function IntervalBreakdown({ data }) {
         return (
           <div key={i} style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '8px 12px', borderBottom: '1px solid #252540',
+            padding: '8px 12px', borderBottom: '1px solid #1e2936',
             backgroundColor: isFastest ? 'rgba(74,222,128,0.06)' : isSlowest ? 'rgba(255,107,107,0.06)' : 'transparent',
             fontSize: '13px',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '80px' }}>
               <div style={{
                 width: '8px', height: '8px', borderRadius: '50%',
-                backgroundColor: isRep ? '#fc5200' : isRest ? '#555' : '#333',
+                backgroundColor: isRep ? '#ff5a1f' : isRest ? '#555' : '#333',
               }} />
-              <span style={{ color: isRep ? '#fc5200' : '#666', fontWeight: isRep ? 600 : 400 }}>{label}</span>
+              <span style={{ color: isRep ? '#ff5a1f' : '#666', fontWeight: isRep ? 600 : 400 }}>{label}</span>
             </div>
-            <span style={{ color: '#e0e0e0' }}>{seg.distance_m}m</span>
-            <span style={{ color: '#e0e0e0' }}>{formatTime(seg.duration_s)}</span>
-            <span style={{ color: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b' : isRep ? '#fc5200' : '#555', fontWeight: isRep ? 600 : 400 }}>
+            <span style={{ color: '#e8edf2' }}>{seg.distance_m}m</span>
+            <span style={{ color: '#e8edf2' }}>{formatTime(seg.duration_s)}</span>
+            <span style={{ color: isFastest ? '#3ddc84' : isSlowest ? '#ff4d4f' : isRep ? '#ff5a1f' : '#555', fontWeight: isRep ? 600 : 400 }}>
               {seg.pace_sec_per_km ? `${formatPaceSeconds(seg.pace_sec_per_km)}/km` : '-'}
             </span>
           </div>
@@ -524,12 +524,12 @@ function ActivityDetail() {
       <div style={dateStyle}>
         {formatDate(activity.start_date)}
         {activity.route_name && (
-          <span style={{ marginLeft: '12px', color: '#fc5200', backgroundColor: '#fc520015', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
+          <span style={{ marginLeft: '12px', color: '#ff5a1f', backgroundColor: '#ff5a1f15', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
             {activity.route_name}
           </span>
         )}
         {isInterval && (
-          <span style={{ marginLeft: '8px', color: '#fbbf24', backgroundColor: '#fbbf2415', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
+          <span style={{ marginLeft: '8px', color: '#f5a623', backgroundColor: '#f5a62315', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
             Interval
           </span>
         )}
@@ -545,7 +545,7 @@ function ActivityDetail() {
           style={{
             display: 'inline-flex', alignItems: 'center', gap: '8px',
             minHeight: '44px', padding: '0 20px', borderRadius: '8px', border: 'none',
-            backgroundColor: '#fc5200', color: '#fff', fontSize: '15px', fontWeight: 600,
+            backgroundColor: '#ff5a1f', color: '#fff', fontSize: '15px', fontWeight: 600,
             cursor: 'pointer',
           }}>
           <span>&#128172;</span>
@@ -565,7 +565,7 @@ function ActivityDetail() {
             onClick={clearChat}
             style={{
               marginLeft: '12px', minHeight: '44px', background: 'none', border: 'none',
-              color: '#94a3b8', fontSize: '13px', cursor: 'pointer',
+              color: '#93a1b1', fontSize: '13px', cursor: 'pointer',
             }}>
             Clear chat
           </button>
@@ -573,8 +573,8 @@ function ActivityDetail() {
 
         {chatOpen && (
           <div style={{
-            marginTop: '12px', backgroundColor: '#1a1a2e', borderRadius: '8px',
-            border: '1px solid #252540', overflow: 'hidden',
+            marginTop: '12px', backgroundColor: '#0b0f14', borderRadius: '8px',
+            border: '1px solid #1e2936', overflow: 'hidden',
             display: 'flex', flexDirection: 'column',
           }}>
             {/* Messages area */}
@@ -584,7 +584,7 @@ function ActivityDetail() {
             }}>
               {messages.length === 0 && !sending && (
                 <div>
-                  <div style={{ fontSize: '13px', color: '#a0a0b0', lineHeight: 1.6, marginBottom: '12px' }}>
+                  <div style={{ fontSize: '13px', color: '#93a1b1', lineHeight: 1.6, marginBottom: '12px' }}>
                     Ask me anything about this run — pacing, heart rate, how it stacks up against your recent runs.
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -599,8 +599,8 @@ function ActivityDetail() {
                         onClick={() => sendChat(chip)}
                         style={{
                           textAlign: 'left', minHeight: '44px', padding: '8px 14px',
-                          borderRadius: '8px', border: '1px solid #fc520044',
-                          backgroundColor: '#fc520012', color: '#fc5200',
+                          borderRadius: '8px', border: '1px solid #ff5a1f44',
+                          backgroundColor: '#ff5a1f12', color: '#ff5a1f',
                           fontSize: '13px', fontWeight: 600, cursor: 'pointer',
                         }}>
                         {chip}
@@ -617,8 +617,8 @@ function ActivityDetail() {
                     <div style={{
                       maxWidth: '85%', padding: '10px 14px', borderRadius: '12px',
                       fontSize: '14px', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                      backgroundColor: isUser ? '#fc5200' : '#16213e',
-                      color: isUser ? '#fff' : '#e0e0e0',
+                      backgroundColor: isUser ? '#ff5a1f' : '#111820',
+                      color: isUser ? '#fff' : '#e8edf2',
                       borderTopRightRadius: isUser ? '4px' : '12px',
                       borderTopLeftRadius: isUser ? '12px' : '4px',
                     }}>
@@ -632,7 +632,7 @@ function ActivityDetail() {
                 <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                   <div style={{
                     padding: '10px 14px', borderRadius: '12px', borderTopLeftRadius: '4px',
-                    fontSize: '14px', color: '#a0a0b0', backgroundColor: '#16213e', fontStyle: 'italic',
+                    fontSize: '14px', color: '#93a1b1', backgroundColor: '#111820', fontStyle: 'italic',
                   }}>
                     Analyzing your run&hellip;
                   </div>
@@ -643,7 +643,7 @@ function ActivityDetail() {
             {/* Input row */}
             <div style={{
               display: 'flex', gap: '8px', padding: '12px 16px',
-              borderTop: '1px solid #252540',
+              borderTop: '1px solid #1e2936',
             }}>
               <input
                 type="text"
@@ -653,7 +653,7 @@ function ActivityDetail() {
                 placeholder="Ask about this run…"
                 style={{
                   flex: 1, minWidth: 0, minHeight: '44px', padding: '0 14px', borderRadius: '8px',
-                  border: '1px solid #333', backgroundColor: '#0f0f1a', color: '#fff',
+                  border: '1px solid #333', backgroundColor: '#0b0f14', color: '#fff',
                   fontSize: '16px',
                 }}
               />
@@ -662,7 +662,7 @@ function ActivityDetail() {
                 disabled={sending || !chatInput.trim()}
                 style={{
                   minHeight: '44px', padding: '0 20px', borderRadius: '8px', border: 'none',
-                  backgroundColor: '#fc5200', color: '#fff', fontSize: '14px', fontWeight: 600,
+                  backgroundColor: '#ff5a1f', color: '#fff', fontSize: '14px', fontWeight: 600,
                   cursor: (sending || !chatInput.trim()) ? 'default' : 'pointer',
                   opacity: (sending || !chatInput.trim()) ? 0.5 : 1,
                   flexShrink: 0,
@@ -677,7 +677,7 @@ function ActivityDetail() {
       {activity.gps_glitch_count > 0 && (
         <div style={{
           backgroundColor: '#3d2515', border: '1px solid #6b4020', borderRadius: '8px',
-          padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#fbbf24',
+          padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#f5a623',
           display: 'flex', alignItems: 'center', gap: '8px',
         }}>
           <span style={{ fontSize: '16px' }}>&#9888;</span>
@@ -744,17 +744,17 @@ function ActivityDetail() {
 
       {/* ── Interval Insight ── */}
       {isInterval && intervalInsight && intervalInsight.narratives.length > 0 && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <h2 style={{ ...sectionTitle, marginBottom: '12px', fontSize: '16px' }}>Interval Insight</h2>
           {intervalInsight.narratives.map((n, i) => (
-            <p key={i} style={{ color: '#e0e0e0', fontSize: '13px', lineHeight: 1.6, marginBottom: '6px' }}>{n}</p>
+            <p key={i} style={{ color: '#e8edf2', fontSize: '13px', lineHeight: 1.6, marginBottom: '6px' }}>{n}</p>
           ))}
           {intervalInsight.tips.length > 0 && (
-            <div style={{ marginTop: '12px', borderTop: '1px solid #252540', paddingTop: '10px' }}>
+            <div style={{ marginTop: '12px', borderTop: '1px solid #1e2936', paddingTop: '10px' }}>
               {intervalInsight.tips.map((t, i) => (
                 <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '6px', fontSize: '12px' }}>
-                  <span style={{ color: '#fbbf24', flexShrink: 0 }}>Tip:</span>
-                  <span style={{ color: '#a0a0b0' }}>{t}</span>
+                  <span style={{ color: '#f5a623', flexShrink: 0 }}>Tip:</span>
+                  <span style={{ color: '#93a1b1' }}>{t}</span>
                 </div>
               ))}
             </div>
@@ -764,10 +764,10 @@ function ActivityDetail() {
 
       {/* ── Run Insight — hidden for interval runs ── */}
       {!isInterval && insight && insight.narratives.length > 0 && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <h2 style={{ ...sectionTitle, marginBottom: '12px', fontSize: '16px' }}>Run Insight</h2>
           {insight.narratives.map((n, i) => (
-            <p key={i} style={{ color: '#e0e0e0', fontSize: '13px', lineHeight: 1.6, marginBottom: '6px' }}>{n}</p>
+            <p key={i} style={{ color: '#e8edf2', fontSize: '13px', lineHeight: 1.6, marginBottom: '6px' }}>{n}</p>
           ))}
           {/* Pacing flow with history comparison */}
           {insight.pace_segments && insight.pace_segments.length > 0 && (
@@ -786,11 +786,11 @@ function ActivityDetail() {
                   const isSlower = seg.history_avg && seg.pace > seg.history_avg + 3;
                   return (
                     <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-                      <div style={{ fontSize: '11px', color: isFaster ? '#4ade80' : isSlower ? '#ff6b6b' : '#a0a0b0', fontWeight: 600, marginBottom: '3px' }}>
+                      <div style={{ fontSize: '11px', color: isFaster ? '#3ddc84' : isSlower ? '#ff4d4f' : '#93a1b1', fontWeight: 600, marginBottom: '3px' }}>
                         {seg.pace_formatted}
                       </div>
                       <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'flex-end', height: '56px' }}>
-                        <div style={{ width: '40%', height: `${height}px`, borderRadius: '2px 2px 0 0', backgroundColor: isFaster ? '#4ade80' : isSlower ? '#ff6b6b55' : '#fc520077' }} />
+                        <div style={{ width: '40%', height: `${height}px`, borderRadius: '2px 2px 0 0', backgroundColor: isFaster ? '#3ddc84' : isSlower ? '#ff4d4f55' : '#ff5a1f77' }} />
                         {seg.history_avg && (
                           <div style={{ width: '40%', height: `${histHeight}px`, borderRadius: '2px 2px 0 0', backgroundColor: '#ffffff15', border: '1px solid #ffffff22' }} />
                         )}
@@ -802,18 +802,18 @@ function ActivityDetail() {
               </div>
               {insight.pace_segments.some(s => s.history_avg) && (
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', fontSize: '10px', color: '#555', marginBottom: '4px' }}>
-                  <span><span style={{ display: 'inline-block', width: '8px', height: '8px', backgroundColor: '#fc520077', borderRadius: '2px', marginRight: '4px' }}/>Today</span>
+                  <span><span style={{ display: 'inline-block', width: '8px', height: '8px', backgroundColor: '#ff5a1f77', borderRadius: '2px', marginRight: '4px' }}/>Today</span>
                   <span><span style={{ display: 'inline-block', width: '8px', height: '8px', backgroundColor: '#ffffff15', border: '1px solid #ffffff22', borderRadius: '2px', marginRight: '4px' }}/>Recent avg</span>
                 </div>
               )}
             </div>
           )}
           {insight.tips.length > 0 && (
-            <div style={{ marginTop: '12px', borderTop: '1px solid #252540', paddingTop: '10px' }}>
+            <div style={{ marginTop: '12px', borderTop: '1px solid #1e2936', paddingTop: '10px' }}>
               {insight.tips.map((t, i) => (
                 <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '6px', fontSize: '12px' }}>
-                  <span style={{ color: '#fbbf24', flexShrink: 0 }}>Tip:</span>
-                  <span style={{ color: '#a0a0b0' }}>{t}</span>
+                  <span style={{ color: '#f5a623', flexShrink: 0 }}>Tip:</span>
+                  <span style={{ color: '#93a1b1' }}>{t}</span>
                 </div>
               ))}
             </div>
@@ -827,15 +827,15 @@ function ActivityDetail() {
           <IntervalBreakdown data={savedConfig.result} />
           {/* Interval metrics */}
           {runMetrics && runMetrics.consistency != null && (
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', marginTop: '-12px', fontSize: '12px', color: '#a0a0b0', flexWrap: 'wrap', paddingLeft: '4px' }}>
-              <span>Consistency: <strong style={{ color: runMetrics.consistency >= 80 ? '#4ade80' : runMetrics.consistency >= 60 ? '#fbbf24' : '#ff6b6b' }}>{runMetrics.consistency}/100</strong></span>
-              <span>Fade: <strong style={{ color: Math.abs(runMetrics.fade_s) <= 5 ? '#4ade80' : '#fbbf24' }}>{runMetrics.fade_s > 0 ? '+' : ''}{runMetrics.fade_s}s</strong></span>
-              <span>Decay: <strong style={{ color: Math.abs(runMetrics.decay_s_per_rep || 0) <= 2 ? '#4ade80' : '#fbbf24' }}>{(runMetrics.decay_s_per_rep || 0).toFixed(1)}s/rep</strong></span>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', marginTop: '-12px', fontSize: '12px', color: '#93a1b1', flexWrap: 'wrap', paddingLeft: '4px' }}>
+              <span>Consistency: <strong style={{ color: runMetrics.consistency >= 80 ? '#3ddc84' : runMetrics.consistency >= 60 ? '#f5a623' : '#ff4d4f' }}>{runMetrics.consistency}/100</strong></span>
+              <span>Fade: <strong style={{ color: Math.abs(runMetrics.fade_s) <= 5 ? '#3ddc84' : '#f5a623' }}>{runMetrics.fade_s > 0 ? '+' : ''}{runMetrics.fade_s}s</strong></span>
+              <span>Decay: <strong style={{ color: Math.abs(runMetrics.decay_s_per_rep || 0) <= 2 ? '#3ddc84' : '#f5a623' }}>{(runMetrics.decay_s_per_rep || 0).toFixed(1)}s/rep</strong></span>
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginBottom: '24px', marginTop: '-8px' }}>
             <button onClick={() => { setIntervals(null); setShowIntervalForm(true); }}
-              style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '11px', cursor: 'pointer' }}>
+              style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#93a1b1', fontSize: '11px', cursor: 'pointer' }}>
               Re-analyze
             </button>
             <button onClick={handleUntagInterval}
@@ -848,13 +848,13 @@ function ActivityDetail() {
 
       {/* ── Case 3: Tagged as interval but no saved config ── */}
       {isInterval && !hasSavedResult && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-            <span style={{ color: '#fbbf24', fontSize: '14px' }}>Tagged as interval run — excluded from pace averages</span>
+            <span style={{ color: '#f5a623', fontSize: '14px' }}>Tagged as interval run — excluded from pace averages</span>
             <div style={{ display: 'flex', gap: '8px' }}>
               {!showIntervalForm && (
                 <button onClick={() => setShowIntervalForm(true)}
-                  style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', backgroundColor: '#ff5a1f', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                   Analyze reps
                 </button>
               )}
@@ -881,11 +881,11 @@ function ActivityDetail() {
 
       {/* ── Case 1: Not interval, no saved config — prompt ── */}
       {!isInterval && activity.has_detailed_data && !intervals && !showIntervalForm && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-            <span style={{ color: '#a0a0b0', fontSize: '14px' }}>Was this an interval run?</span>
+            <span style={{ color: '#93a1b1', fontSize: '14px' }}>Was this an interval run?</span>
             <button onClick={() => setShowIntervalForm(true)}
-              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#ff5a1f', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
               Yes, analyze
             </button>
           </div>
@@ -894,7 +894,7 @@ function ActivityDetail() {
 
       {/* ── Interval config form (Case 1 expanded or re-analyze) ── */}
       {showIntervalForm && !intervals && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <IntervalForm
             repCount={repCount} setRepCount={setRepCount}
             repDistance={repDistance} setRepDistance={setRepDistance}
@@ -915,24 +915,24 @@ function ActivityDetail() {
           {/* Mark as interval prompt */}
           {showMarkPrompt && (
             <div style={{
-              backgroundColor: '#16213e', borderRadius: '8px', padding: '16px', marginBottom: '24px', marginTop: '-16px',
-              border: '1px solid #fbbf2433',
+              backgroundColor: '#111820', borderRadius: '8px', padding: '16px', marginBottom: '24px', marginTop: '-16px',
+              border: '1px solid #f5a62333',
             }}>
               <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>Mark as interval run?</div>
-              <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '14px' }}>
+              <div style={{ fontSize: '12px', color: '#93a1b1', marginBottom: '14px' }}>
                 This will exclude this run from pace averages and save your interval analysis.
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={() => handleMarkInterval(intervals)} disabled={marking}
                   style={{
                     padding: '8px 18px', borderRadius: '6px', border: 'none',
-                    backgroundColor: '#fbbf24', color: '#1a1a2e', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+                    backgroundColor: '#f5a623', color: '#0b0f14', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
                     opacity: marking ? 0.6 : 1,
                   }}>
                   {marking ? 'Saving...' : 'Mark as Interval'}
                 </button>
                 <button onClick={() => { setShowMarkPrompt(false); }}
-                  style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '13px', cursor: 'pointer' }}>
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: 'transparent', color: '#93a1b1', fontSize: '13px', cursor: 'pointer' }}>
                   Dismiss
                 </button>
               </div>
@@ -956,7 +956,7 @@ function ActivityDetail() {
           <button onClick={() => handleMarkInterval(intervals)} disabled={marking}
             style={{
               padding: '8px 18px', borderRadius: '6px', border: 'none',
-              backgroundColor: '#fbbf24', color: '#1a1a2e', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+              backgroundColor: '#f5a623', color: '#0b0f14', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
               opacity: marking ? 0.6 : 1,
             }}>
             {marking ? 'Saving...' : 'Save interval analysis'}
@@ -966,10 +966,10 @@ function ActivityDetail() {
 
       {/* ── Interval not detected ── */}
       {intervals && !intervals.is_interval && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ color: '#666', fontSize: '13px' }}>{intervals.message}</span>
           <button onClick={() => { setIntervals(null); setShowIntervalForm(true); }}
-            style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '11px', cursor: 'pointer' }}>
+            style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#93a1b1', fontSize: '11px', cursor: 'pointer' }}>
             Try again
           </button>
         </div>
@@ -988,27 +988,27 @@ function ActivityDetail() {
 
       {/* ── Run Analysis - Best Efforts ── */}
       {hasBestEfforts && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
           <h2 style={{ ...sectionTitle, marginTop: 0 }}>
             {isInterval ? `Best Efforts (under ${savedRepDist >= 1000 ? `${savedRepDist/1000}km` : `${savedRepDist}m`})` : 'Run Analysis'}
           </h2>
 
           {!isInterval && analysis.pace_percentile != null && (
             <div style={{
-              backgroundColor: '#16213e',
+              backgroundColor: '#111820',
               borderRadius: '8px',
               padding: '14px 18px',
               marginBottom: '18px',
-              border: '1px solid #fc520033',
+              border: '1px solid #ff5a1f33',
               fontSize: '15px',
-              color: '#e0e0e0',
+              color: '#e8edf2',
               textAlign: 'center',
             }}>
-              This run was faster than <span style={{ color: '#fc5200', fontWeight: 700 }}>{Math.round(analysis.pace_percentile)}%</span> of all your runs
+              This run was faster than <span style={{ color: '#ff5a1f', fontWeight: 700 }}>{Math.round(analysis.pace_percentile)}%</span> of all your runs
             </div>
           )}
 
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#a0a0b0', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#93a1b1', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Best Efforts
           </div>
 
@@ -1024,7 +1024,7 @@ function ActivityDetail() {
               textTransform: 'uppercase',
               letterSpacing: '0.5px',
               color: '#666',
-              borderBottom: '1px solid #252540',
+              borderBottom: '1px solid #1e2936',
               minWidth: '480px',
             }}>
               <div>Dist</div>
@@ -1047,37 +1047,37 @@ function ActivityDetail() {
                 minWidth: '480px',
               }}>
                 <div>
-                  <span style={{ color: '#e0e0e0', fontWeight: 600 }}>{formatDistanceLabel(effort.distance)}</span>
+                  <span style={{ color: '#e8edf2', fontWeight: 600 }}>{formatDistanceLabel(effort.distance)}</span>
                   <span style={{
                     marginLeft: '4px', fontSize: '8px', fontWeight: 600, padding: '1px 5px', borderRadius: '3px', verticalAlign: 'middle',
-                    backgroundColor: effort.is_dedicated ? '#4ade8015' : '#fc520015',
-                    color: effort.is_dedicated ? '#4ade80' : '#fc5200',
+                    backgroundColor: effort.is_dedicated ? '#3ddc8415' : '#ff5a1f15',
+                    color: effort.is_dedicated ? '#3ddc84' : '#ff5a1f',
                   }}>
                     {effort.is_dedicated ? 'Sprint' : 'Seg'}
                   </span>
                 </div>
-                <div style={{ color: '#e0e0e0' }}>
+                <div style={{ color: '#e8edf2' }}>
                   {formatTime(effort.time_seconds)}
                 </div>
-                <div style={{ color: '#a0a0b0', fontSize: '12px' }}>
+                <div style={{ color: '#93a1b1', fontSize: '12px' }}>
                   {formatPaceSeconds(effort.pace_sec_per_km)}/km
                 </div>
-                <div style={{ color: '#a0a0b0', fontSize: '11px' }}>
+                <div style={{ color: '#93a1b1', fontSize: '11px' }}>
                   Top {100 - Math.round(effort.percentile)}%
                 </div>
                 <div>
                   {effort.is_pr ? (
-                    <span style={{ backgroundColor: '#4ade80', color: '#0a2a0a', fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px' }}>PR!</span>
+                    <span style={{ backgroundColor: '#3ddc84', color: '#0a2a0a', fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px' }}>PR!</span>
                   ) : effort.diff_from_best != null ? (
-                    <span style={{ color: '#ff6b6b', fontSize: '12px' }}>+{Math.round(effort.diff_from_best)}s</span>
+                    <span style={{ color: '#ff4d4f', fontSize: '12px' }}>+{Math.round(effort.diff_from_best)}s</span>
                   ) : '-'}
                 </div>
                 <div>
                   {effort.diff_from_phase != null ? (
                     effort.diff_from_phase <= 0 ? (
-                      <span style={{ color: '#4ade80', fontSize: '10px', fontWeight: 700 }}>Phase best!</span>
+                      <span style={{ color: '#3ddc84', fontSize: '10px', fontWeight: 700 }}>Phase best!</span>
                     ) : (
-                      <span style={{ color: effort.diff_from_phase <= 5 ? '#fbbf24' : '#ff6b6b', fontSize: '12px' }}>+{Math.round(effort.diff_from_phase)}s</span>
+                      <span style={{ color: effort.diff_from_phase <= 5 ? '#f5a623' : '#ff4d4f', fontSize: '12px' }}>+{Math.round(effort.diff_from_phase)}s</span>
                     )
                   ) : <span style={{ color: '#555', fontSize: '11px' }}>1st in phase</span>}
                 </div>
@@ -1100,8 +1100,8 @@ function ActivityDetail() {
               onClick={() => setHighlightDist(null)}
               style={{
                 padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: 'none',
-                backgroundColor: highlightDist === null ? '#fc5200' : '#16213e',
-                color: highlightDist === null ? '#fff' : '#a0a0b0',
+                backgroundColor: highlightDist === null ? '#ff5a1f' : '#111820',
+                color: highlightDist === null ? '#fff' : '#93a1b1',
               }}>
               Full
             </button>
@@ -1111,8 +1111,8 @@ function ActivityDetail() {
                 onClick={() => setHighlightDist(highlightDist === be.distance_target ? null : be.distance_target)}
                 style={{
                   padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: 'none',
-                  backgroundColor: highlightDist === be.distance_target ? '#4ade80' : '#16213e',
-                  color: highlightDist === be.distance_target ? '#0a2a0a' : '#a0a0b0',
+                  backgroundColor: highlightDist === be.distance_target ? '#3ddc84' : '#111820',
+                  color: highlightDist === be.distance_target ? '#0a2a0a' : '#93a1b1',
                 }}>
                 {formatDistLabel(be.distance_target)}
               </button>
@@ -1134,8 +1134,8 @@ function ActivityDetail() {
           const be = activity.best_efforts.find(e => e.distance_target === highlightDist);
           if (!be) return null;
           return (
-            <div style={{ marginTop: '8px', fontSize: '13px', color: '#a0a0b0', textAlign: 'center' }}>
-              Fastest {formatDistLabel(highlightDist)}: <span style={{ color: '#4ade80', fontWeight: 600 }}>{formatTime(be.time_seconds)}</span>
+            <div style={{ marginTop: '8px', fontSize: '13px', color: '#93a1b1', textAlign: 'center' }}>
+              Fastest {formatDistLabel(highlightDist)}: <span style={{ color: '#3ddc84', fontWeight: 600 }}>{formatTime(be.time_seconds)}</span>
               <span style={{ marginLeft: '8px', color: '#666' }}>({formatPaceSeconds(be.pace_sec_per_km)}/km)</span>
             </div>
           );
@@ -1149,30 +1149,30 @@ function ActivityDetail() {
         const zones = Array.isArray(activity.hr_zones) ? activity.hr_zones : [];
         const maxZoneSecs = zones.reduce((m, z) => Math.max(m, z.secs || 0), 0);
         return (
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
               <h2 style={{ ...sectionTitle, marginBottom: 0, marginTop: 0 }}>Heart Rate</h2>
-              <div style={{ display: 'flex', gap: '16px', fontSize: '13px', color: '#a0a0b0' }}>
+              <div style={{ display: 'flex', gap: '16px', fontSize: '13px', color: '#93a1b1' }}>
                 {typeof activity.average_heartrate === 'number' && (
-                  <span>Avg <strong style={{ color: '#fc5200' }}>{Math.round(activity.average_heartrate)}</strong> bpm</span>
+                  <span>Avg <strong style={{ color: '#ff5a1f' }}>{Math.round(activity.average_heartrate)}</strong> bpm</span>
                 )}
                 {typeof activity.max_heartrate === 'number' && (
-                  <span>Max <strong style={{ color: '#ff6b6b' }}>{Math.round(activity.max_heartrate)}</strong> bpm</span>
+                  <span>Max <strong style={{ color: '#ff4d4f' }}>{Math.round(activity.max_heartrate)}</strong> bpm</span>
                 )}
               </div>
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={hrStream.map((v, i) => ({ i, bpm: v }))} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                 <XAxis dataKey="i" tick={false} height={4} />
                 <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} width={35} />
                 <Tooltip contentStyle={chartTooltipStyle} labelFormatter={() => ''} formatter={(v) => [`${Math.round(v)} bpm`, 'HR']} />
-                <Line type="monotone" dataKey="bpm" name="HR" stroke="#ff6b6b" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="bpm" name="HR" stroke="#ff4d4f" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
             {zones.length > 0 && (
               <div style={{ marginTop: '16px' }}>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#93a1b1', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                   Time in Zones
                 </div>
                 {zones.map((z, i) => {
@@ -1180,13 +1180,13 @@ function ActivityDetail() {
                   const pct = maxZoneSecs > 0 ? (secs / maxZoneSecs) * 100 : 0;
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontSize: '12px' }}>
-                      <span style={{ width: '70px', color: '#a0a0b0', flexShrink: 0 }}>
+                      <span style={{ width: '70px', color: '#93a1b1', flexShrink: 0 }}>
                         Z{z.zone}{z.low_bpm != null ? ` (${z.low_bpm}+)` : ''}
                       </span>
-                      <div style={{ flex: 1, backgroundColor: '#16213e', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
-                        <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#fc5200', borderRadius: '4px' }} />
+                      <div style={{ flex: 1, backgroundColor: '#111820', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#ff5a1f', borderRadius: '4px' }} />
                       </div>
-                      <span style={{ width: '54px', textAlign: 'right', color: '#e0e0e0', flexShrink: 0 }}>{formatTime(secs)}</span>
+                      <span style={{ width: '54px', textAlign: 'right', color: '#e8edf2', flexShrink: 0 }}>{formatTime(secs)}</span>
                     </div>
                   );
                 })}
@@ -1201,18 +1201,18 @@ function ActivityDetail() {
         const cadenceStream = getStreamData(activity, 'cadence');
         if (!cadenceStream) return null;
         return (
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
               <h2 style={{ ...sectionTitle, marginBottom: 0, marginTop: 0 }}>Cadence</h2>
               {typeof activity.average_cadence === 'number' && (
-                <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+                <div style={{ fontSize: '13px', color: '#93a1b1' }}>
                   Avg <strong style={{ color: '#60a5fa' }}>{Math.round(activity.average_cadence)}</strong> spm
                 </div>
               )}
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={cadenceStream.map((v, i) => ({ i, spm: v }))} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                 <XAxis dataKey="i" tick={false} height={4} />
                 <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} width={35} />
                 <Tooltip contentStyle={chartTooltipStyle} labelFormatter={() => ''} formatter={(v) => [`${Math.round(v)} spm`, 'Cadence']} />
@@ -1230,7 +1230,7 @@ function ActivityDetail() {
         const hasAny = rd.stride_length != null || rd.ground_contact_time != null || rd.vertical_oscillation != null;
         if (!hasAny) return null;
         return (
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
             <h2 style={{ ...sectionTitle, marginTop: 0 }}>Running Dynamics</h2>
             <div style={statsGrid}>
               {rd.stride_length != null && (
@@ -1262,13 +1262,13 @@ function ActivityDetail() {
 
       {/* Laps — always shown */}
       {!isInterval && laps && laps.lap_count >= 2 && (
-        <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h2 style={{ ...sectionTitle, marginBottom: 0 }}>
               Laps <span style={{ fontSize: '13px', color: '#666', fontWeight: 400, marginLeft: '8px' }}>~{laps.avg_lap_distance_m}m loop</span>
             </h2>
-            <div style={{ fontSize: '12px', color: '#a0a0b0' }}>
-              Avg: <span style={{ color: '#fc5200', fontWeight: 600 }}>{formatTime(laps.stats.avg_lap_time)}</span>
+            <div style={{ fontSize: '12px', color: '#93a1b1' }}>
+              Avg: <span style={{ color: '#ff5a1f', fontWeight: 600 }}>{formatTime(laps.stats.avg_lap_time)}</span>
               <span style={{ color: '#555', margin: '0 4px' }}>|</span>
               {formatPaceSeconds(laps.stats.avg_pace)}/km
             </div>
@@ -1280,13 +1280,13 @@ function ActivityDetail() {
               const diff = lap.duration_s - laps.stats.fastest_time;
               return (
                 <div key={lap.lap_number} style={{
-                  backgroundColor: isFastest ? '#4ade8012' : isSlowest ? '#ff6b6b08' : '#16213e',
-                  border: isFastest ? '1px solid #4ade8033' : isSlowest ? '1px solid #ff6b6b22' : '1px solid #252540',
+                  backgroundColor: isFastest ? '#3ddc8412' : isSlowest ? '#ff4d4f08' : '#111820',
+                  border: isFastest ? '1px solid #3ddc8433' : isSlowest ? '1px solid #ff4d4f22' : '1px solid #1e2936',
                   borderRadius: '6px', padding: '8px 12px', textAlign: 'center',
                   minWidth: '70px', flex: '0 0 auto',
                 }}>
                   <div style={{ fontSize: '10px', color: '#666' }}>Lap {lap.lap_number}</div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: isFastest ? '#4ade80' : isSlowest ? '#ff6b6b' : '#e0e0e0' }}>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: isFastest ? '#3ddc84' : isSlowest ? '#ff4d4f' : '#e8edf2' }}>
                     {formatTime(lap.duration_s)}
                   </div>
                   <div style={{ fontSize: '10px', color: '#555' }}>
@@ -1296,7 +1296,7 @@ function ActivityDetail() {
               );
             })}
             {laps.partial_lap && (
-              <div style={{ backgroundColor: '#16213e', border: '1px solid #252540', borderRadius: '6px', padding: '8px 12px', textAlign: 'center', minWidth: '70px', opacity: 0.5 }}>
+              <div style={{ backgroundColor: '#111820', border: '1px solid #1e2936', borderRadius: '6px', padding: '8px 12px', textAlign: 'center', minWidth: '70px', opacity: 0.5 }}>
                 <div style={{ fontSize: '10px', color: '#666' }}>Partial</div>
                 <div style={{ fontSize: '16px', fontWeight: 700, color: '#666' }}>{formatTime(laps.partial_lap.duration_s)}</div>
                 <div style={{ fontSize: '10px', color: '#555' }}>{laps.partial_lap.distance_m}m</div>
@@ -1305,10 +1305,10 @@ function ActivityDetail() {
           </div>
           {/* Inline metrics for regular runs */}
           {runMetrics && runMetrics.consistency != null && (
-            <div style={{ display: 'flex', gap: '12px', marginTop: '12px', fontSize: '12px', color: '#a0a0b0', flexWrap: 'wrap' }}>
-              <span>Consistency: <strong style={{ color: runMetrics.consistency >= 80 ? '#4ade80' : runMetrics.consistency >= 60 ? '#fbbf24' : '#ff6b6b' }}>{runMetrics.consistency}/100</strong></span>
-              <span>Fade: <strong style={{ color: Math.abs(runMetrics.fade_s) <= 5 ? '#4ade80' : '#fbbf24' }}>{runMetrics.fade_s > 0 ? '+' : ''}{runMetrics.fade_s}s</strong></span>
-              <span>Decay: <strong style={{ color: Math.abs(runMetrics.decay_s_per_lap || 0) <= 2 ? '#4ade80' : '#fbbf24' }}>{(runMetrics.decay_s_per_lap || 0).toFixed(1)}s/lap</strong></span>
+            <div style={{ display: 'flex', gap: '12px', marginTop: '12px', fontSize: '12px', color: '#93a1b1', flexWrap: 'wrap' }}>
+              <span>Consistency: <strong style={{ color: runMetrics.consistency >= 80 ? '#3ddc84' : runMetrics.consistency >= 60 ? '#f5a623' : '#ff4d4f' }}>{runMetrics.consistency}/100</strong></span>
+              <span>Fade: <strong style={{ color: Math.abs(runMetrics.fade_s) <= 5 ? '#3ddc84' : '#f5a623' }}>{runMetrics.fade_s > 0 ? '+' : ''}{runMetrics.fade_s}s</strong></span>
+              <span>Decay: <strong style={{ color: Math.abs(runMetrics.decay_s_per_lap || 0) <= 2 ? '#3ddc84' : '#f5a623' }}>{(runMetrics.decay_s_per_lap || 0).toFixed(1)}s/lap</strong></span>
             </div>
           )}
         </div>
@@ -1353,7 +1353,7 @@ function CustomDistanceInput({ repDistance, setRepDistance }) {
     <div style={{
       display: 'flex', alignItems: 'center', gap: '4px',
       padding: '4px 8px', borderRadius: '6px',
-      backgroundColor: isCustom ? '#fc5200' : '#16213e',
+      backgroundColor: isCustom ? '#ff5a1f' : '#111820',
     }}>
       <input
         type="number"
@@ -1366,7 +1366,7 @@ function CustomDistanceInput({ repDistance, setRepDistance }) {
         onChange={handleChange}
         style={{
           width: '70px', padding: '4px 6px', borderRadius: '4px',
-          border: '1px solid #333', backgroundColor: '#0f0f1a',
+          border: '1px solid #333', backgroundColor: '#0b0f14',
           color: '#fff', fontSize: '12px', fontWeight: 600,
           textAlign: 'center',
         }}
@@ -1391,8 +1391,8 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
               <button key={n} onClick={() => setRepCount(n)}
                 style={{
                   width: '36px', height: '36px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
-                  backgroundColor: repCount === n ? '#fc5200' : '#16213e',
-                  color: repCount === n ? '#fff' : '#a0a0b0',
+                  backgroundColor: repCount === n ? '#ff5a1f' : '#111820',
+                  color: repCount === n ? '#fff' : '#93a1b1',
                 }}>
                 {n}
               </button>
@@ -1407,8 +1407,8 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
               <button key={d} onClick={() => setRepDistance(d)}
                 style={{
                   padding: '8px 12px', borderRadius: '6px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-                  backgroundColor: repDistance === d ? '#fc5200' : '#16213e',
-                  color: repDistance === d ? '#fff' : '#a0a0b0',
+                  backgroundColor: repDistance === d ? '#ff5a1f' : '#111820',
+                  color: repDistance === d ? '#fff' : '#93a1b1',
                 }}>
                 {d >= 1000 ? `${d/1000}km` : `${d}m`}
               </button>
@@ -1421,7 +1421,7 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
       {/* Timing toggle */}
       <div style={{ marginBottom: '12px' }}>
         <button onClick={() => setShowTiming(!showTiming)}
-          style={{ padding: '0', border: 'none', backgroundColor: 'transparent', color: '#a0a0b0', fontSize: '12px', cursor: 'pointer' }}>
+          style={{ padding: '0', border: 'none', backgroundColor: 'transparent', color: '#93a1b1', fontSize: '12px', cursor: 'pointer' }}>
           {showTiming ? '\u25B2' : '\u25BC'} {showTiming ? 'Hide timing' : 'Add timing (optional)'}
         </button>
         {showTiming && (
@@ -1430,20 +1430,20 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
               <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Warmup</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <button onClick={() => setWarmupSec(Math.max(0, warmupSec - 30))}
-                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>-</button>
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#111820', color: '#93a1b1', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>-</button>
                 <span style={{ color: '#fff', fontSize: '15px', fontWeight: 600, minWidth: '40px', textAlign: 'center' }}>{fmtTime(warmupSec)}</span>
                 <button onClick={() => setWarmupSec(Math.min(600, warmupSec + 30))}
-                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>+</button>
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#111820', color: '#93a1b1', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>+</button>
               </div>
             </div>
             <div>
               <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>Rest between reps</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <button onClick={() => setRestSec(Math.max(0, restSec - 30))}
-                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>-</button>
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#111820', color: '#93a1b1', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>-</button>
                 <span style={{ color: '#fff', fontSize: '15px', fontWeight: 600, minWidth: '40px', textAlign: 'center' }}>{fmtTime(restSec)}</span>
                 <button onClick={() => setRestSec(Math.min(600, restSec + 30))}
-                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>+</button>
+                  style={{ width: '28px', height: '28px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#111820', color: '#93a1b1', fontSize: '16px', cursor: 'pointer', lineHeight: '28px', padding: 0 }}>+</button>
               </div>
             </div>
           </div>
@@ -1453,7 +1453,7 @@ function IntervalForm({ repCount, setRepCount, repDistance, setRepDistance, inte
         <button
           onClick={onAnalyze}
           disabled={intervalsLoading}
-          style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: intervalsLoading ? 0.6 : 1 }}>
+          style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', backgroundColor: '#ff5a1f', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: intervalsLoading ? 0.6 : 1 }}>
           {intervalsLoading ? 'Analyzing...' : `Analyze ${repCount} x ${repDistance >= 1000 ? `${repDistance/1000}km` : `${repDistance}m`}`}
         </button>
         <button onClick={onCancel}

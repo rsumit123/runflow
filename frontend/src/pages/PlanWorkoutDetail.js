@@ -19,36 +19,36 @@ function formatDate(dateString) {
   return d.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-const DAY_TYPE_COLORS = { easy: '#22c55e', long: '#3b82f6', quality: '#ef4444', strides: '#f59e0b', rest: '#64748b' };
+const DAY_TYPE_COLORS = { easy: '#3ddc84', long: '#3b82f6', quality: '#ff4d4f', strides: '#f5a623', rest: '#5d6b7a' };
 
 // Sprint (100m) plan day types — colored label + display text.
 const SPRINT_DAY_TYPE = {
-  accel: { color: '#fc5200', label: 'Accel' },
+  accel: { color: '#ff5a1f', label: 'Accel' },
   max_velocity: { color: '#ff8a3d', label: 'Max velocity' },
   speed_endurance: { color: '#e0245e', label: 'Speed endurance' },
-  technique: { color: '#3d9970', label: 'Technique' },
+  technique: { color: '#3ddc84', label: 'Technique' },
   plyometrics: { color: '#b10dc9', label: 'Plyometrics' },
   test: { color: '#f1c40f', label: 'Test' },
   rest: { color: '#5a5a6a', label: 'Rest' },
 };
 
 const STATUS_META = {
-  done: { label: 'Done', color: '#22c55e' },
-  missed: { label: 'Missed', color: '#ef4444' },
-  rest: { label: 'Rest', color: '#64748b' },
-  upcoming: { label: 'Upcoming', color: '#64748b' },
+  done: { label: 'Done', color: '#3ddc84' },
+  missed: { label: 'Missed', color: '#ff4d4f' },
+  rest: { label: 'Rest', color: '#5d6b7a' },
+  upcoming: { label: 'Upcoming', color: '#5d6b7a' },
 };
 
-const cardStyle = { backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '16px' };
-const cardHeading = { fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#a0a0b0', marginBottom: '12px' };
-const backLink = { display: 'inline-block', marginBottom: '20px', color: '#a0a0b0', fontSize: '14px' };
-const chartTooltipStyle = { backgroundColor: '#16213e', border: '1px solid #333', borderRadius: '6px', fontSize: '13px' };
+const cardStyle = { backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '16px' };
+const cardHeading = { fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#93a1b1', marginBottom: '12px' };
+const backLink = { display: 'inline-block', marginBottom: '20px', color: '#93a1b1', fontSize: '14px' };
+const chartTooltipStyle = { backgroundColor: '#111820', border: '1px solid #333', borderRadius: '6px', fontSize: '13px' };
 
 const STEP_TYPE_COLORS = {
-  warmup: '#3d9970',
-  run: '#fc5200',
+  warmup: '#3ddc84',
+  run: '#ff5a1f',
   recovery: '#6b7280',
-  cooldown: '#3d9970',
+  cooldown: '#3ddc84',
 };
 
 function stepColor(type) {
@@ -82,7 +82,7 @@ function StepRow({ step }) {
       <div style={{ width: '4px', borderRadius: '2px', backgroundColor: color, flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '15px', fontWeight: 700, color: '#e0e0e0' }}>{stepAmount(step)}</span>
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#e8edf2' }}>{stepAmount(step)}</span>
           <span style={{
             color, backgroundColor: `${color}22`, padding: '2px 7px', borderRadius: '4px',
             fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
@@ -90,7 +90,7 @@ function StepRow({ step }) {
             {step.type}
           </span>
         </div>
-        <div style={{ fontSize: '13px', color: target.muted ? '#666' : '#c8c8d4', marginTop: '2px' }}>
+        <div style={{ fontSize: '13px', color: target.muted ? '#666' : '#93a1b1', marginTop: '2px' }}>
           {target.text}
         </div>
         {step.note && (
@@ -108,11 +108,11 @@ function StepTimeline({ steps }) {
         if (s.type === 'repeat') {
           const children = Array.isArray(s.steps) ? s.steps : [];
           return (
-            <div key={i} style={{ margin: '10px 0', backgroundColor: '#16213e', borderRadius: '8px', padding: '10px 12px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#fc5200', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+            <div key={i} style={{ margin: '10px 0', backgroundColor: '#111820', borderRadius: '8px', padding: '10px 12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#ff5a1f', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
                 {s.iterations != null ? s.iterations : '?'} × repeat
               </div>
-              <div style={{ borderLeft: '2px solid #fc5200', paddingLeft: '12px', marginLeft: '2px' }}>
+              <div style={{ borderLeft: '2px solid #ff5a1f', paddingLeft: '12px', marginLeft: '2px' }}>
                 {children.map((cs, ci) => <StepRow key={ci} step={cs} />)}
               </div>
             </div>
@@ -126,9 +126,9 @@ function StepTimeline({ steps }) {
 
 function StatRow({ label, value }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px', padding: '8px 0', borderBottom: '1px solid #252540' }}>
-      <span style={{ fontSize: '13px', color: '#a0a0b0' }}>{label}</span>
-      <span style={{ fontSize: '15px', fontWeight: 600, color: '#e0e0e0' }}>{value}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px', padding: '8px 0', borderBottom: '1px solid #1e2936' }}>
+      <span style={{ fontSize: '13px', color: '#93a1b1' }}>{label}</span>
+      <span style={{ fontSize: '15px', fontWeight: 600, color: '#e8edf2' }}>{value}</span>
     </div>
   );
 }
@@ -176,14 +176,14 @@ function PlanWorkoutDetail() {
   };
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0', fontSize: '16px' }}>Loading workout...</div>;
+    return <div style={{ textAlign: 'center', padding: '60px', color: '#93a1b1', fontSize: '16px' }}>Loading workout...</div>;
   }
 
   if (error || !data || !data.workout) {
     return (
       <div>
         <Link to="/training" style={backLink}>&lsaquo; Back to plan</Link>
-        <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff6b6b' }}>
+        <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff4d4f' }}>
           {error || 'Workout not found'}
         </div>
       </div>
@@ -211,9 +211,9 @@ function PlanWorkoutDetail() {
   const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
 
   // Verdict border color by compliance
-  const verdictColor = compliance === 'ran_hard' ? '#f59e0b'
-    : compliance === 'on_target' ? '#22c55e'
-    : '#fc5200';
+  const verdictColor = compliance === 'ran_hard' ? '#f5a623'
+    : compliance === 'on_target' ? '#3ddc84'
+    : '#ff5a1f';
 
   const showActual = status === 'done' && actual;
   const hrSeries = showActual && Array.isArray(actual.heartrate) && actual.heartrate.length > 0
@@ -238,7 +238,7 @@ function PlanWorkoutDetail() {
       {/* Header */}
       <div style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
-          <span style={{ fontSize: '13px', color: '#a0a0b0' }}>{formatDate(w.date)}</span>
+          <span style={{ fontSize: '13px', color: '#93a1b1' }}>{formatDate(w.date)}</span>
           <span style={{
             color: dc, backgroundColor: `${dc}22`, padding: '2px 8px', borderRadius: '4px',
             fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
@@ -255,7 +255,7 @@ function PlanWorkoutDetail() {
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '4px', wordBreak: 'break-word' }}>
           {w.title || 'Workout'}
         </h1>
-        <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+        <div style={{ fontSize: '13px', color: '#93a1b1' }}>
           Week {w.week_number != null ? w.week_number : '?'}{plan && plan.weeks != null ? ` of ${plan.weeks}` : ''} &middot; {isSprint ? '100m sprint plan' : '5K plan'}
         </div>
       </div>
@@ -263,7 +263,7 @@ function PlanWorkoutDetail() {
       {/* Verdict */}
       {verdict && (
         <div style={{
-          backgroundColor: '#16213e', borderLeft: `4px solid ${verdictColor}`, borderRadius: '8px',
+          backgroundColor: '#111820', borderLeft: `4px solid ${verdictColor}`, borderRadius: '8px',
           padding: '14px 16px', marginBottom: '16px', fontSize: '14px', color: '#e8e8ef', lineHeight: 1.55,
         }}>
           {verdict}
@@ -278,8 +278,8 @@ function PlanWorkoutDetail() {
             <>
               {structure.warmup && (
                 <div style={{ marginBottom: '14px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#a0a0b0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Warm-up</div>
-                  <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.warmup}</div>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#93a1b1', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Warm-up</div>
+                  <div style={{ fontSize: '13px', color: '#e8edf2', lineHeight: 1.5 }}>{structure.warmup}</div>
                 </div>
               )}
 
@@ -290,8 +290,8 @@ function PlanWorkoutDetail() {
                       <tr>
                         {['Reps', 'Distance', 'Effort', 'Recovery'].map((h) => (
                           <th key={h} style={{
-                            textAlign: 'left', color: '#a0a0b0', fontWeight: 600, padding: '8px',
-                            borderBottom: '1px solid #252540', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                            textAlign: 'left', color: '#93a1b1', fontWeight: 600, padding: '8px',
+                            borderBottom: '1px solid #1e2936', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
                             whiteSpace: 'nowrap',
                           }}>
                             {h}
@@ -302,10 +302,10 @@ function PlanWorkoutDetail() {
                     <tbody>
                       {structure.main_set.map((m, i) => (
                         <tr key={i}>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{m.reps != null ? m.reps : '—'}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{m.distance_m != null ? `${m.distance_m}m` : '—'}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{m.effort_pct != null ? `${m.effort_pct}%` : '—'}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#a0a0b0' }}>{m.recovery || '—'}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#e8edf2', whiteSpace: 'nowrap' }}>{m.reps != null ? m.reps : '—'}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#e8edf2', whiteSpace: 'nowrap' }}>{m.distance_m != null ? `${m.distance_m}m` : '—'}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#e8edf2', whiteSpace: 'nowrap' }}>{m.effort_pct != null ? `${m.effort_pct}%` : '—'}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#93a1b1' }}>{m.recovery || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -315,15 +315,15 @@ function PlanWorkoutDetail() {
 
               {structure.finisher && (
                 <div style={{ marginTop: '14px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#a0a0b0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Finisher</div>
-                  <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.finisher}</div>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#93a1b1', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Finisher</div>
+                  <div style={{ fontSize: '13px', color: '#e8edf2', lineHeight: 1.5 }}>{structure.finisher}</div>
                 </div>
               )}
 
               {Array.isArray(structure.cues) && structure.cues.length > 0 && (
                 <div style={{ marginTop: '14px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#a0a0b0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Cues</div>
-                  <ul style={{ margin: 0, paddingLeft: '18px', color: '#c8c8d4', fontSize: '13px', lineHeight: 1.6 }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#93a1b1', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Cues</div>
+                  <ul style={{ margin: 0, paddingLeft: '18px', color: '#93a1b1', fontSize: '13px', lineHeight: 1.6 }}>
                     {structure.cues.map((c, i) => <li key={i}>{c}</li>)}
                   </ul>
                 </div>
@@ -333,7 +333,7 @@ function PlanWorkoutDetail() {
             <div style={{ fontSize: '13px', color: '#666' }}>No prescribed structure for this day.</div>
           )}
           {w.description && (
-            <div style={{ marginTop: '12px', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.5 }}>
+            <div style={{ marginTop: '12px', fontSize: '13px', color: '#93a1b1', lineHeight: 1.5 }}>
               {w.description}
             </div>
           )}
@@ -352,7 +352,7 @@ function PlanWorkoutDetail() {
                     disabled={pushing}
                     style={{
                       minHeight: '44px', padding: '10px 16px', borderRadius: '8px', border: 'none',
-                      backgroundColor: pushing ? '#7a3300' : '#fc5200', color: '#fff',
+                      backgroundColor: pushing ? '#7a3300' : '#ff5a1f', color: '#fff',
                       fontSize: '14px', fontWeight: 700, cursor: pushing ? 'default' : 'pointer',
                     }}
                   >
@@ -362,8 +362,8 @@ function PlanWorkoutDetail() {
                   <>
                     <span style={{
                       display: 'inline-flex', alignItems: 'center', minHeight: '44px', padding: '10px 16px',
-                      borderRadius: '8px', backgroundColor: '#22c55e22', border: '1px solid #22c55e',
-                      color: '#22c55e', fontSize: '14px', fontWeight: 700, boxSizing: 'border-box',
+                      borderRadius: '8px', backgroundColor: '#3ddc8422', border: '1px solid #3ddc84',
+                      color: '#3ddc84', fontSize: '14px', fontWeight: 700, boxSizing: 'border-box',
                     }}>
                       ✓ On your watch
                     </span>
@@ -373,7 +373,7 @@ function PlanWorkoutDetail() {
                       disabled={pushing}
                       style={{
                         minHeight: '44px', padding: '10px 12px', borderRadius: '8px',
-                        border: 'none', backgroundColor: 'transparent', color: '#a0a0b0',
+                        border: 'none', backgroundColor: 'transparent', color: '#93a1b1',
                         fontSize: '13px', fontWeight: 600, textDecoration: 'underline',
                         cursor: pushing ? 'default' : 'pointer',
                       }}
@@ -384,15 +384,15 @@ function PlanWorkoutDetail() {
                 )}
               </div>
               {pushError && (
-                <div style={{ marginTop: '8px', fontSize: '13px', color: '#ff6b6b', lineHeight: 1.5 }}>{pushError}</div>
+                <div style={{ marginTop: '8px', fontSize: '13px', color: '#ff4d4f', lineHeight: 1.5 }}>{pushError}</div>
               )}
             </div>
           )}
 
           {structure && structure.warmup && !steps && (
             <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: '#3d9970', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Warm-up</div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.warmup}</div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#3ddc84', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Warm-up</div>
+              <div style={{ fontSize: '13px', color: '#e8edf2', lineHeight: 1.5 }}>{structure.warmup}</div>
             </div>
           )}
           {km != null && <StatRow label="Target distance" value={`${km} km`} />}
@@ -400,14 +400,14 @@ function PlanWorkoutDetail() {
           {w.hr_ceiling != null && <StatRow label="HR ceiling" value={`≤ ${w.hr_ceiling} bpm`} />}
           {structure && structure.cooldown && !steps && (
             <div style={{ marginTop: '12px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: '#3d9970', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Cool-down</div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.cooldown}</div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#3ddc84', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Cool-down</div>
+              <div style={{ fontSize: '13px', color: '#e8edf2', lineHeight: 1.5 }}>{structure.cooldown}</div>
             </div>
           )}
 
           {steps && (
             <div style={{ marginTop: '16px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#93a1b1', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Workout steps
               </div>
               <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -420,7 +420,7 @@ function PlanWorkoutDetail() {
             <div style={{ fontSize: '13px', color: '#666' }}>No prescribed targets for this day.</div>
           )}
           {w.description && (
-            <div style={{ marginTop: '12px', fontSize: '13px', color: '#a0a0b0', lineHeight: 1.5 }}>
+            <div style={{ marginTop: '12px', fontSize: '13px', color: '#93a1b1', lineHeight: 1.5 }}>
               {w.description}
             </div>
           )}
@@ -437,7 +437,7 @@ function PlanWorkoutDetail() {
 
           {Array.isArray(actual.reps) && actual.reps.length > 0 && (
             <div style={{ marginTop: '16px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#93a1b1', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Reps
               </div>
               <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -446,8 +446,8 @@ function PlanWorkoutDetail() {
                     <tr>
                       {['Rep', 'Dist', 'Time', 'Pace'].map((h) => (
                         <th key={h} style={{
-                          textAlign: 'left', color: '#a0a0b0', fontWeight: 600, padding: '8px',
-                          borderBottom: '1px solid #252540', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                          textAlign: 'left', color: '#93a1b1', fontWeight: 600, padding: '8px',
+                          borderBottom: '1px solid #1e2936', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
                           whiteSpace: 'nowrap',
                         }}>
                           {h}
@@ -458,10 +458,10 @@ function PlanWorkoutDetail() {
                   <tbody>
                     {actual.reps.map((r, i) => (
                       <tr key={i}>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.rep != null ? r.rep : i + 1}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.distance_m != null ? `${r.distance_m}m` : '—'}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.duration_s != null ? `${r.duration_s}s` : '—'}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #252540', color: '#e0e0e0', whiteSpace: 'nowrap' }}>{r.pace_sec_per_km != null ? `${formatPace(r.pace_sec_per_km)}/km` : '—'}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#e8edf2', whiteSpace: 'nowrap' }}>{r.rep != null ? r.rep : i + 1}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#e8edf2', whiteSpace: 'nowrap' }}>{r.distance_m != null ? `${r.distance_m}m` : '—'}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#e8edf2', whiteSpace: 'nowrap' }}>{r.duration_s != null ? `${r.duration_s}s` : '—'}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #1e2936', color: '#e8edf2', whiteSpace: 'nowrap' }}>{r.pace_sec_per_km != null ? `${formatPace(r.pace_sec_per_km)}/km` : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -473,7 +473,7 @@ function PlanWorkoutDetail() {
           {actual.activity_id != null && (
             <Link to={`/activity/${actual.activity_id}`} style={{
               display: 'block', marginTop: '16px', textAlign: 'center',
-              backgroundColor: '#fc5200', color: '#fff', fontSize: '14px', fontWeight: 700,
+              backgroundColor: '#ff5a1f', color: '#fff', fontSize: '14px', fontWeight: 700,
               padding: '12px 16px', borderRadius: '8px', minHeight: '44px', boxSizing: 'border-box',
             }}>
               View full interval analysis &rsaquo;
@@ -488,12 +488,12 @@ function PlanWorkoutDetail() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
             <div style={{ ...cardHeading, marginBottom: 0 }}>How it went</div>
             {compliance === 'ran_hard' && (
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#ef4444', backgroundColor: '#ef444422', padding: '3px 9px', borderRadius: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#ff4d4f', backgroundColor: '#ff4d4f22', padding: '3px 9px', borderRadius: '4px' }}>
                 ran hard
               </span>
             )}
             {compliance === 'on_target' && (
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e22', padding: '3px 9px', borderRadius: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#3ddc84', backgroundColor: '#3ddc8422', padding: '3px 9px', borderRadius: '4px' }}>
                 ✓ on target
               </span>
             )}
@@ -507,15 +507,15 @@ function PlanWorkoutDetail() {
           {/* Warm-up / cool-down auto-detected from the run */}
           {actual.phases && (actual.phases.main_pace_sec != null) && (
             <div style={{ marginTop: '16px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#93a1b1', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Warm-up &amp; cool-down
               </div>
               {[['Warm-up', actual.phases.has_warmup, actual.phases.warmup_sec],
                 ['Cool-down', actual.phases.has_cooldown, actual.phases.cooldown_sec]].map(([label, has, secs]) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px' }}>
-                  <span style={{ color: '#a0a0b0' }}>{label}</span>
+                  <span style={{ color: '#93a1b1' }}>{label}</span>
                   {has ? (
-                    <span style={{ color: '#22c55e', fontWeight: 600 }}>✓ {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
+                    <span style={{ color: '#3ddc84', fontWeight: 600 }}>✓ {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
                   ) : (
                     <span style={{ color: '#666' }}>not detected</span>
                   )}
@@ -527,21 +527,21 @@ function PlanWorkoutDetail() {
           {/* HR over the run */}
           {hrSeries && (
             <div style={{ marginTop: '16px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#93a1b1', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Heart rate
               </div>
               <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                 <ResponsiveContainer width="100%" height={180} minWidth={280}>
                   <LineChart data={hrSeries} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                     <XAxis dataKey="i" tick={false} height={4} />
                     <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} width={35} />
                     <Tooltip contentStyle={chartTooltipStyle} labelFormatter={() => ''} formatter={(v) => [`${Math.round(v)} bpm`, 'HR']} />
                     {w.hr_ceiling != null && (
-                      <ReferenceLine y={w.hr_ceiling} stroke="#f59e0b" strokeDasharray="4 4"
-                        label={{ value: 'ceiling', position: 'insideTopRight', fill: '#f59e0b', fontSize: 10 }} />
+                      <ReferenceLine y={w.hr_ceiling} stroke="#f5a623" strokeDasharray="4 4"
+                        label={{ value: 'ceiling', position: 'insideTopRight', fill: '#f5a623', fontSize: 10 }} />
                     )}
-                    <Line type="monotone" dataKey="bpm" name="HR" stroke="#ff6b6b" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="bpm" name="HR" stroke="#ff4d4f" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -551,7 +551,7 @@ function PlanWorkoutDetail() {
           {/* Time in zones */}
           {hrZones && (
             <div style={{ marginTop: '16px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#93a1b1', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Time in zones
               </div>
               {hrZones.map((z, i) => {
@@ -559,13 +559,13 @@ function PlanWorkoutDetail() {
                 const pct = maxZoneSecs > 0 ? (secs / maxZoneSecs) * 100 : 0;
                 return (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontSize: '12px' }}>
-                    <span style={{ width: '70px', color: '#a0a0b0', flexShrink: 0 }}>
+                    <span style={{ width: '70px', color: '#93a1b1', flexShrink: 0 }}>
                       Z{z.zone}{z.low_bpm != null ? ` (${z.low_bpm}+)` : ''}
                     </span>
-                    <div style={{ flex: 1, backgroundColor: '#16213e', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#fc5200', borderRadius: '4px' }} />
+                    <div style={{ flex: 1, backgroundColor: '#111820', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#ff5a1f', borderRadius: '4px' }} />
                     </div>
-                    <span style={{ width: '54px', textAlign: 'right', color: '#e0e0e0', flexShrink: 0 }}>{formatSecs(secs)}</span>
+                    <span style={{ width: '54px', textAlign: 'right', color: '#e8edf2', flexShrink: 0 }}>{formatSecs(secs)}</span>
                   </div>
                 );
               })}
@@ -576,7 +576,7 @@ function PlanWorkoutDetail() {
           {actual.activity_id != null && (
             <Link to={`/activity/${actual.activity_id}`} style={{
               display: 'block', marginTop: '16px', textAlign: 'center',
-              backgroundColor: '#fc5200', color: '#fff', fontSize: '14px', fontWeight: 700,
+              backgroundColor: '#ff5a1f', color: '#fff', fontSize: '14px', fontWeight: 700,
               padding: '12px 16px', borderRadius: '8px', minHeight: '44px', boxSizing: 'border-box',
             }}>
               View full run details &rsaquo;
