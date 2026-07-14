@@ -39,6 +39,9 @@ import fitness_projection as fproj
 import plan_generator as pgen
 import plan_adherence as padh
 import pace_adaptation as padapt
+import readiness as rdns
+import heat
+import weather
 import coach_llm
 
 garmin = GarminClient()
@@ -2824,6 +2827,131 @@ async def _garmin_push(w: PlannedWorkout) -> Optional[int]:
                                     w.date.date().isoformat())
     w.garmin_workout_id = res["workout_id"]
     return w.garmin_workout_id
+
+
+# ---------------------------------------------------------------------------
+# Today's guidance — readiness + heat, applied to the session in front of you
+# ---------------------------------------------------------------------------
+
+async def _run_location(session: AsyncSession) -> Optional[tuple[float, float]]:
+    """Where the runner actually runs — taken from their most recent GPS run."""
+    row = (await session.execute(
+        select(Activity.start_latlng)
+        .where(Activity.start_latlng.isnot(None))
+        .order_by(Activity.start_date.desc()).limit(1)
+    )).scalars().first()
+    if not row or len(row) < 2:
+        return None
+    return float(row[0]), float(row[1])
+
+
+async def _today_workout(session: AsyncSession, plan: Plan) -> Optional[PlannedWorkout]:
+    today = datetime.utcnow().date()
+    wos = (await session.execute(
+        select(PlannedWorkout).where(PlannedWorkout.plan_id == plan.id)
+        .order_by(PlannedWorkout.date)
+    )).scalars().all()
+    return next((w for w in wos if w.date.date() == today), None)
+
+
+@app.get("/api/plan/today-guidance")
+async def today_guidance(session: AsyncSession = Depends(get_session)):
+    """Should today's session stand, and what pace does today's air allow?
+
+    Read-only. Everything here is a proposal with its reasoning attached — the
+    runner decides.
+    """
+    plan = await _active_plan(session)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No active plan")
+
+    w = await _today_workout(session, plan)
+    day = datetime.utcnow().date().isoformat()
+
+    wellness = await garmin.wellness(day)
+    assessment = rdns.assess(
+        wellness.get("readiness"), wellness.get("hrv"), wellness.get("sleep"),
+        wellness.get("body_battery"), wellness.get("rhr"),
+    )
+    recommendation = rdns.adjust(w.day_type if w else "rest", assessment)
+
+    heat_out = None
+    loc = await _run_location(session)
+    if loc and w and w.day_type != "rest":
+        conds = await weather.conditions(*loc)
+        if conds:
+            heat_out = heat.adjust(conds["temp_c"], conds["dew_point_c"],
+                                   w.pace_low_sec, w.pace_high_sec)
+            heat_out["humidity_pct"] = conds.get("humidity_pct")
+            heat_out["feels_like_c"] = conds.get("feels_like_c")
+
+    dicts = await _workout_dicts(session, plan)
+    return {
+        "workout": next((d for d in dicts if w and d["id"] == w.id), None),
+        "readiness": assessment,
+        "recommendation": recommendation,
+        "heat": heat_out,
+        "can_apply": bool(w and recommendation["action"] in ("downgrade", "rest")),
+    }
+
+
+@app.post("/api/plan/today-guidance/accept")
+async def accept_today_guidance(session: AsyncSession = Depends(get_session)):
+    """Apply the recommended adjustment to today's session and re-sync the watch."""
+    plan = await _active_plan(session)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No active plan")
+    w = await _today_workout(session, plan)
+    if w is None:
+        raise HTTPException(status_code=404, detail="Nothing scheduled today")
+
+    day = datetime.utcnow().date().isoformat()
+    wellness = await garmin.wellness(day)
+    assessment = rdns.assess(
+        wellness.get("readiness"), wellness.get("hrv"), wellness.get("sleep"),
+        wellness.get("body_battery"), wellness.get("rhr"),
+    )
+    rec = rdns.adjust(w.day_type, assessment)
+    if rec["action"] not in ("downgrade", "rest"):
+        raise HTTPException(status_code=400,
+                            detail="Nothing to adjust — today's session stands as written.")
+
+    snap = plan.fitness_snapshot or {}
+    easy_pace = snap.get("easy_pace_sec") or 450
+    ceiling = snap.get("easy_hr_ceiling")
+    was = w.day_type
+
+    if rec["action"] == "rest":
+        if w.garmin_workout_id:
+            try:
+                await garmin.remove_workout(w.garmin_workout_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not pull workout %s off the watch: %s", w.id, exc)
+            w.garmin_workout_id = None
+        w.day_type = "rest"
+        w.title = "Rest — recovery day"
+        w.description = rec["reason"]
+        w.target_distance_m = None
+        w.pace_low_sec = w.pace_high_sec = w.hr_ceiling = None
+        w.structure = None
+    else:
+        km = min(3.0, (w.target_distance_m or 3000) / 1000.0)
+        low, high = easy_pace - 15, easy_pace + 20
+        w.day_type = "easy"
+        w.title = "Easy run (eased back)"
+        w.description = rec["reason"]
+        w.target_distance_m = km * 1000
+        w.pace_low_sec, w.pace_high_sec, w.hr_ceiling = low, high, ceiling
+        w.structure = pgen._run_structure(pgen._steady_steps(km, low, high, ceiling))
+        try:
+            await _garmin_push(w)
+        except Exception as exc:  # noqa: BLE001 — the plan change still stands
+            logger.warning("Re-push after readiness downgrade failed for %s: %s", w.id, exc)
+
+    await session.commit()
+    resp = await _plan_response(session, plan)
+    resp["adjustment"] = {"was": was, "now": w.day_type, "reason": rec["reason"]}
+    return resp
 
 
 # ---------------------------------------------------------------------------
