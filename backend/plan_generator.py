@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+import fitness_model as fmodel
+
 QUALITY_START_WEEK = 3       # no hard sessions until an easy base is laid
 LONG_RUN_CAP_KM = 5.0        # a 5K plan's long run needn't exceed race distance + buffer
 LONG_RUN_START_CAP_KM = 4.0  # don't start the long run too high
@@ -112,8 +114,18 @@ def generate_plan(model: dict[str, Any], weeks: int, target_time_sec: int,
 
     base_long = min(LONG_RUN_START_CAP_KM, max(3.0, model.get("longest_run_28d_km") or 3.0))
 
-    easy_low, easy_high = easy_pace - 15, easy_pace + 20
-    long_low, long_high = easy_pace, easy_pace + 30        # long runs a touch easier
+    # Never prescribe a pace slower than the floor: past it you're shuffling, not
+    # running. When the floor binds, the easy and long bands converge on it — that
+    # is the honest consequence, not a bug. If HR still won't sit under the ceiling
+    # at this pace, the fix is walk breaks, not a slower shuffle.
+    floor = fmodel.EASY_PACE_FLOOR_SEC
+
+    def _band(low: int, high: int) -> tuple[int, int]:
+        high = min(high, floor)
+        return min(low, high - 15), high
+
+    easy_low, easy_high = _band(easy_pace - 15, easy_pace + 20)
+    long_low, long_high = _band(easy_pace, easy_pace + 30)  # long runs a touch easier
 
     # Anchor weeks to the Monday of the plan's first week.
     week0_monday = start_date - timedelta(days=start_date.weekday())
@@ -149,7 +161,11 @@ def generate_plan(model: dict[str, Any], weeks: int, target_time_sec: int,
 
         # Mon — easy (always)
         workouts.append(_wo(wk_mon, 0, w, "easy", easy_short_km, easy_low, easy_high, ceiling,
-                            "Easy run", f"Conversational, nose-breathing. Keep HR ≤{ceiling} bpm — if it climbs, slow down.",
+                            "Easy run",
+                            f"Conversational, nose-breathing. HR ≤{ceiling} bpm is the real rule — the pace "
+                            f"band is only a guide. If your HR still climbs past {ceiling} at "
+                            f"{_fmt_pace(easy_high)}/km, take walk breaks rather than shuffling slower: "
+                            f"below that pace you stop running and start plodding.",
                             _run_structure(_steady_steps(easy_short_km, easy_low, easy_high, ceiling))))
         # Wed — quality (once base supports it, not on down weeks)
         if not is_down and w >= QUALITY_START_WEEK:

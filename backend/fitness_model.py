@@ -68,6 +68,11 @@ MIN_EASY_RUNS = 3         # below this it's an anecdote, not a measurement
 FRESH_EASY_DAYS = 42      # newer than this and the measurement stands on its own
 MAX_DETRAINING = 1.35     # cap: even a long layoff shouldn't slow easy pace by >35%
 
+# Below this you are shuffling, not running: cadence collapses, form degrades, and
+# you stop training the thing you think you're training. If the HR ceiling can't be
+# met at this pace, the answer is WALK BREAKS — not running slower still.
+EASY_PACE_FLOOR_SEC = 450  # 7:30 /km
+
 
 def _fitness_decay(acts: list[dict[str, Any]], now: datetime,
                    since: datetime) -> float:
@@ -140,26 +145,30 @@ def _estimate_easy_pace(
         if stale_days > FRESH_EASY_DAYS:
             decay = _fitness_decay(acts, now, newest)
             adjusted = measured * decay
+            floored = adjusted > EASY_PACE_FLOOR_SEC
             return {
-                "easy_pace_sec": round(adjusted),
+                "easy_pace_sec": round(min(adjusted, EASY_PACE_FLOOR_SEC)),
                 "method": "measured_stale" if decay > 1.0 else "measured",
                 "measured_easy_pace_sec": round(measured),
+                "detrained_easy_pace_sec": round(adjusted),
                 "staleness_days": stale_days,
                 "detraining_factor": round(decay, 3),
+                "pace_floored": floored,
                 "easy_runs_used": len(used),
                 "easy_runs_available": len(easy),
             }
 
         return {
-            "easy_pace_sec": round(measured),
+            "easy_pace_sec": round(min(measured, EASY_PACE_FLOOR_SEC)),
             "method": "measured",
+            "pace_floored": measured > EASY_PACE_FLOOR_SEC,
             "easy_runs_used": len(used),
             "easy_runs_available": len(easy),
         }
 
     if threshold_pace_sec:
         est = threshold_pace_sec * 1.30
-        est = max(420.0, min(540.0, est))  # clamp 7:00–9:00 /km
+        est = max(420.0, min(EASY_PACE_FLOOR_SEC, est))  # 7:00 – 7:30 /km
         return {"easy_pace_sec": round(est), "method": "estimate",
                 "easy_runs_available": len(easy)}
     return {"easy_pace_sec": None, "method": "insufficient_data"}
