@@ -1020,15 +1020,33 @@ async def move_workout(workout_id: int, req: WorkoutMoveRequest,
         wk = int((nd_mon - w0_mon).days / 7) + 1
         w.week_number = max(1, min(plan.weeks, wk))
 
-    # If it's already on the watch, keep Garmin in step with the move.
+    # Keep Garmin in step with the move.
+    #
+    # The rule is about WHERE the workout now sits, not whether it happened to be
+    # on the watch before. A session created in the past (week 1 anchors to Monday,
+    # so the first day can already be gone) is skipped by the initial sync and has
+    # no Garmin id — but the moment you move it to a future date it belongs on the
+    # watch like any other. Guarding on garmin_workout_id missed exactly that case.
     synced = None
-    if w.garmin_workout_id:
+    is_future = w.date.date() >= datetime.utcnow().date()
+    has_steps = bool((w.structure or {}).get("steps"))
+
+    if is_future and has_steps and w.day_type != "rest":
         try:
-            await _garmin_push(w)
+            await _garmin_push(w)      # replaces any previous upload, so no duplicates
             synced = True
         except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not block the move
             logger.warning("Garmin re-sync after move failed for %s: %s", workout_id, exc)
             synced = False
+    elif w.garmin_workout_id:
+        # Moved into the past (or turned into a rest day) — take it off the watch
+        # rather than leaving it stranded on a day it no longer belongs to.
+        try:
+            await garmin.remove_workout(w.garmin_workout_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not unschedule moved workout %s: %s", workout_id, exc)
+        w.garmin_workout_id = None
+        synced = False
 
     await session.commit()
     resp = await _plan_response(session, plan)
