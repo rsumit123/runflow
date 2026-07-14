@@ -82,6 +82,28 @@ class BestEffort(Base):
     activity = relationship("Activity", back_populates="best_efforts")
 
 
+class DailyWellness(Base):
+    """One row per day of Garmin recovery data.
+
+    Cached so a page load doesn't hit Garmin five times, and kept so readiness
+    becomes a trend we can reason about rather than a number that vanishes at
+    midnight.
+    """
+    __tablename__ = "daily_wellness"
+
+    date = Column(String, primary_key=True)             # YYYY-MM-DD
+    readiness_score = Column(Integer, nullable=True)
+    readiness_level = Column(String, nullable=True)     # Garmin's own label
+    sleep_hours = Column(Float, nullable=True)
+    sleep_score = Column(Integer, nullable=True)
+    body_battery_peak = Column(Integer, nullable=True)
+    hrv_last_night = Column(Integer, nullable=True)
+    hrv_status = Column(String, nullable=True)          # NONE while Garmin onboards it
+    resting_hr = Column(Integer, nullable=True)
+    raw = Column(JSON, nullable=True)                   # the assessment we derived
+    fetched_at = Column(DateTime, nullable=True)
+
+
 class RouteLabel(Base):
     __tablename__ = "route_labels"
 

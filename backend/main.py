@@ -15,7 +15,8 @@ from sqlalchemy.orm import selectinload
 
 import config
 from database import init_db, get_session, async_session
-from models import Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal, Plan, PlannedWorkout
+from models import (Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal, Plan,
+                    PlannedWorkout, DailyWellness)
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
@@ -2833,6 +2834,58 @@ async def _garmin_push(w: PlannedWorkout) -> Optional[int]:
 # Today's guidance — readiness + heat, applied to the session in front of you
 # ---------------------------------------------------------------------------
 
+async def _wellness(session: AsyncSession, day: str,
+                    refresh: bool = False) -> dict[str, Any]:
+    """Today's recovery assessment — from cache unless it's missing or forced.
+
+    Garmin's numbers for a day keep moving until you've slept and worn the watch,
+    so `refresh` re-pulls; otherwise one fetch per day is plenty.
+    """
+    row = await session.get(DailyWellness, day)
+    if row is not None and not refresh and row.raw:
+        return row.raw
+
+    raw = await garmin.wellness(day)
+    assessment = rdns.assess(
+        raw.get("readiness"), raw.get("hrv"), raw.get("sleep"),
+        raw.get("body_battery"), raw.get("rhr"),
+    )
+    if not assessment.get("available") and row is not None and row.raw:
+        return row.raw  # Garmin blipped — keep what we already had rather than blanking the UI
+
+    facts = rdns.facts(raw)
+    if row is None:
+        row = DailyWellness(date=day)
+        session.add(row)
+    row.readiness_score = assessment.get("score")
+    row.readiness_level = assessment.get("garmin_level")
+    row.sleep_hours = facts["sleep_hours"]
+    row.sleep_score = facts["sleep_score"]
+    row.body_battery_peak = facts["body_battery_peak"]
+    row.hrv_last_night = facts["hrv_last_night"]
+    row.hrv_status = facts["hrv_status"]
+    row.resting_hr = facts["resting_hr"]
+    row.raw = assessment
+    row.fetched_at = datetime.utcnow()
+    await session.commit()
+    return assessment
+
+
+@app.get("/api/wellness/history")
+async def wellness_history(days: int = 30, session: AsyncSession = Depends(get_session)):
+    """The readiness trend — what a single day's score can never show you."""
+    rows = (await session.execute(
+        select(DailyWellness).order_by(DailyWellness.date.desc()).limit(min(days, 90))
+    )).scalars().all()
+    return {"days": [{
+        "date": r.date, "readiness_score": r.readiness_score,
+        "readiness_level": r.readiness_level, "sleep_hours": r.sleep_hours,
+        "sleep_score": r.sleep_score, "body_battery_peak": r.body_battery_peak,
+        "hrv_last_night": r.hrv_last_night, "hrv_status": r.hrv_status,
+        "resting_hr": r.resting_hr,
+    } for r in reversed(rows)]}
+
+
 async def _run_location(session: AsyncSession) -> Optional[tuple[float, float]]:
     """Where the runner actually runs — taken from their most recent GPS run."""
     row = (await session.execute(
@@ -2855,11 +2908,12 @@ async def _today_workout(session: AsyncSession, plan: Plan) -> Optional[PlannedW
 
 
 @app.get("/api/plan/today-guidance")
-async def today_guidance(session: AsyncSession = Depends(get_session)):
+async def today_guidance(refresh: bool = False,
+                         session: AsyncSession = Depends(get_session)):
     """Should today's session stand, and what pace does today's air allow?
 
-    Read-only. Everything here is a proposal with its reasoning attached — the
-    runner decides.
+    Read-only for the plan. Everything here is a proposal with its reasoning
+    attached — the runner decides.
     """
     plan = await _active_plan(session)
     if plan is None:
@@ -2868,11 +2922,7 @@ async def today_guidance(session: AsyncSession = Depends(get_session)):
     w = await _today_workout(session, plan)
     day = datetime.utcnow().date().isoformat()
 
-    wellness = await garmin.wellness(day)
-    assessment = rdns.assess(
-        wellness.get("readiness"), wellness.get("hrv"), wellness.get("sleep"),
-        wellness.get("body_battery"), wellness.get("rhr"),
-    )
+    assessment = await _wellness(session, day, refresh=refresh)
     recommendation = rdns.adjust(w.day_type if w else "rest", assessment)
 
     heat_out = None
@@ -2906,11 +2956,7 @@ async def accept_today_guidance(session: AsyncSession = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Nothing scheduled today")
 
     day = datetime.utcnow().date().isoformat()
-    wellness = await garmin.wellness(day)
-    assessment = rdns.assess(
-        wellness.get("readiness"), wellness.get("hrv"), wellness.get("sleep"),
-        wellness.get("body_battery"), wellness.get("rhr"),
-    )
+    assessment = await _wellness(session, day)
     rec = rdns.adjust(w.day_type, assessment)
     if rec["action"] not in ("downgrade", "rest"):
         raise HTTPException(status_code=400,
