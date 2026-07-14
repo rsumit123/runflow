@@ -45,7 +45,7 @@ function MiniRouteMap({ polyline }) {
         touchZoom={false}
       >
         <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-        <Polyline positions={positions} pathOptions={{ color: '#fc5200', weight: 2, opacity: 0.9 }} />
+        <Polyline positions={positions} pathOptions={{ color: '#ff5a1f', weight: 2, opacity: 0.9 }} />
       </MapContainer>
     </div>
   );
@@ -80,8 +80,8 @@ function formatDateShort(dateString) {
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload || !payload.length) return null;
   return (
-    <div style={{ backgroundColor: '#16213e', border: '1px solid #333', borderRadius: '6px', padding: '8px 12px', fontSize: '12px' }}>
-      <div style={{ color: '#a0a0b0', marginBottom: '2px' }}>{label}</div>
+    <div style={{ backgroundColor: '#111820', border: '1px solid #333', borderRadius: '6px', padding: '8px 12px', fontSize: '12px' }}>
+      <div style={{ color: '#93a1b1', marginBottom: '2px' }}>{label}</div>
       {payload.map((p, i) => (
         <div key={i} style={{ color: p.color }}>
           {p.name}: {formatPace(p.value)}/km
@@ -102,7 +102,7 @@ function computeBadges(routes) {
   if (withPace.length > 0) {
     const fastest = withPace.reduce((a, b) => a.best_pace_sec_per_km < b.best_pace_sec_per_km ? a : b);
     badges[fastest.route_key] = badges[fastest.route_key] || [];
-    badges[fastest.route_key].push({ label: 'Fastest', color: '#4ade80', bg: '#4ade8018' });
+    badges[fastest.route_key].push({ label: 'Fastest', color: '#3ddc84', bg: '#3ddc8418' });
   }
 
   // Most Improved: biggest pace decrease between first half and second half of attempts
@@ -219,13 +219,13 @@ function Routes() {
   };
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0' }}>Analyzing routes...</div>;
+    return <div style={{ textAlign: 'center', padding: '60px', color: '#93a1b1' }}>Analyzing routes...</div>;
   }
 
   return (
     <div>
       <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>Routes</h1>
-      <p style={{ fontSize: '14px', color: '#a0a0b0', marginBottom: '24px' }}>
+      <p style={{ fontSize: '14px', color: '#93a1b1', marginBottom: '24px' }}>
         {routes.length} routes detected from your runs (routes with 2+ attempts).
       </p>
 
@@ -263,15 +263,15 @@ function Routes() {
 
           // Color border based on highlight
           const badgeLabels = routeBadges.map(b => b.label);
-          const highlightBorder = badgeLabels.includes('Fastest') ? '2px solid #4ade80'
+          const highlightBorder = badgeLabels.includes('Fastest') ? '2px solid #3ddc84'
             : badgeLabels.includes('Most Improved') ? '2px solid #60a5fa'
             : badgeLabels.includes('Hilliest') ? '2px solid #fb923c'
             : badgeLabels.includes('Most Consistent') ? '2px solid #c084fc'
-            : '1px solid #252540';
+            : '1px solid #1e2936';
 
           return (
             <div key={route.route_id} style={{
-              backgroundColor: '#1a1a2e',
+              backgroundColor: '#0b0f14',
               borderRadius: '8px',
               overflow: 'hidden',
               border: highlightBorder,
@@ -296,7 +296,7 @@ function Routes() {
                     {route.custom_name && (
                       <span style={{ fontSize: '12px', color: '#666' }}>~{route.avg_distance_km} km</span>
                     )}
-                    <span style={{ fontSize: '12px', color: '#fc5200', backgroundColor: '#fc520015', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>
+                    <span style={{ fontSize: '12px', color: '#ff5a1f', backgroundColor: '#ff5a1f15', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>
                       {route.run_count} runs
                     </span>
                     {routeBadges.map((badge, i) => (
@@ -317,15 +317,15 @@ function Routes() {
                         padding: '2px 8px',
                         borderRadius: '10px',
                         fontWeight: 600,
-                        color: trend.dir === 'improving' ? '#4ade80' : trend.dir === 'slowing' ? '#ff6b6b' : '#a0a0b0',
-                        backgroundColor: trend.dir === 'improving' ? '#4ade8010' : trend.dir === 'slowing' ? '#ff6b6b10' : '#a0a0b010',
+                        color: trend.dir === 'improving' ? '#3ddc84' : trend.dir === 'slowing' ? '#ff4d4f' : '#93a1b1',
+                        backgroundColor: trend.dir === 'improving' ? '#3ddc8410' : trend.dir === 'slowing' ? '#ff4d4f10' : '#93a1b110',
                       }}>
                         {trend.dir === 'improving' ? `\u2191 ${trend.diff}s faster` : trend.dir === 'slowing' ? `\u2193 ${trend.diff}s slower` : 'Steady'}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#a0a0b0', marginTop: '4px' }}>
-                    Best: <span style={{ color: '#4ade80', fontWeight: 600 }}>{formatPace(route.best_pace_sec_per_km)}/km</span>
+                  <div style={{ fontSize: '13px', color: '#93a1b1', marginTop: '4px' }}>
+                    Best: <span style={{ color: '#3ddc84', fontWeight: 600 }}>{formatPace(route.best_pace_sec_per_km)}/km</span>
                     <span style={{ margin: '0 8px', color: '#333' }}>|</span>
                     {formatDate(activities[0]?.date)} — {formatDate(activities[activities.length - 1]?.date)}
                   </div>
@@ -339,15 +339,15 @@ function Routes() {
               {isExpanded && (
                 <div style={{ padding: '0 16px 16px' }}>
                   {/* Actions toolbar */}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #252540' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #1e2936' }}>
                     <button
                       onClick={(e) => { e.stopPropagation(); setEditingRoute(route.route_key); setEditName(route.custom_name || ''); }}
-                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', cursor: 'pointer' }}>
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#111820', color: '#93a1b1', fontSize: '12px', cursor: 'pointer' }}>
                       Rename
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); setMergingRoute(isMerging ? null : route.route_key); }}
-                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '12px', cursor: 'pointer' }}>
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#111820', color: '#93a1b1', fontSize: '12px', cursor: 'pointer' }}>
                       {isMerging ? 'Cancel Merge' : 'Merge Routes'}
                     </button>
                     {editingRoute === route.route_key && (
@@ -355,9 +355,9 @@ function Routes() {
                         <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleRename(route.route_key)}
                           placeholder="e.g. Park Loop, Hill Sprint..." autoFocus
-                          style={{ padding: '6px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#0f0f1a', color: '#fff', fontSize: '13px', flex: 1 }} />
+                          style={{ padding: '6px 10px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#0b0f14', color: '#fff', fontSize: '13px', flex: 1 }} />
                         <button onClick={() => handleRename(route.route_key)}
-                          style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', backgroundColor: '#fc5200', color: '#fff', fontSize: '12px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>Save</button>
+                          style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', backgroundColor: '#ff5a1f', color: '#fff', fontSize: '12px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>Save</button>
                         <button onClick={() => { setEditingRoute(null); setEditName(''); }}
                           style={{ padding: '6px 8px', borderRadius: '4px', border: '1px solid #333', backgroundColor: 'transparent', color: '#666', fontSize: '12px', cursor: 'pointer' }}>X</button>
                       </div>
@@ -368,7 +368,7 @@ function Routes() {
                         {routes.filter(r => r.route_key !== route.route_key).map(r => (
                           <button key={r.route_key} disabled={mergeLoading}
                             onClick={() => handleMerge(r.route_key, route.route_key)}
-                            style={{ display: 'block', width: '100%', padding: '6px 10px', marginBottom: '4px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#0f0f1a', color: '#e0e0e0', fontSize: '12px', cursor: 'pointer', textAlign: 'left' }}>
+                            style={{ display: 'block', width: '100%', padding: '6px 10px', marginBottom: '4px', borderRadius: '4px', border: '1px solid #333', backgroundColor: '#0b0f14', color: '#e8edf2', fontSize: '12px', cursor: 'pointer', textAlign: 'left' }}>
                             {r.custom_name || `~${r.avg_distance_km}km`} ({r.run_count} runs)
                           </button>
                         ))}
@@ -384,11 +384,11 @@ function Routes() {
                       </div>
                       <ResponsiveContainer width="100%" height={180}>
                         <LineChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                           <XAxis dataKey="date" tick={{ fill: '#666', fontSize: 9 }} interval={Math.max(0, Math.floor(chartData.length / 8))} />
                           <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} tickFormatter={v => formatPace(v)} reversed width={45} />
                           <Tooltip content={<CustomTooltip />} />
-                          <Line type="monotone" dataKey="pace" name="Pace" stroke="#fc5200" strokeWidth={2} dot={{ r: 3, fill: '#fc5200' }} />
+                          <Line type="monotone" dataKey="pace" name="Pace" stroke="#ff5a1f" strokeWidth={2} dot={{ r: 3, fill: '#ff5a1f' }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -408,7 +408,7 @@ function Routes() {
                       fontWeight: 600,
                       textTransform: 'uppercase',
                       color: '#555',
-                      borderBottom: '1px solid #252540',
+                      borderBottom: '1px solid #1e2936',
                       minWidth: '360px',
                     }}>
                       <div>Date</div>
@@ -433,16 +433,16 @@ function Routes() {
                             backgroundColor: isBest ? 'rgba(74,222,128,0.05)' : 'transparent',
                             minWidth: '360px',
                           }}>
-                            <div style={{ color: '#e0e0e0' }}>{formatDate(a.date)}</div>
-                            <div style={{ color: '#e0e0e0' }}>{formatTime(a.moving_time)}</div>
-                            <div style={{ color: isBest ? '#4ade80' : isWorst ? '#ff6b6b' : '#a0a0b0', fontWeight: isBest ? 700 : 400 }}>
+                            <div style={{ color: '#e8edf2' }}>{formatDate(a.date)}</div>
+                            <div style={{ color: '#e8edf2' }}>{formatTime(a.moving_time)}</div>
+                            <div style={{ color: isBest ? '#3ddc84' : isWorst ? '#ff4d4f' : '#93a1b1', fontWeight: isBest ? 700 : 400 }}>
                               {formatPace(a.pace_sec_per_km)}
                             </div>
                             <div>
                               {isBest ? (
-                                <span style={{ color: '#4ade80', fontSize: '11px', fontWeight: 700 }}>Route PR!</span>
+                                <span style={{ color: '#3ddc84', fontSize: '11px', fontWeight: 700 }}>Route PR!</span>
                               ) : diff != null ? (
-                                <span style={{ color: diff <= 10 ? '#fbbf24' : '#ff6b6b', fontSize: '12px' }}>+{Math.round(diff)}s from PR</span>
+                                <span style={{ color: diff <= 10 ? '#f5a623' : '#ff4d4f', fontSize: '12px' }}>+{Math.round(diff)}s from PR</span>
                               ) : '-'}
                             </div>
                           </div>

@@ -155,14 +155,14 @@ function Dashboard() {
   const stats = computeStats(activities);
 
   if (loading && activities.length === 0) {
-    return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0' }}>Loading activities...</div>;
+    return <div style={{ textAlign: 'center', padding: '60px', color: '#93a1b1' }}>Loading activities...</div>;
   }
 
   if (error) {
     return (
       <div>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '16px' }}>Dashboard</h1>
-        <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff6b6b', marginBottom: '16px' }}>{error}</div>
+        <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff4d4f', marginBottom: '16px' }}>{error}</div>
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
           <p>No activities loaded yet.</p>
           <p style={{ marginTop: '8px' }}><Link to="/import">Import your Strava activities</Link> to get started.</p>
@@ -177,7 +177,7 @@ function Dashboard() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>Activities</h1>
         <button onClick={() => { setPullResult(null); loadActivities(1); }} disabled={loading}
-          style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', fontSize: '13px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#16213e', color: '#e0e0e0' }}>
+          style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', fontSize: '13px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#111820', color: '#e8edf2' }}>
           &#x21bb; Refresh
         </button>
       </div>
@@ -187,90 +187,90 @@ function Dashboard() {
         const pctEasy = training.gray_zone.pct_easy_14d;
         const hasEasy = pctEasy !== null && pctEasy !== undefined;
         const flags = (training.warnings || []).length;
-        let easyColor = '#4ade80';
+        let easyColor = '#3ddc84';
         if (hasEasy) {
-          if (pctEasy === 0) easyColor = '#ef4444';
-          else if (pctEasy < 50) easyColor = '#f59e0b';
-          else if (pctEasy < 70) easyColor = '#fbbf24';
+          if (pctEasy === 0) easyColor = '#ff4d4f';
+          else if (pctEasy < 50) easyColor = '#f5a623';
+          else if (pctEasy < 70) easyColor = '#f5a623';
         }
         return (
           <Link to="/training" style={{ textDecoration: 'none' }}>
-            <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', cursor: 'pointer', minHeight: '44px', border: '1px solid #252540' }}>
+            <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', cursor: 'pointer', minHeight: '44px', border: '1px solid #1e2936' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
                 <div>
                   <span style={{ fontSize: '22px', fontWeight: 700, color: easyColor }}>{hasEasy ? `${pctEasy}%` : '—'}</span>
-                  <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginLeft: '6px' }}>Easy (14d)</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginLeft: '6px' }}>Easy (14d)</span>
                 </div>
-                <div style={{ fontSize: '13px', color: flags > 0 ? '#f59e0b' : '#666' }}>
+                <div style={{ fontSize: '13px', color: flags > 0 ? '#f5a623' : '#666' }}>
                   {flags} coaching flag{flags !== 1 ? 's' : ''}
                 </div>
               </div>
-              <span style={{ color: '#fc5200', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap' }}>Training &rsaquo;</span>
+              <span style={{ color: '#ff5a1f', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap' }}>Training &rsaquo;</span>
             </div>
           </Link>
         );
       })()}
 
       {/* Pull from Strava */}
-      <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px' }}>
+      <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '14px 16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button onClick={handlePullToday} disabled={pulling}
-            style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#fc5200', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap', flex: '1 1 auto' }}>
+            style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#ff5a1f', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap', flex: '1 1 auto' }}>
             {pulling ? 'Pulling...' : "Pull Today's Runs"}
           </button>
           <button onClick={() => setShowDatePicker(!showDatePicker)}
-            style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#111820', color: '#93a1b1', fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
             {showDatePicker ? 'Hide' : 'By Date'} {showDatePicker ? '\u25B2' : '\u25BC'}
           </button>
         </div>
         {showDatePicker && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #252540' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #1e2936' }}>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#e0e0e0', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
+              style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#111820', color: '#e8edf2', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
             <span style={{ color: '#666', fontSize: '13px' }}>to</span>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#e0e0e0', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
+              style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#111820', color: '#e8edf2', fontSize: '14px', flex: '1 1 130px', minWidth: '130px' }} />
             <button onClick={() => handlePullByDate()} disabled={pulling}
-              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#fc5200', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#ff5a1f', color: '#fff', opacity: pulling ? 0.6 : 1, whiteSpace: 'nowrap' }}>
               Pull
             </button>
           </div>
         )}
         {pullResult && !pullResult.error && (
-          <div style={{ color: '#4ade80', fontSize: '13px', marginTop: '10px' }}>
+          <div style={{ color: '#3ddc84', fontSize: '13px', marginTop: '10px' }}>
             Imported {pullResult.imported} new runs
             {pullResult.already_existed ? `, ${pullResult.already_existed} already in DB` : ''}
             {pullResult.skipped_non_running ? `, ${pullResult.skipped_non_running} non-running skipped` : ''}
           </div>
         )}
         {pullResult && pullResult.error && (
-          <div style={{ color: '#ff6b6b', fontSize: '13px', marginTop: '10px' }}>{pullResult.error}</div>
+          <div style={{ color: '#ff4d4f', fontSize: '13px', marginTop: '10px' }}>{pullResult.error}</div>
         )}
       </div>
 
       {/* Stats */}
       {stats && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', marginBottom: '20px' }}>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Streak</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: stats.streak > 0 ? '#4ade80' : '#666' }}>{stats.streak}</div>
-            <div style={{ fontSize: '11px', color: '#a0a0b0' }}>days</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Streak</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: stats.streak > 0 ? '#3ddc84' : '#666' }}>{stats.streak}</div>
+            <div style={{ fontSize: '11px', color: '#93a1b1' }}>days</div>
           </div>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>This Week</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{stats.thisWeekKm}</div>
-            <div style={{ fontSize: '11px', color: '#a0a0b0' }}>km ({stats.thisWeekRuns} runs)</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>This Week</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{stats.thisWeekKm}</div>
+            <div style={{ fontSize: '11px', color: '#93a1b1' }}>km ({stats.thisWeekRuns} runs)</div>
           </div>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Last 5 Pace</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{stats.last5AvgPace}</div>
-            <div style={{ fontSize: '11px', color: '#a0a0b0' }}>min/km</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Last 5 Pace</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{stats.last5AvgPace}</div>
+            <div style={{ fontSize: '11px', color: '#93a1b1' }}>min/km</div>
           </div>
           <Link to={`/activity/${stats.fastestRunId}`} style={{ textDecoration: 'none' }}>
-            <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center', cursor: 'pointer' }}>
-              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Fastest</div>
-              <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{stats.fastestRunPace}</div>
-              <div style={{ fontSize: '11px', color: '#a0a0b0' }}>min/km</div>
+            <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '14px 10px', textAlign: 'center', cursor: 'pointer' }}>
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Fastest</div>
+              <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{stats.fastestRunPace}</div>
+              <div style={{ fontSize: '11px', color: '#93a1b1' }}>min/km</div>
             </div>
           </Link>
         </div>
@@ -286,29 +286,29 @@ function Dashboard() {
         <>
           {/* Desktop table */}
           <div className="table-scroll" style={{ display: 'block' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#1a1a2e', borderRadius: '8px', overflow: 'hidden', minWidth: '500px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#0b0f14', borderRadius: '8px', overflow: 'hidden', minWidth: '500px' }}>
               <thead>
                 <tr>
                   {['Name', 'Date', 'Distance', 'Pace', 'Elev.'].map((h) => (
-                    <th key={h} style={{ textAlign: 'left', padding: '12px 14px', backgroundColor: '#16213e', color: '#a0a0b0', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px' }}>{h}</th>
+                    <th key={h} style={{ textAlign: 'left', padding: '12px 14px', backgroundColor: '#111820', color: '#93a1b1', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {activities.map((a) => (
                   <tr key={a.id} style={{ cursor: 'pointer' }}>
-                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #252540', fontSize: '14px' }}>
-                      <Link to={`/activity/${a.id}`} style={{ color: '#fc5200', fontWeight: 500 }}>
+                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #1e2936', fontSize: '14px' }}>
+                      <Link to={`/activity/${a.id}`} style={{ color: '#ff5a1f', fontWeight: 500 }}>
                         {a.name || 'Untitled'}
                       </Link>
                       {a.is_interval && (
-                        <span style={{ marginLeft: '6px', color: '#fbbf24', backgroundColor: '#fbbf2410', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600 }}>INT</span>
+                        <span style={{ marginLeft: '6px', color: '#f5a623', backgroundColor: '#f5a62310', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600 }}>INT</span>
                       )}
                     </td>
-                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #252540', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatDate(a.start_date)}</td>
-                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #252540', fontSize: '13px', whiteSpace: 'nowrap' }}>{metersToKm(a.distance)} km</td>
-                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #252540', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatPace(a.moving_time, a.distance)}</td>
-                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #252540', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatElevation(a.total_elevation_gain)}</td>
+                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #1e2936', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatDate(a.start_date)}</td>
+                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #1e2936', fontSize: '13px', whiteSpace: 'nowrap' }}>{metersToKm(a.distance)} km</td>
+                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #1e2936', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatPace(a.moving_time, a.distance)}</td>
+                    <td style={{ padding: '12px 14px', borderBottom: '1px solid #1e2936', fontSize: '13px', whiteSpace: 'nowrap' }}>{formatElevation(a.total_elevation_gain)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -319,14 +319,14 @@ function Dashboard() {
           {totalPages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '20px', flexWrap: 'wrap' }}>
               <button onClick={() => loadActivities(page - 1)} disabled={page <= 1}
-                style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: page <= 1 ? '#1a1a2e' : '#16213e', color: page <= 1 ? '#444' : '#e0e0e0', fontSize: '13px', cursor: page <= 1 ? 'default' : 'pointer' }}>
+                style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: page <= 1 ? '#0b0f14' : '#111820', color: page <= 1 ? '#444' : '#e8edf2', fontSize: '13px', cursor: page <= 1 ? 'default' : 'pointer' }}>
                 Prev
               </button>
-              <span style={{ color: '#a0a0b0', fontSize: '13px' }}>
+              <span style={{ color: '#93a1b1', fontSize: '13px' }}>
                 Page {page} of {totalPages} ({total} runs)
               </span>
               <button onClick={() => loadActivities(page + 1)} disabled={page >= totalPages}
-                style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: page >= totalPages ? '#1a1a2e' : '#16213e', color: page >= totalPages ? '#444' : '#e0e0e0', fontSize: '13px', cursor: page >= totalPages ? 'default' : 'pointer' }}>
+                style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #333', backgroundColor: page >= totalPages ? '#0b0f14' : '#111820', color: page >= totalPages ? '#444' : '#e8edf2', fontSize: '13px', cursor: page >= totalPages ? 'default' : 'pointer' }}>
                 Next
               </button>
             </div>

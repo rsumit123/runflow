@@ -39,11 +39,11 @@ function formatTime(seconds) {
 function getPhaseQuality(phase) {
   // Score based on consistency and volume
   const score = (phase.runs_per_week * 2) + (phase.total_distance_km / 10) + (phase.duration_days / 7);
-  if (score > 50) return { label: 'Peak', color: '#4ade80', bg: 'rgba(74, 222, 128, 0.08)' };
+  if (score > 50) return { label: 'Peak', color: '#3ddc84', bg: 'rgba(74, 222, 128, 0.08)' };
   if (score > 20) return { label: 'Strong', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.08)' };
-  if (score > 8) return { label: 'Building', color: '#fc5200', bg: 'rgba(252, 82, 0, 0.08)' };
-  if (phase.total_runs <= 2) return { label: 'Restart', color: '#a0a0b0', bg: 'rgba(160, 160, 176, 0.05)' };
-  return { label: 'Active', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.08)' };
+  if (score > 8) return { label: 'Building', color: '#ff5a1f', bg: 'rgba(252, 82, 0, 0.08)' };
+  if (phase.total_runs <= 2) return { label: 'Restart', color: '#93a1b1', bg: 'rgba(160, 160, 176, 0.05)' };
+  return { label: 'Active', color: '#f5a623', bg: 'rgba(251, 191, 36, 0.08)' };
 }
 
 function Phases() {
@@ -80,11 +80,11 @@ function Phases() {
   })() : null;
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0' }}>Analyzing your running phases...</div>;
+    return <div style={{ textAlign: 'center', padding: '60px', color: '#93a1b1' }}>Analyzing your running phases...</div>;
   }
 
   if (error) {
-    return <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff6b6b' }}>{error}</div>;
+    return <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff4d4f' }}>{error}</div>;
   }
 
   return (
@@ -92,9 +92,9 @@ function Phases() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff' }}>Running Phases</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '13px', color: '#a0a0b0' }}>Break threshold:</span>
+          <span style={{ fontSize: '13px', color: '#93a1b1' }}>Break threshold:</span>
           <select value={gapDays} onChange={(e) => { setGapDays(Number(e.target.value)); loadPhases(Number(e.target.value)); }}
-            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#16213e', color: '#e0e0e0', fontSize: '13px' }}>
+            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #333', backgroundColor: '#111820', color: '#e8edf2', fontSize: '13px' }}>
             <option value={7}>7 days</option>
             <option value={14}>14 days</option>
             <option value={21}>21 days</option>
@@ -103,40 +103,40 @@ function Phases() {
         </div>
       </div>
 
-      <p style={{ fontSize: '14px', color: '#a0a0b0', marginBottom: '24px' }}>
+      <p style={{ fontSize: '14px', color: '#93a1b1', marginBottom: '24px' }}>
         Detected {phases.length} distinct running phases based on gaps of {gapDays}+ days between runs.
       </p>
 
       {/* Insights */}
       {insights && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '28px' }}>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Total Phases</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{phases.length}</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Total Phases</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{phases.length}</div>
           </div>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Total Runs</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{insights.totalRuns}</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Total Runs</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{insights.totalRuns}</div>
           </div>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Total Distance</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{insights.totalDistance.toFixed(0)}</div>
-            <div style={{ fontSize: '12px', color: '#a0a0b0' }}>km</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Total Distance</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{insights.totalDistance.toFixed(0)}</div>
+            <div style={{ fontSize: '12px', color: '#93a1b1' }}>km</div>
           </div>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Avg Break</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{insights.avgBreak}</div>
-            <div style={{ fontSize: '12px', color: '#a0a0b0' }}>days</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Avg Break</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{insights.avgBreak}</div>
+            <div style={{ fontSize: '12px', color: '#93a1b1' }}>days</div>
           </div>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Longest Streak</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{insights.longestStreak?.duration_days || 0}</div>
-            <div style={{ fontSize: '12px', color: '#a0a0b0' }}>days</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Longest Streak</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{insights.longestStreak?.duration_days || 0}</div>
+            <div style={{ fontSize: '12px', color: '#93a1b1' }}>days</div>
           </div>
-          <div style={{ backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Best Frequency</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>{insights.mostConsistent?.runs_per_week || 0}</div>
-            <div style={{ fontSize: '12px', color: '#a0a0b0' }}>runs/week</div>
+          <div style={{ backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Best Frequency</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>{insights.mostConsistent?.runs_per_week || 0}</div>
+            <div style={{ fontSize: '12px', color: '#93a1b1' }}>runs/week</div>
           </div>
         </div>
       )}
@@ -152,7 +152,7 @@ function Phases() {
             return (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                 {phase.break_before_days && (
-                  <div style={{ width: Math.max(4, Math.min(phase.break_before_days / 5, 20)), height: '4px', backgroundColor: '#252540', borderRadius: '2px' }} />
+                  <div style={{ width: Math.max(4, Math.min(phase.break_before_days / 5, 20)), height: '4px', backgroundColor: '#1e2936', borderRadius: '2px' }} />
                 )}
                 <div title={`Phase ${phase.phase_number}: ${phase.total_runs} runs, ${phase.total_distance_km} km`}
                   style={{ width: Math.max(12, Math.min(phase.duration_days / 2, 40)), height: `${barHeight}px`, backgroundColor: quality.color, borderRadius: '3px 3px 0 0', opacity: 0.8, cursor: 'pointer', minWidth: '12px' }} />
@@ -176,13 +176,13 @@ function Phases() {
                     <span style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>Phase {phase.phase_number}</span>
                     <span style={{ fontSize: '11px', fontWeight: 600, color: quality.color, backgroundColor: `${quality.color}15`, padding: '2px 8px', borderRadius: '10px' }}>{quality.label}</span>
                   </div>
-                  <div style={{ fontSize: '13px', color: '#a0a0b0', marginTop: '2px' }}>
+                  <div style={{ fontSize: '13px', color: '#93a1b1', marginTop: '2px' }}>
                     {formatDate(phase.start_date)} — {formatDate(phase.end_date)}
                     <span style={{ marginLeft: '8px', color: '#666' }}>({formatDuration(phase.duration_days)})</span>
                   </div>
                 </div>
                 {phase.break_before_days && (
-                  <div style={{ fontSize: '12px', color: '#ff6b6b', backgroundColor: 'rgba(255,107,107,0.08)', padding: '4px 10px', borderRadius: '6px' }}>
+                  <div style={{ fontSize: '12px', color: '#ff4d4f', backgroundColor: 'rgba(255,107,107,0.08)', padding: '4px 10px', borderRadius: '6px' }}>
                     {phase.break_before_days}d break before
                   </div>
                 )}
@@ -204,14 +204,14 @@ function Phases() {
                   <Link to={`/activity/${phase.fastest_run_id}`} style={{ textDecoration: 'none' }}>
                     <div style={{ cursor: 'pointer' }}>
                       <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Best Pace</div>
-                      <div style={{ fontSize: '18px', fontWeight: 700, color: '#4ade80' }}>{formatPace(phase.best_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
-                      <div style={{ fontSize: '9px', color: '#4ade8088' }}>view run &rarr;</div>
+                      <div style={{ fontSize: '18px', fontWeight: 700, color: '#3ddc84' }}>{formatPace(phase.best_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
+                      <div style={{ fontSize: '9px', color: '#3ddc8488' }}>view run &rarr;</div>
                     </div>
                   </Link>
                 ) : (
                   <div>
                     <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Best Pace</div>
-                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#4ade80' }}>{formatPace(phase.best_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: '#3ddc84' }}>{formatPace(phase.best_pace_sec_per_km)} <span style={{ fontSize: '12px', color: '#666' }}>/km</span></div>
                   </div>
                 )}
                 <div>
@@ -225,7 +225,7 @@ function Phases() {
               </div>
               {phase.fastest_run_id && (
                 <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                  <Link to={`/activity/${phase.fastest_run_id}`} style={{ fontSize: '12px', color: '#4ade80' }}>
+                  <Link to={`/activity/${phase.fastest_run_id}`} style={{ fontSize: '12px', color: '#3ddc84' }}>
                     Fastest run &rarr;
                   </Link>
                   {phase.longest_run_id && phase.longest_run_id !== phase.fastest_run_id && (

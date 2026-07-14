@@ -6,19 +6,19 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background-color: #0f0f1a;
-  color: #e0e0e0;
+  background-color: #0b0f14;
+  color: #e8edf2;
   line-height: 1.6;
   -webkit-text-size-adjust: 100%;
 }
 
 a {
-  color: #fc5200;
+  color: #ff5a1f;
   text-decoration: none;
 }
 
 a:hover {
-  color: #ff7733;
+  color: #ff7a4d;
 }
 
 /* Dark theme date inputs for mobile */

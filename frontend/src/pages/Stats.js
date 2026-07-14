@@ -32,7 +32,7 @@ function formatDistanceLabel(meters) {
   return `${m}m`;
 }
 
-const cardStyle = { backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '20px', overflow: 'hidden' };
+const cardStyle = { backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '20px', overflow: 'hidden' };
 const chartWrap = { width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' };
 const chartInner = (minW) => ({ minWidth: minW ? `${minW}px` : undefined, width: '100%' });
 const sectionTitle = { fontSize: '18px', fontWeight: 600, color: '#fff', marginBottom: '16px' };
@@ -40,10 +40,10 @@ const sectionTitle = { fontSize: '18px', fontWeight: 600, color: '#fff', marginB
 const CustomTooltip = ({ active, payload, label, formatter }) => {
   if (!active || !payload || !payload.length) return null;
   return (
-    <div style={{ backgroundColor: '#16213e', border: '1px solid #333', borderRadius: '6px', padding: '10px 14px', fontSize: '13px' }}>
-      <div style={{ color: '#a0a0b0', marginBottom: '4px' }}>{label}</div>
+    <div style={{ backgroundColor: '#111820', border: '1px solid #333', borderRadius: '6px', padding: '10px 14px', fontSize: '13px' }}>
+      <div style={{ color: '#93a1b1', marginBottom: '4px' }}>{label}</div>
       {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color || '#fc5200' }}>
+        <div key={i} style={{ color: p.color || '#ff5a1f' }}>
           {p.name}: {formatter ? formatter(p.value, p.name) : p.value}
         </div>
       ))}
@@ -85,7 +85,7 @@ function Stats() {
   }, []);
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0' }}>Loading stats...</div>;
+    return <div style={{ textAlign: 'center', padding: '60px', color: '#93a1b1' }}>Loading stats...</div>;
   }
 
   // Prepare phase pace data for chart
@@ -169,7 +169,7 @@ function Stats() {
               textTransform: 'uppercase',
               letterSpacing: '0.5px',
               color: '#666',
-              borderBottom: '1px solid #252540',
+              borderBottom: '1px solid #1e2936',
               minWidth: '460px',
             }}>
               <div>Dist</div>
@@ -185,18 +185,18 @@ function Stats() {
               const sp = allTimeSprint[distKey];
               const cp = currentPhase[distKey];
               let diffSeconds = null;
-              let diffColor = '#a0a0b0';
+              let diffColor = '#93a1b1';
               if (at && cp) {
                 diffSeconds = cp.time_seconds - at.time_seconds;
                 const diffPct = at.time_seconds > 0 ? (diffSeconds / at.time_seconds) * 100 : 0;
                 if (diffSeconds <= 0) {
-                  diffColor = '#4ade80'; // green - PR
+                  diffColor = '#3ddc84'; // green - PR
                 } else if (diffPct <= 5) {
-                  diffColor = '#4ade80'; // green - within 5%
+                  diffColor = '#3ddc84'; // green - within 5%
                 } else if (diffPct <= 15) {
-                  diffColor = '#fbbf24'; // yellow - 5-15% gap
+                  diffColor = '#f5a623'; // yellow - 5-15% gap
                 } else {
-                  diffColor = '#ff6b6b'; // red - >15% gap
+                  diffColor = '#ff4d4f'; // red - >15% gap
                 }
               }
 
@@ -211,12 +211,12 @@ function Stats() {
                   fontSize: '13px',
                   minWidth: '460px',
                 }}>
-                  <div style={{ color: '#e0e0e0', fontWeight: 600 }}>
+                  <div style={{ color: '#e8edf2', fontWeight: 600 }}>
                     {formatDistanceLabel(distKey)}
                   </div>
                   <div>
                     {at ? (
-                      <Link to={`/activity/${at.activity_id}`} style={{ color: '#fc5200', textDecoration: 'none', fontWeight: 600 }}>
+                      <Link to={`/activity/${at.activity_id}`} style={{ color: '#ff5a1f', textDecoration: 'none', fontWeight: 600 }}>
                         {formatTime(at.time_seconds)}
                       </Link>
                     ) : <span style={{ color: '#555' }}>-</span>}
@@ -224,7 +224,7 @@ function Stats() {
                   </div>
                   <div>
                     {sp ? (
-                      <Link to={`/activity/${sp.activity_id}`} style={{ color: '#4ade80', textDecoration: 'none', fontWeight: 600 }}>
+                      <Link to={`/activity/${sp.activity_id}`} style={{ color: '#3ddc84', textDecoration: 'none', fontWeight: 600 }}>
                         {formatTime(sp.time_seconds)}
                       </Link>
                     ) : <span style={{ color: '#555' }}>-</span>}
@@ -236,14 +236,14 @@ function Stats() {
                         <Link to={`/activity/${cp.activity_id}`} style={{ color: '#60a5fa', textDecoration: 'none', fontWeight: 600 }}>
                           {formatTime(cp.time_seconds)}
                         </Link>
-                      ) : <span style={{ color: '#e0e0e0' }}>{formatTime(cp.time_seconds)}</span>
+                      ) : <span style={{ color: '#e8edf2' }}>{formatTime(cp.time_seconds)}</span>
                     ) : <span style={{ color: '#555' }}>-</span>}
                     {cp && <div style={{ color: '#666', fontSize: '10px' }}>{formatPace(cp.pace_sec_per_km)}/km</div>}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     {at && cp ? (
                       diffSeconds <= 0 ? (
-                        <span style={{ color: '#4ade80', fontWeight: 700, fontSize: '11px' }}>PR!</span>
+                        <span style={{ color: '#3ddc84', fontWeight: 700, fontSize: '11px' }}>PR!</span>
                       ) : (
                         <span style={{ color: diffColor, fontSize: '12px' }}>+{Math.round(diffSeconds)}s</span>
                       )
@@ -261,7 +261,7 @@ function Stats() {
         const fmtDelta = (d) => {
           if (d === null || d === undefined) return '-';
           const sign = d < 0 ? '↓' : d > 0 ? '↑' : '·';
-          const color = d < 0 ? '#22c55e' : d > 0 ? '#ef4444' : '#888';
+          const color = d < 0 ? '#3ddc84' : d > 0 ? '#ff4d4f' : '#888';
           const mins = Math.floor(Math.abs(d) / 60);
           const secs = Math.round(Math.abs(d) % 60);
           const txt = mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${Math.abs(d).toFixed(0)}s`;
@@ -281,12 +281,12 @@ function Stats() {
           if (!summary || data.length < 2) return null;
           const chartData = buildChart(data);
           return (
-            <div style={{ flex: '1 1 280px', minWidth: 0, backgroundColor: '#0f0f1a', borderRadius: '6px', padding: '12px' }}>
+            <div style={{ flex: '1 1 280px', minWidth: 0, backgroundColor: '#0b0f14', borderRadius: '6px', padding: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
                 <div style={{ fontSize: '13px', fontWeight: 700, color }}>{title}</div>
                 <div style={{ fontSize: '10px', color: '#666' }}>{summary.session_count} sessions</div>
               </div>
-              <div style={{ fontSize: '11px', color: '#a0a0b0', marginBottom: '4px' }}>
+              <div style={{ fontSize: '11px', color: '#93a1b1', marginBottom: '4px' }}>
                 {formatPace(summary.first_pace)} → <span style={{ color: '#fff', fontWeight: 700 }}>{formatPace(summary.latest_pace)}</span>/km &nbsp;{fmtDelta(summary.delta)}
               </div>
               <div style={{ fontSize: '10px', color: '#666', marginBottom: '8px' }}>
@@ -298,7 +298,7 @@ function Stats() {
                   <XAxis dataKey="date" tick={{ fill: '#555', fontSize: 9 }} />
                   <YAxis tick={{ fill: '#555', fontSize: 9 }} domain={['auto', 'auto']} tickFormatter={(v) => formatPace(v)} reversed width={42} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #333', borderRadius: '4px', fontSize: '11px' }}
+                    contentStyle={{ backgroundColor: '#0b0f14', border: '1px solid #333', borderRadius: '4px', fontSize: '11px' }}
                     labelStyle={{ color: '#fff' }}
                     formatter={(v) => [`${formatPace(v)}/km`, 'pace']}
                   />
@@ -315,8 +315,8 @@ function Stats() {
               Pace per session within the current phase. Line trending up = getting faster. Green delta = improving.
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              {block('Regular Runs', '#fc5200', regSum, reg)}
-              {block('Interval Avg Rep', '#fbbf24', intvSum, intv)}
+              {block('Regular Runs', '#ff5a1f', regSum, reg)}
+              {block('Interval Avg Rep', '#f5a623', intvSum, intv)}
             </div>
             {!regSum && !intvSum && (
               <div style={{ color: '#666', fontSize: '12px' }}>Not enough sessions in this phase yet.</div>
@@ -343,14 +343,14 @@ function Stats() {
                 {hasRegular && (
                   <button onClick={() => setMetricsTab('regular')}
                     style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: 'none', cursor: 'pointer',
-                      backgroundColor: metricsTab === 'regular' ? '#fc5200' : '#16213e', color: metricsTab === 'regular' ? '#fff' : '#666' }}>
+                      backgroundColor: metricsTab === 'regular' ? '#ff5a1f' : '#111820', color: metricsTab === 'regular' ? '#fff' : '#666' }}>
                     Runs
                   </button>
                 )}
                 {hasInterval && (
                   <button onClick={() => setMetricsTab('interval')}
                     style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: 'none', cursor: 'pointer',
-                      backgroundColor: metricsTab === 'interval' ? '#fbbf24' : '#16213e', color: metricsTab === 'interval' ? '#1a1a2e' : '#666' }}>
+                      backgroundColor: metricsTab === 'interval' ? '#f5a623' : '#111820', color: metricsTab === 'interval' ? '#0b0f14' : '#666' }}>
                     Intervals
                   </button>
                 )}
@@ -374,27 +374,27 @@ function Stats() {
             {/* Current metrics summary */}
             {latest && (
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+                <div style={{ backgroundColor: '#111820', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Consistency</div>
-                  <div style={{ fontSize: '22px', fontWeight: 700, color: latest.consistency >= 80 ? '#4ade80' : latest.consistency >= 60 ? '#fbbf24' : '#ff6b6b' }}>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: latest.consistency >= 80 ? '#3ddc84' : latest.consistency >= 60 ? '#f5a623' : '#ff4d4f' }}>
                     {latest.consistency}
                   </div>
                   {scoreDiff !== null && scoreDiff !== 0 && (
-                    <div style={{ fontSize: '10px', color: scoreDiff > 0 ? '#4ade80' : '#ff6b6b' }}>
+                    <div style={{ fontSize: '10px', color: scoreDiff > 0 ? '#3ddc84' : '#ff4d4f' }}>
                       {scoreDiff > 0 ? '+' : ''}{scoreDiff} vs last
                     </div>
                   )}
                 </div>
-                <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+                <div style={{ backgroundColor: '#111820', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Fade</div>
-                  <div style={{ fontSize: '22px', fontWeight: 700, color: Math.abs(latest.fade_s) <= 5 ? '#4ade80' : latest.fade_s > 15 ? '#ff6b6b' : '#fbbf24' }}>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: Math.abs(latest.fade_s) <= 5 ? '#3ddc84' : latest.fade_s > 15 ? '#ff4d4f' : '#f5a623' }}>
                     {latest.fade_s > 0 ? '+' : ''}{latest.fade_s}s
                   </div>
                   <div style={{ fontSize: '10px', color: '#666' }}>{latest.fade_s > 3 ? 'slowing' : latest.fade_s < -3 ? 'speeding up' : 'even'}</div>
                 </div>
-                <div style={{ backgroundColor: '#16213e', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
+                <div style={{ backgroundColor: '#111820', borderRadius: '6px', padding: '10px 14px', textAlign: 'center', flex: '1 1 80px' }}>
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Decay</div>
-                  <div style={{ fontSize: '22px', fontWeight: 700, color: Math.abs(latest.decay_s_per_rep || latest.decay_s_per_lap || 0) <= 2 ? '#4ade80' : '#fbbf24' }}>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: Math.abs(latest.decay_s_per_rep || latest.decay_s_per_lap || 0) <= 2 ? '#3ddc84' : '#f5a623' }}>
                     {(latest.decay_s_per_rep || latest.decay_s_per_lap || 0).toFixed(1)}s
                   </div>
                   <div style={{ fontSize: '10px', color: '#666' }}>per {metricsTab === 'interval' ? 'rep' : 'lap'}</div>
@@ -408,7 +408,7 @@ function Stats() {
                 <div style={chartInner(400)}>
                   <ResponsiveContainer width="100%" height={160}>
                     <ComposedChart data={data.slice(-20)} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                       <XAxis dataKey="date" tick={{ fill: '#666', fontSize: 9 }} interval={Math.max(0, Math.floor(data.slice(-20).length / 6))} />
                       <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={[0, 100]} width={35} />
                       <Tooltip content={<CustomTooltip formatter={(v, name) => {
@@ -416,7 +416,7 @@ function Stats() {
                         if (name === 'Fade') return `${v}s`;
                         return v;
                       }} />} />
-                      <Area type="monotone" dataKey="consistency" name="Consistency" fill="#4ade8015" stroke="#4ade80" strokeWidth={2} dot={{ r: 3, fill: '#4ade80' }} />
+                      <Area type="monotone" dataKey="consistency" name="Consistency" fill="#3ddc8415" stroke="#3ddc84" strokeWidth={2} dot={{ r: 3, fill: '#3ddc84' }} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -432,9 +432,9 @@ function Stats() {
           <h2 style={sectionTitle}>Personal Records</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
             {prs?.best_1km_split && (
-              <div style={{ backgroundColor: '#16213e', borderRadius: '8px', padding: '16px', textAlign: 'center', border: '1px solid #fc520033' }}>
-                <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Best 1km Split</div>
-                <div style={{ fontSize: '26px', fontWeight: 700, color: '#fc5200' }}>{formatTime(prs.best_1km_split.time)}</div>
+              <div style={{ backgroundColor: '#111820', borderRadius: '8px', padding: '16px', textAlign: 'center', border: '1px solid #ff5a1f33' }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Best 1km Split</div>
+                <div style={{ fontSize: '26px', fontWeight: 700, color: '#ff5a1f' }}>{formatTime(prs.best_1km_split.time)}</div>
                 <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
                   {formatPace(prs.best_1km_split.time)}/km
                 </div>
@@ -442,9 +442,9 @@ function Stats() {
             )}
             {prEntries.map(([dist, pr]) => (
               <Link to={`/activity/${pr.activity_id}`} key={dist} style={{ textDecoration: 'none' }}>
-                <div style={{ backgroundColor: '#16213e', borderRadius: '8px', padding: '16px', textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.2s', border: '1px solid transparent' }}>
-                  <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>{dist} PR</div>
-                  <div style={{ fontSize: '26px', fontWeight: 700, color: '#4ade80' }}>{formatTime(pr.time_seconds)}</div>
+                <div style={{ backgroundColor: '#111820', borderRadius: '8px', padding: '16px', textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.2s', border: '1px solid transparent' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>{dist} PR</div>
+                  <div style={{ fontSize: '26px', fontWeight: 700, color: '#3ddc84' }}>{formatTime(pr.time_seconds)}</div>
                   <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
                     {formatPace(pr.pace_sec_per_km)}/km &middot; {formatDate(pr.date)}
                   </div>
@@ -464,7 +464,7 @@ function Stats() {
             <div style={chartInner(500)}>
               <ResponsiveContainer width="100%" height={260}>
                 <ComposedChart data={phasePaceData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                   <XAxis dataKey="name" tick={{ fill: '#666', fontSize: 10 }} />
                   <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} tickFormatter={(v) => formatPace(v)} reversed width={45} />
                   <Tooltip content={<CustomTooltip formatter={(v, name) => {
@@ -472,8 +472,8 @@ function Stats() {
                     if (name === 'Distance') return `${v} km`;
                     return v;
                   }} />} />
-                  <Area type="monotone" dataKey="pace" name="Avg Pace" fill="#fc520015" stroke="#fc5200" strokeWidth={2} dot={{ fill: '#fc5200', r: 3 }} />
-                  <Line type="monotone" dataKey="bestPace" name="Best Pace" stroke="#4ade80" strokeWidth={1.5} strokeDasharray="4 4" dot={{ fill: '#4ade80', r: 2 }} />
+                  <Area type="monotone" dataKey="pace" name="Avg Pace" fill="#ff5a1f15" stroke="#ff5a1f" strokeWidth={2} dot={{ fill: '#ff5a1f', r: 3 }} />
+                  <Line type="monotone" dataKey="bestPace" name="Best Pace" stroke="#3ddc84" strokeWidth={1.5} strokeDasharray="4 4" dot={{ fill: '#3ddc84', r: 2 }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -489,7 +489,7 @@ function Stats() {
             <div style={chartInner(600)}>
               <ResponsiveContainer width="100%" height={240}>
                 <ComposedChart data={monthlyChart} margin={{ top: 5, right: 5, left: -10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                   <XAxis dataKey="month" tick={{ fill: '#666', fontSize: 9 }} interval={2} angle={-45} textAnchor="end" height={45} />
                   <YAxis yAxisId="km" tick={{ fill: '#666', fontSize: 10 }} width={35} />
                   <YAxis yAxisId="runs" orientation="right" tick={{ fill: '#666', fontSize: 10 }} width={30} />
@@ -498,7 +498,7 @@ function Stats() {
                     if (name === 'Pace') return formatPace(v);
                     return v;
                   }} />} />
-                  <Bar yAxisId="km" dataKey="distance" name="Distance" fill="#fc520066" radius={[3, 3, 0, 0]} />
+                  <Bar yAxisId="km" dataKey="distance" name="Distance" fill="#ff5a1f66" radius={[3, 3, 0, 0]} />
                   <Line yAxisId="runs" type="monotone" dataKey="runs" name="Runs" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -515,11 +515,11 @@ function Stats() {
             <div style={chartInner(500)}>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={monthlyChart.filter(m => m.pace)} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                   <XAxis dataKey="month" tick={{ fill: '#666', fontSize: 9 }} interval={3} angle={-45} textAnchor="end" height={45} />
                   <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} tickFormatter={(v) => formatPace(v)} reversed width={45} />
                   <Tooltip content={<CustomTooltip formatter={(v) => formatPace(v)} />} />
-                  <Line type="monotone" dataKey="pace" name="Avg Pace" stroke="#fc5200" strokeWidth={2} dot={{ r: 2, fill: '#fc5200' }} />
+                  <Line type="monotone" dataKey="pace" name="Avg Pace" stroke="#ff5a1f" strokeWidth={2} dot={{ r: 2, fill: '#ff5a1f' }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -557,11 +557,11 @@ function Stats() {
             {weeks.map((week, wi) => (
               <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 {week.map((day, di) => {
-                  let bg = '#16213e';
+                  let bg = '#111820';
                   if (day.runs > 0) {
-                    if (day.distance > 5) bg = '#fc5200';
-                    else if (day.distance > 3) bg = '#fc5200aa';
-                    else bg = '#fc520055';
+                    if (day.distance > 5) bg = '#ff5a1f';
+                    else if (day.distance > 3) bg = '#ff5a1faa';
+                    else bg = '#ff5a1f55';
                   }
                   return (
                     <div key={di} title={`${day.date}: ${day.runs > 0 ? `${day.distance}km` : 'Rest day'}`}
@@ -573,10 +573,10 @@ function Stats() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', fontSize: '11px', color: '#666', marginLeft: '32px' }}>
             <span>Less</span>
-            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#16213e' }} />
-            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#fc520055' }} />
-            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#fc5200aa' }} />
-            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#fc5200' }} />
+            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#111820' }} />
+            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#ff5a1f55' }} />
+            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#ff5a1faa' }} />
+            <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#ff5a1f' }} />
             <span>More</span>
           </div>
         </div>

@@ -11,15 +11,15 @@ const tableWrapper = {
 const tableStyle = {
   width: '100%',
   borderCollapse: 'collapse',
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#0b0f14',
   minWidth: '560px',
 };
 
 const thStyle = {
   textAlign: 'left',
   padding: '14px 16px',
-  backgroundColor: '#16213e',
-  color: '#a0a0b0',
+  backgroundColor: '#111820',
+  color: '#93a1b1',
   fontSize: '12px',
   fontWeight: 600,
   textTransform: 'uppercase',
@@ -28,7 +28,7 @@ const thStyle = {
 
 const tdBase = {
   padding: '12px 16px',
-  borderBottom: '1px solid #252540',
+  borderBottom: '1px solid #1e2936',
   fontSize: '14px',
 };
 
@@ -112,10 +112,10 @@ function SplitsTable({ splits }) {
 
   const getPaceStyle = (index) => {
     if (index === fastestIdx) {
-      return { color: '#4ade80', fontWeight: 600 };
+      return { color: '#3ddc84', fontWeight: 600 };
     }
     if (index === slowestIdx) {
-      return { color: '#ff6b6b', fontWeight: 600 };
+      return { color: '#ff4d4f', fontWeight: 600 };
     }
     return {};
   };

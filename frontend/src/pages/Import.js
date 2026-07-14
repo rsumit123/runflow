@@ -10,12 +10,12 @@ const pageTitle = {
 
 const subtitle = {
   fontSize: '14px',
-  color: '#a0a0b0',
+  color: '#93a1b1',
   marginBottom: '32px',
 };
 
 const cardStyle = {
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#0b0f14',
   borderRadius: '8px',
   padding: '28px',
   marginBottom: '20px',
@@ -30,7 +30,7 @@ const cardTitle = {
 
 const cardDesc = {
   fontSize: '14px',
-  color: '#a0a0b0',
+  color: '#93a1b1',
   marginBottom: '20px',
   lineHeight: '1.5',
 };
@@ -47,20 +47,20 @@ const buttonBase = {
 
 const primaryButton = {
   ...buttonBase,
-  backgroundColor: '#fc5200',
+  backgroundColor: '#ff5a1f',
   color: '#ffffff',
 };
 
 const secondaryButton = {
   ...buttonBase,
-  backgroundColor: '#16213e',
-  color: '#e0e0e0',
+  backgroundColor: '#111820',
+  color: '#e8edf2',
   border: '1px solid #333',
 };
 
 const connectButton = {
   ...buttonBase,
-  backgroundColor: '#fc5200',
+  backgroundColor: '#ff5a1f',
   color: '#ffffff',
   fontSize: '15px',
   padding: '14px 32px',
@@ -84,21 +84,21 @@ const successStatus = {
   ...statusBox,
   backgroundColor: '#0d3320',
   border: '1px solid #1a6b40',
-  color: '#4ade80',
+  color: '#3ddc84',
 };
 
 const errorStatus = {
   ...statusBox,
   backgroundColor: '#3d1515',
   border: '1px solid #6b2020',
-  color: '#ff6b6b',
+  color: '#ff4d4f',
 };
 
 const loadingStatus = {
   ...statusBox,
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#0b0f14',
   border: '1px solid #333',
-  color: '#a0a0b0',
+  color: '#93a1b1',
 };
 
 const spinnerStyle = {
@@ -110,8 +110,8 @@ const inputStyle = {
   padding: '10px 14px',
   borderRadius: '6px',
   border: '1px solid #333',
-  backgroundColor: '#16213e',
-  color: '#e0e0e0',
+  backgroundColor: '#111820',
+  color: '#e8edf2',
   fontSize: '14px',
   width: '100%',
   maxWidth: '500px',
@@ -121,7 +121,7 @@ const inputStyle = {
 
 const progressBarContainer = {
   width: '100%',
-  backgroundColor: '#16213e',
+  backgroundColor: '#111820',
   borderRadius: '4px',
   height: '8px',
   marginTop: '12px',
@@ -130,7 +130,7 @@ const progressBarContainer = {
 
 const progressBarFill = (pct) => ({
   width: `${pct}%`,
-  backgroundColor: '#fc5200',
+  backgroundColor: '#ff5a1f',
   height: '100%',
   borderRadius: '4px',
   transition: 'width 0.3s ease',
@@ -360,7 +360,7 @@ function Import() {
 
     return (
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '13px', color: '#a0a0b0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '13px', color: '#93a1b1' }}>
           <span>{current} / {total > 0 ? total : '?'} activities processed</span>
           <span>{total > 0 ? `${pct}%` : ''}</span>
         </div>
@@ -392,7 +392,7 @@ function Import() {
           {authLoading ? 'Connecting...' : 'Connect with Strava'}
         </button>
         {authUrl && (
-          <div style={{ ...statusBox, backgroundColor: '#16213e', color: '#a0a0b0', marginTop: '12px' }}>
+          <div style={{ ...statusBox, backgroundColor: '#111820', color: '#93a1b1', marginTop: '12px' }}>
             {authUrl}
           </div>
         )}

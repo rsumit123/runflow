@@ -23,21 +23,21 @@ function formatDate(dateString) {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-const cardStyle = { backgroundColor: '#1a1a2e', borderRadius: '8px', padding: '16px', marginBottom: '20px', overflow: 'hidden' };
+const cardStyle = { backgroundColor: '#0b0f14', borderRadius: '8px', padding: '16px', marginBottom: '20px', overflow: 'hidden' };
 const chartWrap = { width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' };
 const chartInner = (minW) => ({ minWidth: minW ? `${minW}px` : undefined, width: '100%' });
 const sectionTitle = { fontSize: '18px', fontWeight: 600, color: '#fff', marginBottom: '16px' };
 
-const ZONE_COLORS = { easy: '#22c55e', gray: '#f59e0b', hard: '#ef4444', unknown: '#666' };
-const WARN_COLORS = { danger: '#ef4444', warn: '#f59e0b', info: '#3b82f6' };
-const DAY_TYPE_COLORS = { easy: '#22c55e', long: '#3b82f6', quality: '#ef4444', strides: '#f59e0b', rest: '#64748b' };
+const ZONE_COLORS = { easy: '#3ddc84', gray: '#f5a623', hard: '#ff4d4f', unknown: '#666' };
+const WARN_COLORS = { danger: '#ff4d4f', warn: '#f5a623', info: '#3b82f6' };
+const DAY_TYPE_COLORS = { easy: '#3ddc84', long: '#3b82f6', quality: '#ff4d4f', strides: '#f5a623', rest: '#5d6b7a' };
 
 // Sprint (100m) plan day types — colored label + display text.
 const SPRINT_DAY_TYPE = {
-  accel: { color: '#fc5200', label: 'Accel' },
+  accel: { color: '#ff5a1f', label: 'Accel' },
   max_velocity: { color: '#ff8a3d', label: 'Max velocity' },
   speed_endurance: { color: '#e0245e', label: 'Speed endurance' },
-  technique: { color: '#3d9970', label: 'Technique' },
+  technique: { color: '#3ddc84', label: 'Technique' },
   plyometrics: { color: '#b10dc9', label: 'Plyometrics' },
   test: { color: '#f1c40f', label: 'Test' },
   rest: { color: '#5a5a6a', label: 'Rest' },
@@ -62,7 +62,7 @@ function SprintSummary({ structure, dc }) {
   const vol = structure.total_volume_m;
   return (
     <>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e0e0e0', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e8edf2', alignItems: 'center' }}>
         {lines.map((l, i) => <span key={i}>{l}</span>)}
         {vol != null && (
           <span style={{
@@ -83,10 +83,10 @@ function SprintSummary({ structure, dc }) {
 const GrayTooltip = ({ active, payload, label }) => {
   if (!active || !payload || !payload.length) return null;
   return (
-    <div style={{ backgroundColor: '#16213e', border: '1px solid #333', borderRadius: '6px', padding: '10px 14px', fontSize: '13px' }}>
-      <div style={{ color: '#a0a0b0', marginBottom: '4px' }}>{label}</div>
+    <div style={{ backgroundColor: '#111820', border: '1px solid #333', borderRadius: '6px', padding: '10px 14px', fontSize: '13px' }}>
+      <div style={{ color: '#93a1b1', marginBottom: '4px' }}>{label}</div>
       {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color || '#f59e0b' }}>
+        <div key={i} style={{ color: p.color || '#f5a623' }}>
           {p.name}: {p.value}%
         </div>
       ))}
@@ -96,9 +96,9 @@ const GrayTooltip = ({ active, payload, label }) => {
 
 function StatCard({ label, value, sub, color }) {
   return (
-    <div style={{ backgroundColor: '#16213e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
-      <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>{label}</div>
-      <div style={{ fontSize: '22px', fontWeight: 700, color: color || '#fc5200' }}>{value}</div>
+    <div style={{ backgroundColor: '#111820', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+      <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>{label}</div>
+      <div style={{ fontSize: '22px', fontWeight: 700, color: color || '#ff5a1f' }}>{value}</div>
       {sub && <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>{sub}</div>}
     </div>
   );
@@ -365,7 +365,7 @@ function PlanSection() {
   if (loading) {
     return (
       <div style={cardStyle}>
-        <div style={{ color: '#a0a0b0', fontSize: '13px' }}>Loading plan...</div>
+        <div style={{ color: '#93a1b1', fontSize: '13px' }}>Loading plan...</div>
       </div>
     );
   }
@@ -411,7 +411,7 @@ function PlanSection() {
       if (ws.some((w) => w.status === 'missed')) return 'missed';
       return 'neutral';
     };
-    const chipBg = { done: '#22c55e18', missed: '#ef444418', neutral: '#16213e' };
+    const chipBg = { done: '#3ddc8418', missed: '#ff4d4f18', neutral: '#111820' };
 
     // Selected-week date range + narrative focus
     const selDates = selWorkouts.map((w) => w.date).filter(Boolean).map((d) => new Date(d));
@@ -446,21 +446,21 @@ function PlanSection() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px', alignItems: 'baseline', marginBottom: '14px' }}>
           <div style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>
             {isSprint ? (
-              <>100m in <span style={{ color: '#fc5200' }}>{plan.sprint_target_sec != null ? `${plan.sprint_target_sec.toFixed(1)}s` : '—'}</span></>
+              <>100m in <span style={{ color: '#ff5a1f' }}>{plan.sprint_target_sec != null ? `${plan.sprint_target_sec.toFixed(1)}s` : '—'}</span></>
             ) : (
-              <>5K in <span style={{ color: '#fc5200' }}>{goalSec != null ? formatPace(goalSec) : '—'}</span></>
+              <>5K in <span style={{ color: '#ff5a1f' }}>{goalSec != null ? formatPace(goalSec) : '—'}</span></>
             )}
           </div>
-          <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+          <div style={{ fontSize: '13px', color: '#93a1b1' }}>
             Goal date {formatDate(plan.goal_date)}
           </div>
-          <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+          <div style={{ fontSize: '13px', color: '#93a1b1' }}>
             · Week {currentWeek} of {totalWeeks}
           </div>
           <button
             onClick={abandonPlan}
             style={{
-              marginLeft: 'auto', background: 'none', border: 'none', color: '#ef4444',
+              marginLeft: 'auto', background: 'none', border: 'none', color: '#ff4d4f',
               fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '4px 0',
             }}
           >
@@ -475,7 +475,7 @@ function PlanSection() {
               onClick={syncPlanToWatch}
               disabled={syncing}
               style={{
-                backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                backgroundColor: '#ff5a1f', border: 'none', borderRadius: '6px', color: '#fff',
                 fontSize: '13px', fontWeight: 700, padding: '10px 16px', minHeight: '44px',
                 cursor: syncing ? 'default' : 'pointer', opacity: syncing ? 0.6 : 1,
               }}
@@ -484,18 +484,18 @@ function PlanSection() {
             </button>
             {syncResult && (
               <div style={{ marginTop: '8px' }}>
-                <div style={{ fontSize: '12px', color: '#22c55e' }}>
+                <div style={{ fontSize: '12px', color: '#3ddc84' }}>
                   ✓ {syncResult.pushed} workout{syncResult.pushed === 1 ? '' : 's'} on your watch
                 </div>
                 {syncResult.total_failed > 0 && (
-                  <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '4px' }}>
+                  <div style={{ fontSize: '12px', color: '#f5a623', marginTop: '4px' }}>
                     {syncResult.total_failed} couldn't be sent
                   </div>
                 )}
               </div>
             )}
             {syncError && (
-              <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '8px' }}>{syncError}</div>
+              <div style={{ fontSize: '12px', color: '#ff4d4f', marginTop: '8px' }}>{syncError}</div>
             )}
           </div>
         )}
@@ -651,7 +651,7 @@ function PlanSection() {
         <div
           onClick={todayCardId != null ? () => navigate('/plan/workout/' + todayCardId) : undefined}
           style={{
-            backgroundColor: '#16213e', border: '1px solid #fc520055', borderLeft: '4px solid #fc5200',
+            backgroundColor: '#111820', border: '1px solid #ff5a1f55', borderLeft: '4px solid #ff5a1f',
             borderRadius: '8px', padding: '16px', marginBottom: '18px',
             cursor: todayCardId != null ? 'pointer' : 'default',
           }}
@@ -670,14 +670,14 @@ function PlanSection() {
             return (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#fc5200' }}>Today</span>
+                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#ff5a1f' }}>Today</span>
                   <span style={{
                     color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
                     fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
                   }}>
                     {dtLabel}
                   </span>
-                  <span style={{ marginLeft: 'auto', fontSize: '15px', color: done ? '#22c55e' : '#64748b' }}>
+                  <span style={{ marginLeft: 'auto', fontSize: '15px', color: done ? '#3ddc84' : '#5d6b7a' }}>
                     {done ? '●' : '○'}
                   </span>
                 </div>
@@ -687,7 +687,7 @@ function PlanSection() {
                 {isSprint ? (
                   <SprintSummary structure={w.structure} dc={dc} />
                 ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e0e0e0' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '13px', color: '#e8edf2' }}>
                     {km != null && <span>{km} km</span>}
                     {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
                     {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
@@ -695,7 +695,7 @@ function PlanSection() {
                 )}
                 {isSprint && done && actual && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
-                    <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                    <span style={{ fontSize: '12px', color: '#93a1b1' }}>
                       Best 100m: {actual.best_100m_sec != null ? `${actual.best_100m_sec}s` : '—'}
                       {actual.fade_pct != null ? ` · fade ${actual.fade_pct}%` : ''}
                     </span>
@@ -703,13 +703,13 @@ function PlanSection() {
                 )}
                 {!isSprint && done && actual && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
-                    <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                    <span style={{ fontSize: '12px', color: '#93a1b1' }}>
                       Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
                       {actual.avg_hr != null ? ` · ${Math.round(actual.avg_hr)} bpm` : ''}
                     </span>
                     {w.compliance === 'ran_hard' && (
                       <span style={{
-                        fontSize: '10px', fontWeight: 700, color: '#ef4444', backgroundColor: '#ef444422',
+                        fontSize: '10px', fontWeight: 700, color: '#ff4d4f', backgroundColor: '#ff4d4f22',
                         padding: '2px 7px', borderRadius: '4px',
                       }}>
                         ran hard
@@ -717,7 +717,7 @@ function PlanSection() {
                     )}
                     {w.compliance === 'on_target' && (
                       <span style={{
-                        fontSize: '10px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e22',
+                        fontSize: '10px', fontWeight: 700, color: '#3ddc84', backgroundColor: '#3ddc8422',
                         padding: '2px 7px', borderRadius: '4px',
                       }}>
                         ✓ easy
@@ -729,7 +729,7 @@ function PlanSection() {
             );
           })() : nextWorkout ? (
             <>
-              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#fc5200', marginBottom: '8px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#ff5a1f', marginBottom: '8px' }}>
                 Next · {formatDate(nextWorkout.date)}
               </div>
               <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
@@ -738,7 +738,7 @@ function PlanSection() {
             </>
           ) : (
             <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
-              <span style={{ color: '#fc5200' }}>Today</span> · Rest day 😌
+              <span style={{ color: '#ff5a1f' }}>Today</span> · Rest day 😌
             </div>
           )}
         </div>
@@ -746,8 +746,8 @@ function PlanSection() {
 
         {narrative && narrative.overview && (
           <div style={{
-            backgroundColor: '#16213e', borderLeft: '4px solid #fc5200', borderRadius: '6px',
-            padding: '10px 12px', marginBottom: '16px', fontSize: '12.5px', color: '#c8c8d4',
+            backgroundColor: '#111820', borderLeft: '4px solid #ff5a1f', borderRadius: '6px',
+            padding: '10px 12px', marginBottom: '16px', fontSize: '12.5px', color: '#93a1b1',
             lineHeight: 1.45,
           }}>
             {narrative.overview}
@@ -758,14 +758,14 @@ function PlanSection() {
         {isSprint && progress && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '18px' }}>
             <span style={{
-              fontSize: '12px', fontWeight: 600, color: '#e0e0e0', backgroundColor: '#16213e',
+              fontSize: '12px', fontWeight: 600, color: '#e8edf2', backgroundColor: '#111820',
               borderRadius: '20px', padding: '5px 12px',
             }}>
               {progress.sessions_done != null ? progress.sessions_done : 0}/{progress.sessions_planned_past != null ? progress.sessions_planned_past : 0} done
             </span>
             {progress.adherence_pct != null && (
               <span style={{
-                fontSize: '12px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e18',
+                fontSize: '12px', fontWeight: 700, color: '#3ddc84', backgroundColor: '#3ddc8418',
                 borderRadius: '20px', padding: '5px 12px',
               }}>
                 {progress.adherence_pct}%
@@ -773,7 +773,7 @@ function PlanSection() {
             )}
             {progress.latest_best_100m_sec != null && (
               <span style={{
-                fontSize: '12px', fontWeight: 700, color: '#fc5200', backgroundColor: '#fc520018',
+                fontSize: '12px', fontWeight: 700, color: '#ff5a1f', backgroundColor: '#ff5a1f18',
                 borderRadius: '20px', padding: '5px 12px',
               }}>
                 Best 100m: {progress.latest_best_100m_sec}s
@@ -787,14 +787,14 @@ function PlanSection() {
           adh.planned_past > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '18px' }}>
               <span style={{
-                fontSize: '12px', fontWeight: 600, color: '#e0e0e0', backgroundColor: '#16213e',
+                fontSize: '12px', fontWeight: 600, color: '#e8edf2', backgroundColor: '#111820',
                 borderRadius: '20px', padding: '5px 12px',
               }}>
                 {adh.done != null ? adh.done : 0}/{adh.planned_past} done
               </span>
               {adh.adherence_pct != null && (
                 <span style={{
-                  fontSize: '12px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e18',
+                  fontSize: '12px', fontWeight: 700, color: '#3ddc84', backgroundColor: '#3ddc8418',
                   borderRadius: '20px', padding: '5px 12px',
                 }}>
                   {adh.adherence_pct}%
@@ -802,7 +802,7 @@ function PlanSection() {
               )}
               {adh.easy_run_hard > 0 && (
                 <span style={{
-                  fontSize: '12px', fontWeight: 600, color: '#f59e0b', backgroundColor: '#f59e0b18',
+                  fontSize: '12px', fontWeight: 600, color: '#f5a623', backgroundColor: '#f5a62318',
                   borderRadius: '20px', padding: '5px 12px',
                 }}>
                   ⚠ {adh.easy_run_hard} easy day{adh.easy_run_hard === 1 ? '' : 's'} run hard
@@ -810,10 +810,10 @@ function PlanSection() {
               )}
             </div>
           ) : (adh.done || 0) > 0 ? (
-            <div style={{ fontSize: '12px', color: '#a0a0b0', marginBottom: '18px' }}>
+            <div style={{ fontSize: '12px', color: '#93a1b1', marginBottom: '18px' }}>
               {adh.done} run{adh.done === 1 ? '' : 's'} logged so far
               {adh.easy_run_hard > 0 && (
-                <span style={{ color: '#f59e0b' }}>
+                <span style={{ color: '#f5a623' }}>
                   {' · '}{adh.easy_run_hard} run hard — ease up
                 </span>
               )}
@@ -830,18 +830,18 @@ function PlanSection() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
             {visibleSuggestions.map((s) => {
               const isOnTrack = s.type === 'on_track';
-              const accent = isOnTrack ? '#22c55e' : '#f59e0b';
+              const accent = isOnTrack ? '#3ddc84' : '#f5a623';
               const isApplying = applyingId === s.id;
               return (
                 <div key={s.id} style={{
-                  backgroundColor: '#16213e', borderLeft: `4px solid ${accent}`, borderRadius: '6px',
+                  backgroundColor: '#111820', borderLeft: `4px solid ${accent}`, borderRadius: '6px',
                   padding: '12px 14px',
                 }}>
                   <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
                     {s.title}
                   </div>
                   {s.detail && (
-                    <div style={{ fontSize: '13px', color: '#a0a0b0', lineHeight: 1.5 }}>{s.detail}</div>
+                    <div style={{ fontSize: '13px', color: '#93a1b1', lineHeight: 1.5 }}>{s.detail}</div>
                   )}
                   {!isOnTrack && (
                     <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
@@ -849,7 +849,7 @@ function PlanSection() {
                         onClick={() => applySuggestion(s.id)}
                         disabled={applyingId != null}
                         style={{
-                          backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                          backgroundColor: '#ff5a1f', border: 'none', borderRadius: '6px', color: '#fff',
                           fontSize: '12px', fontWeight: 700, padding: '8px 16px', minHeight: '44px',
                           cursor: applyingId != null ? 'default' : 'pointer', opacity: applyingId != null && !isApplying ? 0.5 : 1,
                         }}
@@ -860,7 +860,7 @@ function PlanSection() {
                         onClick={() => dismissSuggestion(s.id)}
                         disabled={applyingId != null}
                         style={{
-                          backgroundColor: 'transparent', border: '1px solid #333', borderRadius: '6px', color: '#a0a0b0',
+                          backgroundColor: 'transparent', border: '1px solid #333', borderRadius: '6px', color: '#93a1b1',
                           fontSize: '12px', fontWeight: 600, padding: '8px 16px', minHeight: '44px',
                           cursor: applyingId != null ? 'default' : 'pointer',
                         }}
@@ -886,9 +886,9 @@ function PlanSection() {
                   key={wn}
                   onClick={() => setSelectedWeek(wn)}
                   style={{
-                    fontSize: '12px', fontWeight: 700, color: '#e0e0e0',
+                    fontSize: '12px', fontWeight: 700, color: '#e8edf2',
                     backgroundColor: chipBg[st] || chipBg.neutral,
-                    border: isSel ? '1px solid #fc5200' : '1px solid #2a2a45',
+                    border: isSel ? '1px solid #ff5a1f' : '1px solid #2a2a45',
                     borderRadius: '6px', padding: '6px 10px', minHeight: '36px', cursor: 'pointer',
                     whiteSpace: 'nowrap',
                   }}
@@ -906,7 +906,7 @@ function PlanSection() {
             onClick={() => setSelectedWeek(Math.max(1, sel - 1))}
             disabled={sel <= 1}
             style={{
-              backgroundColor: '#16213e', border: '1px solid #2a2a45', borderRadius: '6px', color: '#e0e0e0',
+              backgroundColor: '#111820', border: '1px solid #2a2a45', borderRadius: '6px', color: '#e8edf2',
               fontSize: '16px', fontWeight: 700, width: '40px', minHeight: '40px',
               cursor: sel <= 1 ? 'default' : 'pointer', opacity: sel <= 1 ? 0.4 : 1,
             }}
@@ -915,15 +915,15 @@ function PlanSection() {
           </button>
           <div style={{ flex: 1, textAlign: 'center' }}>
             <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
-              Week {sel}{dateRange ? <span style={{ fontSize: '12px', fontWeight: 400, color: '#a0a0b0' }}> ({dateRange})</span> : null}
+              Week {sel}{dateRange ? <span style={{ fontSize: '12px', fontWeight: 400, color: '#93a1b1' }}> ({dateRange})</span> : null}
             </div>
-            {selFocus && <div style={{ fontSize: '12px', color: '#a0a0b0', marginTop: '2px' }}>{selFocus}</div>}
+            {selFocus && <div style={{ fontSize: '12px', color: '#93a1b1', marginTop: '2px' }}>{selFocus}</div>}
           </div>
           <button
             onClick={() => setSelectedWeek(Math.min(totalWeeks, sel + 1))}
             disabled={sel >= totalWeeks}
             style={{
-              backgroundColor: '#16213e', border: '1px solid #2a2a45', borderRadius: '6px', color: '#e0e0e0',
+              backgroundColor: '#111820', border: '1px solid #2a2a45', borderRadius: '6px', color: '#e8edf2',
               fontSize: '16px', fontWeight: 700, width: '40px', minHeight: '40px',
               cursor: sel >= totalWeeks ? 'default' : 'pointer', opacity: sel >= totalWeeks ? 0.4 : 1,
             }}
@@ -935,14 +935,14 @@ function PlanSection() {
         {/* Move warning (amber, dismissible) */}
         {moveWarning && (
           <div style={{
-            display: 'flex', alignItems: 'flex-start', gap: '8px', backgroundColor: '#f59e0b18',
-            border: '1px solid #f59e0b55', borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
+            display: 'flex', alignItems: 'flex-start', gap: '8px', backgroundColor: '#f5a62318',
+            border: '1px solid #f5a62355', borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
           }}>
-            <span style={{ flex: 1, fontSize: '12px', color: '#f59e0b', lineHeight: 1.4 }}>{moveWarning}</span>
+            <span style={{ flex: 1, fontSize: '12px', color: '#f5a623', lineHeight: 1.4 }}>{moveWarning}</span>
             <button
               onClick={() => setMoveWarning(null)}
               style={{
-                background: 'none', border: 'none', color: '#f59e0b', fontSize: '14px',
+                background: 'none', border: 'none', color: '#f5a623', fontSize: '14px',
                 fontWeight: 700, cursor: 'pointer', padding: '0 2px', lineHeight: 1,
               }}
               aria-label="Dismiss"
@@ -956,13 +956,13 @@ function PlanSection() {
         {moveNotice && (
           <div style={{
             display: 'flex', alignItems: 'flex-start', gap: '8px',
-            backgroundColor: moveNotice.tone === 'good' ? '#22c55e18' : '#f59e0b18',
-            border: `1px solid ${moveNotice.tone === 'good' ? '#22c55e55' : '#f59e0b55'}`,
+            backgroundColor: moveNotice.tone === 'good' ? '#3ddc8418' : '#f5a62318',
+            border: `1px solid ${moveNotice.tone === 'good' ? '#3ddc8455' : '#f5a62355'}`,
             borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
           }}>
             <span style={{
               flex: 1, fontSize: '12px', lineHeight: 1.4,
-              color: moveNotice.tone === 'good' ? '#22c55e' : '#f59e0b',
+              color: moveNotice.tone === 'good' ? '#3ddc84' : '#f5a623',
             }}>
               {moveNotice.tone === 'good' ? '⌚ ' : ''}{moveNotice.text}
             </span>
@@ -971,7 +971,7 @@ function PlanSection() {
               style={{
                 background: 'none', border: 'none', fontSize: '14px', fontWeight: 700,
                 cursor: 'pointer', padding: '0 2px', lineHeight: 1,
-                color: moveNotice.tone === 'good' ? '#22c55e' : '#f59e0b',
+                color: moveNotice.tone === 'good' ? '#3ddc84' : '#f5a623',
               }}
               aria-label="Dismiss"
             >
@@ -998,16 +998,16 @@ function PlanSection() {
 
             // Left status marker
             let marker = null;
-            if (status === 'done') marker = { ch: '●', color: '#22c55e' };
-            else if (status === 'missed') marker = { ch: '✗', color: '#ef4444' };
-            else if (status === 'upcoming') marker = { ch: '○', color: '#64748b' };
+            if (status === 'done') marker = { ch: '●', color: '#3ddc84' };
+            else if (status === 'missed') marker = { ch: '✗', color: '#ff4d4f' };
+            else if (status === 'upcoming') marker = { ch: '○', color: '#5d6b7a' };
 
             return (
               <div
                 key={w.id}
                 onClick={() => navigate('/plan/workout/' + w.id)}
                 style={{
-                  display: 'flex', gap: '10px', backgroundColor: '#16213e', borderRadius: '8px',
+                  display: 'flex', gap: '10px', backgroundColor: '#111820', borderRadius: '8px',
                   padding: '12px', borderLeft: `3px solid ${dc}`, cursor: 'pointer',
                 }}
               >
@@ -1019,10 +1019,10 @@ function PlanSection() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '11px', color: '#a0a0b0' }}>{formatDate(w.date)}</span>
+                    <span style={{ fontSize: '11px', color: '#93a1b1' }}>{formatDate(w.date)}</span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {!isSprint && w.garmin_workout_id != null && (
-                        <span style={{ fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 600, color: '#3ddc84' }}>
                           ⌚ on watch
                         </span>
                       )}
@@ -1042,7 +1042,7 @@ function PlanSection() {
                       <SprintSummary structure={w.structure} dc={dc} />
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '12px', color: '#e0e0e0', marginBottom: w.description ? '8px' : 0 }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '12px', color: '#e8edf2', marginBottom: w.description ? '8px' : 0 }}>
                       {km != null && <span>{km} km</span>}
                       {hasPace && <span>{formatPace(w.pace_low_sec)}–{formatPace(w.pace_high_sec)}/km</span>}
                       {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
@@ -1053,7 +1053,7 @@ function PlanSection() {
                   )}
                   {isSprint && status === 'done' && actual && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                      <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                      <span style={{ fontSize: '12px', color: '#93a1b1' }}>
                         Best 100m: {actual.best_100m_sec != null ? `${actual.best_100m_sec}s` : '—'}
                         {actual.fade_pct != null ? ` · fade ${actual.fade_pct}%` : ''}
                         {actual.fastest_rep_sec != null ? ` · fastest ${actual.fastest_rep_sec}s` : ''}
@@ -1062,13 +1062,13 @@ function PlanSection() {
                   )}
                   {!isSprint && status === 'done' && actual && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                      <span style={{ fontSize: '12px', color: '#c8c8d4' }}>
+                      <span style={{ fontSize: '12px', color: '#93a1b1' }}>
                         Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
                         {actual.avg_hr != null ? ` · ${Math.round(actual.avg_hr)} bpm` : ''}
                       </span>
                       {w.compliance === 'ran_hard' && (
                         <span style={{
-                          fontSize: '10px', fontWeight: 700, color: '#ef4444', backgroundColor: '#ef444422',
+                          fontSize: '10px', fontWeight: 700, color: '#ff4d4f', backgroundColor: '#ff4d4f22',
                           padding: '2px 7px', borderRadius: '4px',
                         }}>
                           ran hard
@@ -1076,7 +1076,7 @@ function PlanSection() {
                       )}
                       {w.compliance === 'on_target' && (
                         <span style={{
-                          fontSize: '10px', fontWeight: 700, color: '#22c55e', backgroundColor: '#22c55e22',
+                          fontSize: '10px', fontWeight: 700, color: '#3ddc84', backgroundColor: '#3ddc8422',
                           padding: '2px 7px', borderRadius: '4px',
                         }}>
                           ✓ easy
@@ -1089,7 +1089,7 @@ function PlanSection() {
                       <button
                         onClick={(e) => { e.stopPropagation(); startEditMove(w); }}
                         style={{
-                          background: 'none', border: 'none', color: '#a0a0b0',
+                          background: 'none', border: 'none', color: '#93a1b1',
                           fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '4px 0',
                         }}
                       >
@@ -1105,7 +1105,7 @@ function PlanSection() {
                           value={editDate}
                           onChange={(e) => setEditDate(e.target.value)}
                           style={{
-                            colorScheme: 'dark', backgroundColor: '#0f0f1a', color: '#e0e0e0',
+                            colorScheme: 'dark', backgroundColor: '#0b0f14', color: '#e8edf2',
                             border: '1px solid #2a2a45', borderRadius: '6px', padding: '8px 10px',
                             fontSize: '16px', minHeight: '44px', flex: '1 1 140px', minWidth: 0,
                           }}
@@ -1114,7 +1114,7 @@ function PlanSection() {
                           onClick={() => saveMove(w.id)}
                           disabled={moving || !editDate}
                           style={{
-                            backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                            backgroundColor: '#ff5a1f', border: 'none', borderRadius: '6px', color: '#fff',
                             fontSize: '12px', fontWeight: 700, padding: '8px 16px', minHeight: '44px',
                             cursor: moving || !editDate ? 'default' : 'pointer', opacity: moving || !editDate ? 0.5 : 1,
                           }}
@@ -1125,7 +1125,7 @@ function PlanSection() {
                           onClick={cancelEditMove}
                           disabled={moving}
                           style={{
-                            backgroundColor: 'transparent', border: '1px solid #333', borderRadius: '6px', color: '#a0a0b0',
+                            backgroundColor: 'transparent', border: '1px solid #333', borderRadius: '6px', color: '#93a1b1',
                             fontSize: '12px', fontWeight: 600, padding: '8px 16px', minHeight: '44px',
                             cursor: moving ? 'default' : 'pointer',
                           }}
@@ -1134,7 +1134,7 @@ function PlanSection() {
                         </button>
                       </div>
                       {moveError && (
-                        <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px' }}>{moveError}</div>
+                        <div style={{ fontSize: '11px', color: '#ff4d4f', marginTop: '6px' }}>{moveError}</div>
                       )}
                     </div>
                   )}
@@ -1166,13 +1166,13 @@ function PlanSection() {
   const hasSprintBaseline = sprintProfile && sprintProfile.best_100m_sec != null;
 
   const segBtn = (active) => ({
-    flex: 1, minHeight: 44, borderRadius: '8px', border: '1px solid ' + (active ? '#fc5200' : '#2a2a45'),
-    backgroundColor: active ? '#fc5200' : '#16213e', color: active ? '#fff' : '#a0a0b0',
+    flex: 1, minHeight: 44, borderRadius: '8px', border: '1px solid ' + (active ? '#ff5a1f' : '#2a2a45'),
+    backgroundColor: active ? '#ff5a1f' : '#111820', color: active ? '#fff' : '#93a1b1',
     fontSize: '14px', fontWeight: 700, cursor: 'pointer',
   });
 
   const horizonBtnStyle = (isBuilding) => ({
-    textAlign: 'left', backgroundColor: '#16213e', border: '1px solid #333',
+    textAlign: 'left', backgroundColor: '#111820', border: '1px solid #333',
     borderRadius: '8px', padding: '14px', cursor: building != null ? 'default' : 'pointer',
     color: 'inherit', minHeight: '44px', opacity: building != null && !isBuilding ? 0.5 : 1,
   });
@@ -1191,14 +1191,14 @@ function PlanSection() {
 
           <div style={{ marginBottom: hasEstimate ? '18px' : 0 }}>
             {hasEstimate ? (
-              <div style={{ fontSize: '14px', color: '#e0e0e0' }}>
-                Projected 5K now: <span style={{ fontSize: '20px', fontWeight: 700, color: '#fc5200' }}>{formatPace(currentSec)}</span>
+              <div style={{ fontSize: '14px', color: '#e8edf2' }}>
+                Projected 5K now: <span style={{ fontSize: '20px', fontWeight: 700, color: '#ff5a1f' }}>{formatPace(currentSec)}</span>
                 <span style={{ marginLeft: '8px', color: '#666', fontSize: '11px' }}>
                   estimate{confidence === 'low' ? ' (rough — improves as you log runs)' : ''}
                 </span>
               </div>
             ) : (
-              <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+              <div style={{ fontSize: '13px', color: '#93a1b1' }}>
                 Log a few runs and I'll project a 5K target.
               </div>
             )}
@@ -1217,11 +1217,11 @@ function PlanSection() {
                     style={horizonBtnStyle(isBuilding)}
                   >
                     {isBuilding ? (
-                      <div style={{ fontSize: '13px', color: '#fc5200', fontWeight: 600 }}>Building your plan…</div>
+                      <div style={{ fontSize: '13px', color: '#ff5a1f', fontWeight: 600 }}>Building your plan…</div>
                     ) : (
                       <>
-                        <div style={{ fontSize: '14px', color: '#e0e0e0', marginBottom: '4px' }}>
-                          {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{formatPace(h.target_time_sec)}</span>
+                        <div style={{ fontSize: '14px', color: '#e8edf2', marginBottom: '4px' }}>
+                          {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#ff5a1f' }}>{formatPace(h.target_time_sec)}</span>
                         </div>
                         <div style={{ fontSize: '11px', color: '#666' }}>
                           {impliedPace != null && <>≈{formatPace(impliedPace)}/km</>}
@@ -1240,15 +1240,15 @@ function PlanSection() {
           <h2 style={sectionTitle}>Build your 100m sprint plan</h2>
 
           {sprintLoading && !sprintProjections ? (
-            <div style={{ fontSize: '13px', color: '#a0a0b0' }}>Loading sprint profile…</div>
+            <div style={{ fontSize: '13px', color: '#93a1b1' }}>Loading sprint profile…</div>
           ) : (
             <>
               {/* Baseline card */}
               <div style={{ marginBottom: '18px' }}>
                 {hasSprintBaseline ? (
                   <>
-                    <div style={{ fontSize: '14px', color: '#e0e0e0' }}>
-                      Best 100m: <span style={{ fontSize: '28px', fontWeight: 800, color: '#fc5200' }}>{sprintProfile.best_100m_sec}s</span>
+                    <div style={{ fontSize: '14px', color: '#e8edf2' }}>
+                      Best 100m: <span style={{ fontSize: '28px', fontWeight: 800, color: '#ff5a1f' }}>{sprintProfile.best_100m_sec}s</span>
                       {sprintProfile.best_100m_date && (
                         <span style={{ marginLeft: '8px', color: '#666', fontSize: '11px' }}>
                           {formatDate(sprintProfile.best_100m_date)}
@@ -1256,7 +1256,7 @@ function PlanSection() {
                       )}
                     </div>
                     {sprintProfile.diagnosis_detail && (
-                      <div style={{ fontSize: '12.5px', color: '#a0a0b0', marginTop: '6px', lineHeight: 1.45 }}>
+                      <div style={{ fontSize: '12.5px', color: '#93a1b1', marginTop: '6px', lineHeight: 1.45 }}>
                         {sprintProfile.diagnosis_detail}
                       </div>
                     )}
@@ -1264,7 +1264,7 @@ function PlanSection() {
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
                         {sprintProfile.supporting_efforts.map((e, i) => (
                           <span key={i} style={{
-                            fontSize: '11px', color: '#c8c8d4', backgroundColor: '#16213e',
+                            fontSize: '11px', color: '#93a1b1', backgroundColor: '#111820',
                             borderRadius: '20px', padding: '4px 10px',
                           }}>
                             {e.distance_m}m {e.time_sec}s
@@ -1274,7 +1274,7 @@ function PlanSection() {
                     )}
                   </>
                 ) : (
-                  <div style={{ fontSize: '13px', color: '#a0a0b0' }}>
+                  <div style={{ fontSize: '13px', color: '#93a1b1' }}>
                     Not enough sprint data — pick a horizon and we'll estimate.
                   </div>
                 )}
@@ -1293,11 +1293,11 @@ function PlanSection() {
                         style={horizonBtnStyle(isBuilding)}
                       >
                         {isBuilding ? (
-                          <div style={{ fontSize: '13px', color: '#fc5200', fontWeight: 600 }}>Building your plan…</div>
+                          <div style={{ fontSize: '13px', color: '#ff5a1f', fontWeight: 600 }}>Building your plan…</div>
                         ) : (
                           <>
-                            <div style={{ fontSize: '14px', color: '#e0e0e0', marginBottom: '4px' }}>
-                              {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#fc5200' }}>{h.target_100m_sec != null ? `${h.target_100m_sec}s` : '—'}</span>
+                            <div style={{ fontSize: '14px', color: '#e8edf2', marginBottom: '4px' }}>
+                              {h.weeks} weeks → <span style={{ fontSize: '18px', fontWeight: 700, color: '#ff5a1f' }}>{h.target_100m_sec != null ? `${h.target_100m_sec}s` : '—'}</span>
                             </div>
                             {h.improvement_pct != null && (
                               <div style={{ fontSize: '11px', color: '#666' }}>{h.improvement_pct}%</div>
@@ -1349,14 +1349,14 @@ function Training() {
   }, []);
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0' }}>Loading training...</div>;
+    return <div style={{ textAlign: 'center', padding: '60px', color: '#93a1b1' }}>Loading training...</div>;
   }
 
   if (error) {
     return (
       <div>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '16px' }}>Training</h1>
-        <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff6b6b' }}>{error}</div>
+        <div style={{ padding: '16px', backgroundColor: '#3d1515', border: '1px solid #6b2020', borderRadius: '8px', color: '#ff4d4f' }}>{error}</div>
       </div>
     );
   }
@@ -1369,11 +1369,11 @@ function Training() {
   const hasRecent = pctEasy !== null && pctEasy !== undefined;
 
   // Easy % hero color
-  let easyColor = '#22c55e';
+  let easyColor = '#3ddc84';
   if (hasRecent) {
-    if (pctEasy === 0) easyColor = '#ef4444';
-    else if (pctEasy < 50) easyColor = '#f59e0b';
-    else if (pctEasy < 70) easyColor = '#fbbf24';
+    if (pctEasy === 0) easyColor = '#ff4d4f';
+    else if (pctEasy < 50) easyColor = '#f5a623';
+    else if (pctEasy < 70) easyColor = '#f5a623';
   }
 
   // Zone breakdown counts
@@ -1400,16 +1400,16 @@ function Training() {
   const warningItems = warnings.map((w, i) => {
     const c = WARN_COLORS[w.level] || WARN_COLORS.info;
     return (
-      <div key={i} style={{ backgroundColor: '#16213e', borderLeft: `4px solid ${c}`, borderRadius: '6px', padding: '12px 14px' }}>
+      <div key={i} style={{ backgroundColor: '#111820', borderLeft: `4px solid ${c}`, borderRadius: '6px', padding: '12px 14px' }}>
         <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>{w.title}</div>
-        <div style={{ fontSize: '13px', color: '#a0a0b0' }}>{w.detail}</div>
+        <div style={{ fontSize: '13px', color: '#93a1b1' }}>{w.detail}</div>
       </div>
     );
   });
 
   const tabBtn = (active) => ({
-    flex: 1, minHeight: 44, borderRadius: '8px', border: '1px solid ' + (active ? '#fc5200' : '#2a2a45'),
-    backgroundColor: active ? '#fc5200' : '#16213e', color: active ? '#fff' : '#a0a0b0',
+    flex: 1, minHeight: 44, borderRadius: '8px', border: '1px solid ' + (active ? '#ff5a1f' : '#2a2a45'),
+    backgroundColor: active ? '#ff5a1f' : '#111820', color: active ? '#fff' : '#93a1b1',
     fontSize: '14px', fontWeight: 700, cursor: 'pointer',
   });
 
@@ -1434,7 +1434,7 @@ function Training() {
             <div style={{ fontSize: '56px', fontWeight: 800, color: easyColor, lineHeight: 1 }}>
               {hasRecent ? `${pctEasy}%` : '—'}
             </div>
-            <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginTop: '8px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginTop: '8px' }}>
               Easy (last 14 days)
             </div>
             <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
@@ -1442,22 +1442,22 @@ function Training() {
             </div>
           </div>
           <div style={{ flex: '1 1 200px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 90px', backgroundColor: '#16213e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
-              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>HR Ceiling</div>
-              <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>
+            <div style={{ flex: '1 1 90px', backgroundColor: '#111820', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>HR Ceiling</div>
+              <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>
                 {fm.easy_hr_ceiling != null ? fm.easy_hr_ceiling : '—'}
               </div>
               <div style={{ fontSize: '11px', color: '#666' }}>bpm easy max</div>
             </div>
-            <div style={{ flex: '1 1 90px', backgroundColor: '#16213e', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
-              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#a0a0b0', marginBottom: '4px' }}>Easy Pace</div>
-              <div style={{ fontSize: '22px', fontWeight: 700, color: '#fc5200' }}>
+            <div style={{ flex: '1 1 90px', backgroundColor: '#111820', borderRadius: '8px', padding: '14px 10px', textAlign: 'center' }}>
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#93a1b1', marginBottom: '4px' }}>Easy Pace</div>
+              <div style={{ fontSize: '22px', fontWeight: 700, color: '#ff5a1f' }}>
                 {fm.easy_pace_sec != null ? formatPace(fm.easy_pace_sec) : '—'}
               </div>
               <div style={{ fontSize: '11px', color: '#666' }}>
                 /km
                 {fm.easy_pace_method === 'estimate' && (
-                  <span style={{ marginLeft: '4px', color: '#f59e0b', backgroundColor: '#f59e0b18', padding: '1px 5px', borderRadius: '4px', fontSize: '9px', fontWeight: 600 }}>estimate</span>
+                  <span style={{ marginLeft: '4px', color: '#f5a623', backgroundColor: '#f5a62318', padding: '1px 5px', borderRadius: '4px', fontSize: '9px', fontWeight: 600 }}>estimate</span>
                 )}
               </div>
             </div>
@@ -1470,7 +1470,7 @@ function Training() {
         {warnings.length === 0 ? (
           <>
             <h2 style={sectionTitle}>Coaching Flags</h2>
-            <div style={{ color: '#22c55e', fontSize: '13px' }}>No flags — nice work.</div>
+            <div style={{ color: '#3ddc84', fontSize: '13px' }}>No flags — nice work.</div>
           </>
         ) : hasActivePlan ? (
           <>
@@ -1482,10 +1482,10 @@ function Training() {
               }}
               aria-expanded={flagsExpanded}
             >
-              <span style={{ fontSize: '16px', fontWeight: 700, color: '#f59e0b' }}>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#f5a623' }}>
                 ⚠ {warnings.length} coaching flag{warnings.length === 1 ? '' : 's'}
               </span>
-              <span style={{ fontSize: '13px', color: '#a0a0b0' }}>{flagsExpanded ? '▲' : '▼'}</span>
+              <span style={{ fontSize: '13px', color: '#93a1b1' }}>{flagsExpanded ? '▲' : '▼'}</span>
             </button>
             {flagsExpanded && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
@@ -1512,7 +1512,7 @@ function Training() {
             label="ACWR"
             value={acwr != null ? acwr : '—'}
             sub="acute:chronic"
-            color={acwr != null && acwr > 1.3 ? '#ef4444' : '#4ade80'}
+            color={acwr != null && acwr > 1.3 ? '#ff4d4f' : '#3ddc84'}
           />
           <StatCard label="Longest 28d" value={fm.longest_run_28d_km != null ? fm.longest_run_28d_km : '—'} sub="km" />
           <StatCard label="Longest 90d" value={fm.longest_run_90d_km != null ? fm.longest_run_90d_km : '—'} sub="km" />
@@ -1538,7 +1538,7 @@ function Training() {
                   width: `${(z.n / zoneTotal) * 100}%`,
                   backgroundColor: ZONE_COLORS[z.key],
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '12px', fontWeight: 700, color: '#0f0f1a',
+                  fontSize: '12px', fontWeight: 700, color: '#0b0f14',
                 }}>
                   {z.n}
                 </div>
@@ -1546,7 +1546,7 @@ function Training() {
             </div>
             <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
               {zoneCounts.map((z) => (
-                <div key={z.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#a0a0b0' }}>
+                <div key={z.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#93a1b1' }}>
                   <span style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: ZONE_COLORS[z.key] }} />
                   {z.label}: <span style={{ color: '#fff', fontWeight: 600 }}>{z.n}</span>
                 </div>
@@ -1566,11 +1566,11 @@ function Training() {
             <div style={chartInner(400)}>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={trend} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#252540" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                   <XAxis dataKey="label" tick={{ fill: '#666', fontSize: 10 }} />
                   <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={[0, 100]} width={35} tickFormatter={(v) => `${v}%`} />
                   <Tooltip content={<GrayTooltip />} cursor={{ fill: '#ffffff08' }} />
-                  <Bar dataKey="pct_gray" name="Gray %" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="pct_gray" name="Gray %" fill="#f5a623" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
