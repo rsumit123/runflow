@@ -384,15 +384,22 @@ function ActivityDetail() {
     setIntervalsLoading(false);
   };
 
+  // The transcript lives on the server now, so it survives a refresh.
+  useEffect(() => {
+    if (!id) return;
+    api.get(`/activities/${id}/chat`)
+      .then((res) => setMessages((res.data && res.data.messages) || []))
+      .catch(() => {});
+  }, [id]);
+
   const sendChat = async (text) => {
     const content = (text || '').trim();
     if (!content || sending) return;
-    const nextMessages = [...messages, { role: 'user', content }];
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, { role: 'user', content }]);
     setChatInput('');
     setSending(true);
     try {
-      const res = await api.post(`/activities/${id}/chat`, { messages: nextMessages });
+      const res = await api.post(`/activities/${id}/chat`, { message: content });
       const reply = res.data && res.data.reply
         ? res.data.reply
         : 'Sorry — something went wrong. Try again.';
@@ -401,6 +408,13 @@ function ActivityDetail() {
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry — something went wrong. Try again.' }]);
     }
     setSending(false);
+  };
+
+  const clearChat = async () => {
+    try {
+      await api.delete(`/activities/${id}/chat`);
+      setMessages([]);
+    } catch { /* leave the transcript alone if the delete failed */ }
   };
 
   // Auto-scroll the messages area to the bottom on new messages / thinking state.
@@ -532,7 +546,26 @@ function ActivityDetail() {
           }}>
           <span>&#128172;</span>
           <span>{chatOpen ? 'Hide chat' : 'Chat about this run'}</span>
+          {!chatOpen && messages.length > 0 && (
+            <span style={{
+              backgroundColor: '#ffffff33', borderRadius: '10px', padding: '1px 7px',
+              fontSize: '12px', fontWeight: 700,
+            }}>
+              {messages.length}
+            </span>
+          )}
         </button>
+
+        {chatOpen && messages.length > 0 && (
+          <button
+            onClick={clearChat}
+            style={{
+              marginLeft: '12px', minHeight: '44px', background: 'none', border: 'none',
+              color: '#94a3b8', fontSize: '13px', cursor: 'pointer',
+            }}>
+            Clear chat
+          </button>
+        )}
 
         {chatOpen && (
           <div style={{

@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 import config
 from database import init_db, get_session, async_session
 from models import (Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal, Plan,
-                    PlannedWorkout, DailyWellness)
+                    PlannedWorkout, DailyWellness, ChatMessage)
 from strava_client import StravaClient, STREAM_TYPES
 from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
@@ -2817,27 +2817,82 @@ async def _run_chat_tool(session: AsyncSession, ctx_activity_id: int,
 
 
 class RunChatRequest(BaseModel):
-    messages: list[dict[str, Any]]
+    message: Optional[str] = None
+    # Legacy: older clients posted the whole transcript. Accepted so a stale tab
+    # doesn't break, but the server's own history is what it actually answers from.
+    messages: Optional[list[dict[str, Any]]] = None
+
+
+CHAT_CONTEXT_TURNS = 12
+
+
+async def _chat_history(session: AsyncSession, activity_id: int) -> list[ChatMessage]:
+    return list((await session.execute(
+        select(ChatMessage).where(ChatMessage.activity_id == activity_id)
+        .order_by(ChatMessage.id)
+    )).scalars().all())
+
+
+@app.get("/api/activities/{activity_id}/chat")
+async def get_run_chat(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """The saved conversation about this run."""
+    rows = await _chat_history(session, activity_id)
+    return {"messages": [{"role": r.role, "content": r.content,
+                          "created_at": r.created_at.isoformat() if r.created_at else None}
+                         for r in rows]}
+
+
+@app.delete("/api/activities/{activity_id}/chat")
+async def clear_run_chat(activity_id: int, session: AsyncSession = Depends(get_session)):
+    """Start the conversation over."""
+    rows = await _chat_history(session, activity_id)
+    for r in rows:
+        await session.delete(r)
+    await session.commit()
+    return {"cleared": len(rows)}
 
 
 @app.post("/api/activities/{activity_id}/chat")
 async def run_chat_endpoint(activity_id: int, req: RunChatRequest,
                             session: AsyncSession = Depends(get_session)):
-    """Grounded, tool-calling Q&A about a run and the athlete's history."""
+    """Grounded, tool-calling Q&A about a run and the athlete's history.
+
+    The transcript lives server-side, so closing the tab no longer throws the
+    conversation away.
+    """
     act = await session.get(Activity, activity_id)
     if act is None:
         raise HTTPException(status_code=404, detail="Activity not found")
-    msgs = [{"role": m.get("role"), "content": str(m.get("content"))[:2000]}
-            for m in req.messages
-            if m.get("role") in ("user", "assistant") and m.get("content")][-12:]
-    if not msgs or msgs[-1]["role"] != "user":
-        raise HTTPException(status_code=400, detail="last message must be from the user")
+
+    content = (req.message or "").strip()
+    if not content and req.messages:                    # legacy client
+        last = [m for m in req.messages if m.get("role") == "user" and m.get("content")]
+        content = str(last[-1]["content"]).strip() if last else ""
+    if not content:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    now = datetime.utcnow()
+    session.add(ChatMessage(activity_id=activity_id, role="user",
+                            content=content[:2000], created_at=now))
+    await session.commit()
+
+    history = await _chat_history(session, activity_id)
+    msgs = [{"role": m.role, "content": m.content} for m in history][-CHAT_CONTEXT_TURNS:]
 
     async def execute_tool(tname: str, targs: dict[str, Any]) -> dict[str, Any]:
         return await _run_chat_tool(session, activity_id, tname, targs)
 
-    result = await rchat.chat(activity_id, msgs, execute_tool, datetime.utcnow().date().isoformat())
-    return {"reply": result["reply"], "ok": result.get("ok", True)}
+    result = await rchat.chat(activity_id, msgs, execute_tool, now.date().isoformat())
+    reply = result["reply"]
+
+    # Only persist a real answer — saving an error string would poison the context
+    # of every later turn in this conversation.
+    if result.get("ok", True) and reply:
+        session.add(ChatMessage(activity_id=activity_id, role="assistant",
+                                content=reply[:4000], created_at=datetime.utcnow()))
+        await session.commit()
+
+    return {"reply": reply, "ok": result.get("ok", True)}
 
 
 # ---------------------------------------------------------------------------

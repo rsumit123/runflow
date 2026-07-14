@@ -92,6 +92,23 @@ class BestEffort(Base):
     activity = relationship("Activity", back_populates="best_efforts")
 
 
+class ChatMessage(Base):
+    """A turn in the conversation about a run.
+
+    The chat was previously client-side only: the server took a message list,
+    answered, and forgot. Close the tab and the whole conversation was gone —
+    including anything the coach worked out about you.
+    """
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    activity_id = Column(BigInteger, ForeignKey("activities.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    role = Column(String, nullable=False)      # 'user' | 'assistant'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=True)
+
+
 class DailyWellness(Base):
     """One row per day of Garmin recovery data.
 
