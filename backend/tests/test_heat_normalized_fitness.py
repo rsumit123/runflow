@@ -102,3 +102,41 @@ def test_detraining_is_capped_so_one_bad_run_cannot_wreck_the_plan():
     now_hard = [_act(6, 2.5, 600, norm=600, aid=51)]   # a disastrous jog
     out = fm._estimate_easy_pace(easy + era_hard + now_hard, CEILING, 335, now=NOW)
     assert out["detraining_factor"] == fm.MAX_DETRAINING
+
+
+# --- the pace floor: below 7:30 you're shuffling, not running ----------------
+
+def test_easy_pace_never_goes_below_the_shuffle_floor():
+    easy = [_act(80 + i, 3.0, 404, hr=150, norm=391, aid=i) for i in range(4)]
+    era_hard = [_act(85, 3.0, 300, norm=300, aid=50)]
+    now_hard = [_act(6, 2.5, 600, norm=600, aid=51)]   # heavy detraining
+    out = fm._estimate_easy_pace(easy + era_hard + now_hard, CEILING, 335, now=NOW)
+    assert out["detrained_easy_pace_sec"] > fm.EASY_PACE_FLOOR_SEC   # the raw maths
+    assert out["easy_pace_sec"] == fm.EASY_PACE_FLOOR_SEC            # ...but we floor it
+    assert out["pace_floored"] is True
+
+
+def test_the_estimate_branch_respects_the_floor_too():
+    hard = [_act(2, 3.0, 396, hr=187, aid=i) for i in range(5)]
+    out = fm._estimate_easy_pace(hard, CEILING, threshold_pace_sec=420, now=NOW)
+    assert out["easy_pace_sec"] <= fm.EASY_PACE_FLOOR_SEC   # 420*1.3 = 546 -> floored
+
+
+def test_plan_bands_never_prescribe_slower_than_the_floor():
+    import plan_generator as pg
+    model = {"easy_pace_sec": 463, "easy_hr_ceiling": 160,   # 7:43, past the floor
+             "threshold_pace_sec": 316, "longest_run_28d_km": 2.88}
+    out = pg.generate_plan(model, 8, 1560, datetime(2026, 7, 20))
+    for w in out["workouts"]:
+        if w["day_type"] in ("easy", "long", "strides") and w["pace_high_sec"]:
+            assert w["pace_high_sec"] <= fm.EASY_PACE_FLOOR_SEC
+
+
+def test_the_easy_run_tells_you_to_walk_rather_than_shuffle():
+    import plan_generator as pg
+    model = {"easy_pace_sec": 450, "easy_hr_ceiling": 160,
+             "threshold_pace_sec": 316, "longest_run_28d_km": 2.88}
+    out = pg.generate_plan(model, 8, 1560, datetime(2026, 7, 20))
+    easy = next(w for w in out["workouts"] if w["day_type"] == "easy")
+    assert "walk breaks" in easy["description"]
+    assert "HR ≤160 bpm is the real rule" in easy["description"]
