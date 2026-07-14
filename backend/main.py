@@ -722,9 +722,26 @@ async def abandon_plan(plan_id: int, session: AsyncSession = Depends(get_session
     plan = await session.get(Plan, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
+
+    # Pull this plan's workouts off the Garmin watch so we don't strand them there.
+    wos = (await session.execute(
+        select(PlannedWorkout).where(
+            PlannedWorkout.plan_id == plan.id,
+            PlannedWorkout.garmin_workout_id.isnot(None),
+        )
+    )).scalars().all()
+    removed = 0
+    for w in wos:
+        try:
+            await garmin.remove_workout(w.garmin_workout_id)
+            removed += 1
+        except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not block abandoning
+            logger.warning("Could not remove Garmin workout %s: %s", w.garmin_workout_id, exc)
+        w.garmin_workout_id = None
+
     plan.status = "abandoned"
     await session.commit()
-    return {"status": "abandoned", "id": plan_id}
+    return {"status": "abandoned", "id": plan_id, "removed_from_watch": removed}
 
 
 class SuggestionApplyRequest(BaseModel):
