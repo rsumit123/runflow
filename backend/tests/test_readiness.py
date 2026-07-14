@@ -85,6 +85,16 @@ def test_high_readiness_greenlights_quality():
     assert out["action"] == "keep" and "primed" in out["reason"]
 
 
+def test_feeling_good_on_an_easy_day_does_not_license_running_it_hard():
+    # The classic trap: high readiness + easy day -> people race their easy run.
+    a = rd.assess(_ready(85), None, None, None, None)
+    out = rd.adjust("easy", a)
+    assert out["action"] == "keep"
+    assert "easy" in out["reason"].lower()
+    # ...and the verdict must not contradict the HIGH badge the UI shows.
+    assert "normal" not in out["reason"]
+
+
 def test_the_reason_names_the_factor_that_drove_the_call():
     bad_sleep = {"dailySleepDTO": {"sleepTimeSeconds": 4 * 3600}}
     a = rd.assess(_ready(35), None, bad_sleep, None, None)

@@ -212,10 +212,14 @@ def adjust(day_type: str, assessment: dict[str, Any]) -> dict[str, Any]:
             "confidence": "medium",
         }
 
-    if level == "high" and is_hard:
+    if level == "high":
         return {
             "action": "keep",
-            "reason": f"Readiness is {score}/100 — you're primed. Run the session as written.",
+            "reason": (f"Readiness is {score}/100 — you're rested and primed. "
+                       + ("Run the session as written and don't hold back."
+                          if is_hard else
+                          "Keep today easy anyway — easy days are what make the hard ones "
+                          "possible, and feeling good is the classic trap.")),
             "confidence": "high",
         }
 
