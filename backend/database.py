@@ -28,6 +28,7 @@ _MIGRATIONS = {
     },
     "plans": {
         "sprint_target_sec": "FLOAT",
+        "calibrations": "JSON",
     },
     "planned_workouts": {
         "structure": "JSON",
