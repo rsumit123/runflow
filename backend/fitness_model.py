@@ -63,25 +63,67 @@ def classify_run(
     return {"zone": zone, "basis": "pace"}
 
 
-def _estimate_easy_pace(
-    acts: list[dict[str, Any]], easy_hr_ceiling: int, threshold_pace_sec: Optional[float]
-) -> dict[str, Any]:
-    """Estimate easy pace (sec/km) — deliberately an ESTIMATE.
+EASY_MEASURE_DAYS = 365   # a season, not a career — beyond this is a different athlete
+MIN_EASY_RUNS = 3         # below this it's an anecdote, not a measurement
 
-    A pace-vs-HR regression is unreliable for a one-gear runner (pace barely
-    varies with HR, so it just predicts the usual pace). Instead we anchor easy
-    pace to threshold pace (easy ≈ 30% slower), clamped to a plausible band.
-    This refines to a measured value in v2 using per-point HR segments.
+
+def _estimate_easy_pace(
+    acts: list[dict[str, Any]], easy_hr_ceiling: int, threshold_pace_sec: Optional[float],
+    now: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """Easy pace (sec/km) — MEASURED from runs actually run at an easy heart rate,
+    and only estimated when there's nothing to measure.
+
+    Two things matter here:
+
+    1. Prefer evidence. Anchoring easy pace to threshold × 1.30 is a guess, and
+       it was producing 7:15/km for a runner whose own easy-HR runs said 6:31.
+    2. Compare like with like. A run's raw pace conflates fitness with weather,
+       so we measure on the HEAT-NORMALISED pace where we have it. Otherwise a
+       cool-season run and a monsoon run get averaged as if they were the same.
     """
+    now = now or datetime.utcnow()
+    cutoff = now - timedelta(days=EASY_MEASURE_DAYS)
+
+    easy = []
+    for a in acts:
+        hr = a.get("average_heartrate")
+        sd = a.get("start_date")
+        if not hr or not sd or sd < cutoff or hr > easy_hr_ceiling:
+            continue
+        if (a.get("distance") or 0) < 1000:
+            continue
+        # Heat-normalised where we have it; raw pace is the fallback.
+        pace = a.get("normalized_pace_sec") or _pace_sec_per_km(a.get("average_speed"))
+        if pace:
+            easy.append((sd, pace))
+
+    if len(easy) >= MIN_EASY_RUNS:
+        easy.sort(key=lambda p: p[0], reverse=True)
+        used = easy[:10]
+        measured = sum(p for _, p in used) / len(used)
+        return {
+            "easy_pace_sec": round(measured),
+            "method": "measured",
+            "easy_runs_used": len(used),
+            "easy_runs_available": len(easy),
+        }
+
     if threshold_pace_sec:
         est = threshold_pace_sec * 1.30
         est = max(420.0, min(540.0, est))  # clamp 7:00–9:00 /km
-        return {"easy_pace_sec": round(est), "method": "estimate"}
+        return {"easy_pace_sec": round(est), "method": "estimate",
+                "easy_runs_available": len(easy)}
     return {"easy_pace_sec": None, "method": "insufficient_data"}
 
 
 def _threshold_pace_sec(acts: list[dict[str, Any]], now: datetime) -> Optional[float]:
-    """Fastest sustained average pace over a meaningful distance, recent-weighted."""
+    """Fastest sustained average pace over a meaningful distance, recent-weighted.
+
+    Measured on heat-normalised pace: a 5:35 set in February and a 6:37 set in the
+    monsoon are not 62 s/km of lost fitness, and reporting them as if they were
+    tells a runner they're falling apart when they're mostly just hot.
+    """
     def fastest(min_dist: float, since_days: Optional[int]) -> Optional[float]:
         paces = []
         for a in acts:
@@ -90,7 +132,7 @@ def _threshold_pace_sec(acts: list[dict[str, Any]], now: datetime) -> Optional[f
             if since_days is not None and a.get("start_date"):
                 if a["start_date"] < now - timedelta(days=since_days):
                     continue
-            p = _pace_sec_per_km(a.get("average_speed"))
+            p = a.get("normalized_pace_sec") or _pace_sec_per_km(a.get("average_speed"))
             if p:
                 paces.append(p)
         return min(paces) if paces else None
@@ -130,7 +172,7 @@ def build_fitness_model(acts: list[dict[str, Any]], now: datetime) -> dict[str, 
     acwr = round(acute_7d / chronic_28d_weekly, 2) if chronic_28d_weekly > 0 else None
 
     threshold = _threshold_pace_sec(acts, now)
-    easy = _estimate_easy_pace(acts, easy_hr_ceiling, threshold)
+    easy = _estimate_easy_pace(acts, easy_hr_ceiling, threshold, now)
 
     return {
         "athlete_max_hr": max_hr,

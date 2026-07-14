@@ -9,7 +9,48 @@ import httpx
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.open-meteo.com/v1/forecast"
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 TIMEOUT = 8.0
+ARCHIVE_TIMEOUT = 60.0
+
+
+async def archive_hourly(lat: float, lon: float, start_date: str,
+                         end_date: str) -> dict[str, tuple[float, float]]:
+    """Historical temp + dew point for a whole date range, in ONE request.
+
+    Keyed by the local hour stamp Open-Meteo returns ("2026-02-07T06:00"), so a
+    caller can look up the conditions for any past run without a request per run.
+    Returns {} on failure — a missing archive must never block anything.
+    """
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": start_date,
+        "end_date": end_date,
+        "hourly": "temperature_2m,dew_point_2m",
+        "timezone": "auto",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=ARCHIVE_TIMEOUT) as client:
+            res = await client.get(ARCHIVE_URL, params=params)
+            res.raise_for_status()
+            body = res.json() or {}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Weather archive failed (%s..%s): %s", start_date, end_date, exc)
+        return {}
+
+    h = body.get("hourly") or {}
+    times = h.get("time") or []
+    temps = h.get("temperature_2m") or []
+    dews = h.get("dew_point_2m") or []
+    offset_h = (body.get("utc_offset_seconds") or 0) / 3600.0
+
+    out: dict[str, tuple[float, float]] = {}
+    for i, t in enumerate(times):
+        if i < len(temps) and i < len(dews) and temps[i] is not None and dews[i] is not None:
+            out[t] = (temps[i], dews[i])
+    out["_utc_offset_h"] = offset_h  # type: ignore[assignment]
+    return out
 
 
 async def conditions_at_hour(lat: float, lon: float,

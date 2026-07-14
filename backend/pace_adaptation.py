@@ -33,6 +33,15 @@ def _pace_sec_per_km(speed_mps: Optional[float]) -> Optional[float]:
     return 1000.0 / speed_mps
 
 
+def _pace(a: dict[str, Any]) -> Optional[float]:
+    """Heat-normalised pace where we have it, raw pace otherwise.
+
+    Measuring easy pace on raw pace mixes fitness with weather: the same effort
+    reads 28 s/km slower in a monsoon than in February.
+    """
+    return a.get("normalized_pace_sec") or _pace_sec_per_km(a.get("average_speed"))
+
+
 def _fmt_pace(sec: Optional[float]) -> Optional[str]:
     if not sec:
         return None
@@ -48,7 +57,9 @@ def _recent(acts: list[dict[str, Any]], now: datetime, days: int) -> list[dict[s
 
 
 def _evidence(a: dict[str, Any]) -> dict[str, Any]:
-    pace = _pace_sec_per_km(a.get("average_speed"))
+    pace = _pace_sec_per_km(a.get("average_speed"))   # what the watch actually said
+    norm = a.get("normalized_pace_sec")
+    penalty = a.get("heat_penalty_sec")
     return {
         "activity_id": a.get("id"),
         "date": a["start_date"].date().isoformat() if a.get("start_date") else None,
@@ -56,6 +67,11 @@ def _evidence(a: dict[str, Any]) -> dict[str, Any]:
         "pace_sec": round(pace) if pace else None,
         "pace": _fmt_pace(pace),
         "avg_hr": round(a["average_heartrate"]) if a.get("average_heartrate") else None,
+        # Show the weather we corrected for, so the correction can be checked.
+        "temp_c": round(a["temp_c"], 1) if a.get("temp_c") is not None else None,
+        "dew_point_c": round(a["dew_point_c"], 1) if a.get("dew_point_c") is not None else None,
+        "heat_penalty_sec": round(penalty) if penalty else 0,
+        "normalized_pace": _fmt_pace(norm) if norm else None,
     }
 
 
@@ -77,13 +93,13 @@ def measure_easy_pace(acts: list[dict[str, Any]], easy_hr_ceiling: int,
     with_hr = [a for a in pool if a.get("average_heartrate")]
     easy = [a for a in with_hr
             if a["average_heartrate"] <= easy_hr_ceiling + HR_TOLERANCE
-            and _pace_sec_per_km(a.get("average_speed"))]
+            and _pace(a)]
 
     # Recent runs describe current fitness better than six-week-old ones, but a
     # plain "latest wins" would swing wildly on one odd run. Mean of the newest few.
     easy.sort(key=lambda a: a["start_date"], reverse=True)
     used = easy[:5]
-    paces = [_pace_sec_per_km(a["average_speed"]) for a in used]
+    paces = [_pace(a) for a in used]
     measured = round(sum(paces) / len(paces)) if paces else None
 
     return {
@@ -125,7 +141,7 @@ def historical_easy(acts: list[dict[str, Any]], easy_hr_ceiling: int,
         return {"count": 0, "avg_pace": None, "last_date": None, "evidence": []}
 
     old.sort(key=lambda a: a["start_date"], reverse=True)
-    paces = [_pace_sec_per_km(a["average_speed"]) for a in old]
+    paces = [_pace(a) for a in old]
     avg = round(sum(paces) / len(paces))
     return {
         "count": len(old),
@@ -141,13 +157,13 @@ def measure_threshold(acts: list[dict[str, Any]], now: datetime) -> dict[str, An
     """Fastest sustained effort in the recent window — our read on top-end fitness."""
     pool = [a for a in _recent(acts, now, LOOKBACK_DAYS)
             if (a.get("distance") or 0) >= MIN_THRESHOLD_DIST_M
-            and _pace_sec_per_km(a.get("average_speed"))]
+            and _pace(a)]
     if not pool:
         return {"threshold_pace_sec": None, "method": "no_qualifying_runs",
                 "evidence": [], "runs_considered": 0}
 
-    best = min(pool, key=lambda a: _pace_sec_per_km(a["average_speed"]))
-    pace = round(_pace_sec_per_km(best["average_speed"]))
+    best = min(pool, key=lambda a: _pace(a))
+    pace = round(_pace(best))
     return {
         "threshold_pace_sec": pace,
         "threshold_pace": _fmt_pace(pace),

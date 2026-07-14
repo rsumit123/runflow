@@ -22,6 +22,12 @@ _MIGRATIONS = {
         "average_cadence": "FLOAT",
         "hr_zones": "JSON",
         "running_dynamics": "JSON",
+        "temp_c": "FLOAT",
+        "dew_point_c": "FLOAT",
+        "heat_index": "FLOAT",
+        "heat_penalty_sec": "FLOAT",
+        "normalized_pace_sec": "FLOAT",
+        "weather_checked": "BOOLEAN DEFAULT 0",
     },
     "splits": {
         "average_cadence": "FLOAT",
