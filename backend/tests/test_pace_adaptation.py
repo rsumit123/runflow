@@ -93,6 +93,16 @@ def test_historical_easy_ignores_runs_inside_the_live_window():
     assert pa.historical_easy(fresh, CEILING, NOW)["count"] == 0
 
 
+def test_historical_easy_will_not_dredge_up_a_fitter_athlete_from_years_ago():
+    # The real trap: 100+ easy runs at 5:43/km from two seasons back. Quoting
+    # those at someone rebuilding is misleading, so they're out of scope.
+    ancient = [_act(400 + i, 3.0, 343, hr=150, aid=i) for i in range(20)]
+    recent = [_act(80 + i * 10, 3.0, 400, hr=150, aid=200 + i) for i in range(3)]
+    out = pa.historical_easy(ancient + recent, CEILING, NOW)
+    assert out["count"] == 3               # only the past-year runs
+    assert out["avg_pace"] == "6:40"       # not 5:43
+
+
 def test_measured_improvement_moves_the_easy_band_faster():
     # Plan assumed 7:15/km easy; runner is doing 6:40/km at easy HR.
     acts = [_act(i + 1, 3.0, 400, hr=150, aid=i) for i in range(4)]
