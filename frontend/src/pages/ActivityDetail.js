@@ -7,6 +7,7 @@ import {
 import api from '../api';
 import SplitsTable from '../components/SplitsTable';
 import RouteMap from '../components/RouteMap';
+import Conditions from '../components/Conditions';
 
 /* ── Read a stream's data array by type (streams = array of {stream_type, data}) ── */
 function getStreamData(activity, streamType) {
@@ -533,6 +534,9 @@ function ActivityDetail() {
           </span>
         )}
       </div>
+
+      {/* ── What the weather cost this run ── */}
+      <Conditions activity={activity} />
 
       {/* ── Chat about this run ── */}
       <div style={{ marginBottom: '24px' }}>

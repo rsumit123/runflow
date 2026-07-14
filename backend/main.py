@@ -154,6 +154,14 @@ def _activity_to_dict(act: Activity) -> dict[str, Any]:
         "is_interval": act.is_interval,
         "interval_config": act.interval_config,
         "source": act.source,
+        # The conditions this run was actually run in, and what the same effort
+        # would have produced on a neutral day. A monsoon 6:38 is not a worse run
+        # than a February 6:14 — it's the same run, and the runner deserves to see that.
+        "temp_c": act.temp_c,
+        "dew_point_c": act.dew_point_c,
+        "heat_index": act.heat_index,
+        "heat_penalty_sec": act.heat_penalty_sec,
+        "normalized_pace_sec": act.normalized_pace_sec,
         "average_heartrate": act.average_heartrate,
         "max_heartrate": act.max_heartrate,
         "average_cadence": act.average_cadence,
