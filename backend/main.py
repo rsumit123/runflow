@@ -38,6 +38,7 @@ import fitness_model as fmodel
 import fitness_projection as fproj
 import plan_generator as pgen
 import plan_adherence as padh
+import pace_adaptation as padapt
 import coach_llm
 
 garmin = GarminClient()
@@ -2823,6 +2824,99 @@ async def _garmin_push(w: PlannedWorkout) -> Optional[int]:
                                     w.date.date().isoformat())
     w.garmin_workout_id = res["workout_id"]
     return w.garmin_workout_id
+
+
+# ---------------------------------------------------------------------------
+# Plan calibration — re-aim the plan at the runner it actually has
+# ---------------------------------------------------------------------------
+
+async def _calibration(session: AsyncSession, plan: Plan) -> dict[str, Any]:
+    """The full working: what the plan assumed, what the runs say, what we'd change."""
+    dicts = await _plan_activity_dicts(session)
+    # Compare against the plan's CURRENT bands, not the original snapshot, so a
+    # second calibration doesn't re-propose an adjustment already applied.
+    nxt = (await session.execute(
+        select(PlannedWorkout)
+        .where(PlannedWorkout.plan_id == plan.id, PlannedWorkout.day_type == "easy")
+        .order_by(PlannedWorkout.date)
+    )).scalars().first()
+    return padapt.calibrate(
+        plan.fitness_snapshot or {}, dicts, datetime.utcnow(),
+        current_easy_low=nxt.pace_low_sec if nxt else None,
+    )
+
+
+@app.get("/api/plan/calibration")
+async def get_plan_calibration(session: AsyncSession = Depends(get_session)):
+    """Preview only — never writes. Shows the evidence behind every proposed change."""
+    plan = await _active_plan(session)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No active plan")
+    out = await _calibration(session, plan)
+    out["history"] = plan.calibrations or []
+    return out
+
+
+@app.post("/api/plan/calibration/apply")
+async def apply_plan_calibration(session: AsyncSession = Depends(get_session)):
+    """Re-aim the plan's remaining easy/long/strides days at the measured easy pace,
+    then re-push the affected workouts so the watch agrees with the app."""
+    plan = await _active_plan(session)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No active plan")
+
+    cal = await _calibration(session, plan)
+    new_easy = (cal.get("proposed") or {}).get("easy_low_sec")
+    if not cal["has_changes"] or new_easy is None:
+        raise HTTPException(status_code=400,
+                            detail="Nothing to calibrate — no change is supported by your runs yet.")
+    new_easy_pace = new_easy + 15  # band low -> centre, the generator's convention
+
+    today = datetime.utcnow().date()
+    wos = (await session.execute(
+        select(PlannedWorkout).where(PlannedWorkout.plan_id == plan.id)
+        .order_by(PlannedWorkout.date)
+    )).scalars().all()
+
+    updated, repushed, failed = 0, 0, []
+    for w in wos:
+        if w.date.date() < today:      # the past is history — never rewrite it
+            continue
+        patch = padapt.retarget_workout(w.day_type, w.structure, new_easy_pace)
+        if patch is None:
+            continue
+        w.pace_low_sec = patch["pace_low_sec"]
+        w.pace_high_sec = patch["pace_high_sec"]
+        if patch["structure"]:
+            w.structure = patch["structure"]
+        updated += 1
+        if w.garmin_workout_id and (w.structure or {}).get("steps"):
+            try:
+                await _garmin_push(w)   # replaces the old upload, so no duplicates
+                repushed += 1
+            except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not lose the calibration
+                logger.warning("Re-push after calibration failed for %s: %s", w.id, exc)
+                failed.append({"id": w.id, "title": w.title})
+
+    # The snapshot now holds a MEASURED easy pace, not the starting estimate.
+    snap = dict(plan.fitness_snapshot or {})
+    snap["easy_pace_sec"] = new_easy_pace
+    snap["easy_pace_method"] = "measured"
+    plan.fitness_snapshot = snap
+
+    # Keep the audit trail: every adjustment stays inspectable after the fact.
+    plan.calibrations = (plan.calibrations or []) + [{
+        "date": today.isoformat(),
+        "changes": cal["changes"],
+        "insights": cal["insights"],
+        "workouts_updated": updated,
+    }]
+
+    await session.commit()
+    resp = await _plan_response(session, plan)
+    resp["calibration"] = {"workouts_updated": updated, "repushed_to_watch": repushed,
+                           "changes": cal["changes"], "failed": failed}
+    return resp
 
 
 @app.post("/api/plan/sync-to-watch")

@@ -127,6 +127,7 @@ class Plan(Base):
     created_at = Column(DateTime, nullable=True)
     fitness_snapshot = Column(JSON, nullable=True)      # fitness model at creation
     narrative = Column(JSON, nullable=True)             # {overview, weekly: [..]} | null
+    calibrations = Column(JSON, nullable=True)          # audit log: [{date, changes, insights, ...}]
 
     workouts = relationship("PlannedWorkout", back_populates="plan",
                             cascade="all, delete-orphan")

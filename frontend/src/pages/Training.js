@@ -124,8 +124,38 @@ function PlanSection() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null); // { pushed, total_failed }
   const [syncError, setSyncError] = useState(null);
+  const [calibration, setCalibration] = useState(null); // { insights, changes, has_changes, ... }
+  const [calApplying, setCalApplying] = useState(false);
+  const [calError, setCalError] = useState(null);
+  const [calNotice, setCalNotice] = useState(null);
+  const [calOpen, setCalOpen] = useState(false); // evidence drawer
 
   const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
+
+  const loadCalibration = () => api.get('/plan/calibration')
+    .then((res) => setCalibration(res.data))
+    .catch(() => setCalibration(null));
+
+  const applyCalibration = () => {
+    setCalApplying(true);
+    setCalError(null);
+    api.post('/plan/calibration/apply')
+      .then((res) => {
+        setPlan(res.data.plan || null);
+        setWorkouts(res.data.workouts || []);
+        setAdherence(res.data.adherence || null);
+        const c = res.data.calibration || {};
+        setCalNotice(
+          `Re-aimed ${c.workouts_updated} workout${c.workouts_updated === 1 ? '' : 's'}`
+          + (c.repushed_to_watch ? ` and updated ${c.repushed_to_watch} on your watch.` : '.')
+        );
+        return loadCalibration();
+      })
+      .catch((err) => setCalError(
+        (err.response && err.response.data && err.response.data.detail) || 'Calibration failed.'
+      ))
+      .finally(() => setCalApplying(false));
+  };
 
   const loadSuggestions = () => api.get('/plan/suggestions')
     .then((res) => setSuggestions(res.data.suggestions || []))
@@ -140,9 +170,9 @@ function PlanSection() {
         setAdherence(res.data.adherence || null);
         setProgress(res.data.progress || null);
         if (!res.data.plan) return loadProjections();
-        // Sprint plans have no suggestions pipeline.
+        // Sprint plans have no suggestions or pace-calibration pipeline.
         if (res.data.plan.goal_type === 'sprint_100m') return undefined;
-        return loadSuggestions();
+        return Promise.all([loadSuggestions(), loadCalibration()]);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -425,6 +455,131 @@ function PlanSection() {
             )}
           </div>
         )}
+
+        {/* a1b) Pace calibration — why your targets are what they are */}
+        {!isSprint && calibration && (calibration.insights || []).length > 0 && (() => {
+          const CONF = {
+            high: { label: 'High confidence', color: '#22c55e' },
+            medium: { label: 'Medium confidence', color: '#22c55e' },
+            low: { label: 'Low confidence', color: '#f59e0b' },
+            none: { label: 'Not enough data', color: '#94a3b8' },
+          };
+          const assumed = calibration.plan_assumed || {};
+          return (
+            <div style={{
+              backgroundColor: '#16213e', border: '1px solid #2a3f5f', borderRadius: '8px',
+              padding: '16px', marginBottom: '18px',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>
+                  Why your paces are what they are
+                </div>
+                <button
+                  onClick={() => setCalOpen(!calOpen)}
+                  style={{
+                    background: 'none', border: 'none', color: '#94a3b8', fontSize: '12px',
+                    cursor: 'pointer', padding: '4px 0', minHeight: '44px',
+                  }}
+                >
+                  {calOpen ? 'Hide the numbers' : 'Show the numbers'}
+                </button>
+              </div>
+
+              {(calibration.insights || []).map((ins, i) => {
+                const conf = CONF[ins.confidence] || CONF.none;
+                return (
+                  <div key={i} style={{ marginTop: '12px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0' }}>
+                      {ins.title}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5, marginTop: '4px' }}>
+                      {ins.detail}
+                    </div>
+                    <div style={{ fontSize: '11px', color: conf.color, marginTop: '6px', fontWeight: 600 }}>
+                      {conf.label}
+                    </div>
+
+                    {calOpen && (ins.evidence || []).length > 0 && (
+                      <div style={{
+                        marginTop: '8px', border: '1px solid #2a3f5f', borderRadius: '6px',
+                        overflowX: 'auto',
+                      }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                          <thead>
+                            <tr style={{ color: '#64748b', textAlign: 'left' }}>
+                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Run</th>
+                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Distance</th>
+                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Pace</th>
+                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Avg HR</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ins.evidence.map((e, j) => {
+                              const over = assumed.easy_hr_ceiling && e.avg_hr > assumed.easy_hr_ceiling;
+                              return (
+                                <tr key={j} style={{ borderTop: '1px solid #2a3f5f', color: '#cbd5e1' }}>
+                                  <td style={{ padding: '6px 8px' }}>{e.date}</td>
+                                  <td style={{ padding: '6px 8px' }}>{e.distance_km} km</td>
+                                  <td style={{ padding: '6px 8px' }}>{e.pace}/km</td>
+                                  <td style={{ padding: '6px 8px', color: over ? '#ef4444' : '#22c55e', fontWeight: 600 }}>
+                                    {e.avg_hr != null ? e.avg_hr + ' bpm' : '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {calOpen && (
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '12px', lineHeight: 1.5 }}>
+                  Your easy HR ceiling is {assumed.easy_hr_ceiling} bpm. The plan was built assuming an
+                  easy pace of {assumed.easy_pace}/km
+                  {assumed.easy_pace_method === 'estimate'
+                    ? ' — an estimate, because there were no easy-HR runs to measure from.'
+                    : ' — measured from your runs.'}
+                  {' '}Evidence window: last {calibration.window_days} days.
+                </div>
+              )}
+
+              {(calibration.changes || []).length > 0 && (
+                <div style={{
+                  marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #2a3f5f',
+                }}>
+                  {calibration.changes.map((c, i) => (
+                    <div key={i} style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '8px' }}>
+                      <strong style={{ color: '#e2e8f0' }}>{c.from} → {c.to}</strong>
+                      <div style={{ color: '#94a3b8', marginTop: '2px' }}>{c.reason}</div>
+                    </div>
+                  ))}
+                  <button
+                    onClick={applyCalibration}
+                    disabled={calApplying}
+                    style={{
+                      backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                      fontSize: '13px', fontWeight: 700, padding: '10px 16px', minHeight: '44px',
+                      cursor: calApplying ? 'default' : 'pointer', opacity: calApplying ? 0.6 : 1,
+                      marginTop: '4px',
+                    }}
+                  >
+                    {calApplying ? 'Re-aiming…' : 'Update my remaining workouts'}
+                  </button>
+                </div>
+              )}
+
+              {calNotice && (
+                <div style={{ fontSize: '12px', color: '#22c55e', marginTop: '10px' }}>✓ {calNotice}</div>
+              )}
+              {calError && (
+                <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '10px' }}>{calError}</div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* a2) Today — the primary focal point */}
         <div
