@@ -44,6 +44,86 @@ const cardHeading = { fontSize: '13px', fontWeight: 600, textTransform: 'upperca
 const backLink = { display: 'inline-block', marginBottom: '20px', color: '#a0a0b0', fontSize: '14px' };
 const chartTooltipStyle = { backgroundColor: '#16213e', border: '1px solid #333', borderRadius: '6px', fontSize: '13px' };
 
+const STEP_TYPE_COLORS = {
+  warmup: '#3d9970',
+  run: '#fc5200',
+  recovery: '#6b7280',
+  cooldown: '#3d9970',
+};
+
+function stepColor(type) {
+  return STEP_TYPE_COLORS[type] || '#6b7280';
+}
+
+function stepAmount(step) {
+  const v = step.end_value;
+  if (v == null) return '—';
+  if (step.end_kind === 'distance') {
+    return v >= 1000 ? `${(v / 1000).toFixed(1)} km` : `${v} m`;
+  }
+  if (step.end_kind === 'time') {
+    return v < 60 ? `${v}s` : `${Math.round(v / 60)} min`;
+  }
+  return String(v);
+}
+
+function stepTarget(step) {
+  if (step.target_kind === 'pace' && step.pace_low_sec != null && step.pace_high_sec != null) {
+    return { text: `${formatPace(step.pace_low_sec)}–${formatPace(step.pace_high_sec)} /km`, muted: false };
+  }
+  return { text: 'no pace target', muted: true };
+}
+
+function StepRow({ step }) {
+  const color = stepColor(step.type);
+  const target = stepTarget(step);
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: '10px', padding: '8px 0' }}>
+      <div style={{ width: '4px', borderRadius: '2px', backgroundColor: color, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#e0e0e0' }}>{stepAmount(step)}</span>
+          <span style={{
+            color, backgroundColor: `${color}22`, padding: '2px 7px', borderRadius: '4px',
+            fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
+          }}>
+            {step.type}
+          </span>
+        </div>
+        <div style={{ fontSize: '13px', color: target.muted ? '#666' : '#c8c8d4', marginTop: '2px' }}>
+          {target.text}
+        </div>
+        {step.note && (
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '2px', lineHeight: 1.5 }}>{step.note}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StepTimeline({ steps }) {
+  return (
+    <div>
+      {steps.map((s, i) => {
+        if (s.type === 'repeat') {
+          const children = Array.isArray(s.steps) ? s.steps : [];
+          return (
+            <div key={i} style={{ margin: '10px 0', backgroundColor: '#16213e', borderRadius: '8px', padding: '10px 12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#fc5200', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                {s.iterations != null ? s.iterations : '?'} × repeat
+              </div>
+              <div style={{ borderLeft: '2px solid #fc5200', paddingLeft: '12px', marginLeft: '2px' }}>
+                {children.map((cs, ci) => <StepRow key={ci} step={cs} />)}
+              </div>
+            </div>
+          );
+        }
+        return <StepRow key={i} step={s} />;
+      })}
+    </div>
+  );
+}
+
 function StatRow({ label, value }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px', padding: '8px 0', borderBottom: '1px solid #252540' }}>
@@ -58,15 +138,42 @@ function PlanWorkoutDetail() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [garminId, setGarminId] = useState(null);
+  const [pushing, setPushing] = useState(false);
+  const [pushError, setPushError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setPushError(null);
+    setPushing(false);
+    setGarminId(null);
     api.get('/plan/workout/' + id)
-      .then((res) => setData(res.data))
+      .then((res) => {
+        setData(res.data);
+        setGarminId(res.data?.workout?.garmin_workout_id ?? null);
+      })
       .catch((err) => setError(err.response?.data?.detail || 'Failed to load workout'))
       .finally(() => setLoading(false));
   }, [id]);
+
+  const pushToWatch = () => {
+    setPushing(true);
+    setPushError(null);
+    api.post(`/plan/workout/${id}/push`)
+      .then((res) => setGarminId(res.data?.garmin_workout_id ?? null))
+      .catch((err) => setPushError(err.response?.data?.detail || 'Couldn’t reach Garmin — try again.'))
+      .finally(() => setPushing(false));
+  };
+
+  const removeFromWatch = () => {
+    setPushing(true);
+    setPushError(null);
+    api.delete(`/plan/workout/${id}/push`)
+      .then(() => setGarminId(null))
+      .catch((err) => setPushError(err.response?.data?.detail || 'Couldn’t reach Garmin — try again.'))
+      .finally(() => setPushing(false));
+  };
 
   if (loading) {
     return <div style={{ textAlign: 'center', padding: '60px', color: '#a0a0b0', fontSize: '16px' }}>Loading workout...</div>;
@@ -97,6 +204,8 @@ function PlanWorkoutDetail() {
   const status = w.status || 'upcoming';
   const statusMeta = STATUS_META[status] || STATUS_META.upcoming;
   const compliance = w.compliance || null;
+
+  const steps = structure && Array.isArray(structure.steps) && structure.steps.length > 0 ? structure.steps : null;
 
   const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
   const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
@@ -232,7 +341,55 @@ function PlanWorkoutDetail() {
       ) : (
         <div style={cardStyle}>
           <div style={cardHeading}>Planned</div>
-          {structure && structure.warmup && (
+
+          {steps && (
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                {garminId == null ? (
+                  <button
+                    type="button"
+                    onClick={pushToWatch}
+                    disabled={pushing}
+                    style={{
+                      minHeight: '44px', padding: '10px 16px', borderRadius: '8px', border: 'none',
+                      backgroundColor: pushing ? '#7a3300' : '#fc5200', color: '#fff',
+                      fontSize: '14px', fontWeight: 700, cursor: pushing ? 'default' : 'pointer',
+                    }}
+                  >
+                    {pushing ? 'Sending…' : '⌚ Send to watch'}
+                  </button>
+                ) : (
+                  <>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', minHeight: '44px', padding: '10px 16px',
+                      borderRadius: '8px', backgroundColor: '#22c55e22', border: '1px solid #22c55e',
+                      color: '#22c55e', fontSize: '14px', fontWeight: 700, boxSizing: 'border-box',
+                    }}>
+                      ✓ On your watch
+                    </span>
+                    <button
+                      type="button"
+                      onClick={removeFromWatch}
+                      disabled={pushing}
+                      style={{
+                        minHeight: '44px', padding: '10px 12px', borderRadius: '8px',
+                        border: 'none', backgroundColor: 'transparent', color: '#a0a0b0',
+                        fontSize: '13px', fontWeight: 600, textDecoration: 'underline',
+                        cursor: pushing ? 'default' : 'pointer',
+                      }}
+                    >
+                      {pushing ? 'Removing…' : 'Remove'}
+                    </button>
+                  </>
+                )}
+              </div>
+              {pushError && (
+                <div style={{ marginTop: '8px', fontSize: '13px', color: '#ff6b6b', lineHeight: 1.5 }}>{pushError}</div>
+              )}
+            </div>
+          )}
+
+          {structure && structure.warmup && !steps && (
             <div style={{ marginBottom: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: 600, color: '#3d9970', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Warm-up</div>
               <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.warmup}</div>
@@ -241,12 +398,24 @@ function PlanWorkoutDetail() {
           {km != null && <StatRow label="Target distance" value={`${km} km`} />}
           {hasPace && <StatRow label="Pace band" value={`${formatPace(w.pace_low_sec)}–${formatPace(w.pace_high_sec)} /km`} />}
           {w.hr_ceiling != null && <StatRow label="HR ceiling" value={`≤ ${w.hr_ceiling} bpm`} />}
-          {structure && structure.cooldown && (
+          {structure && structure.cooldown && !steps && (
             <div style={{ marginTop: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: 600, color: '#3d9970', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Cool-down</div>
               <div style={{ fontSize: '13px', color: '#e0e0e0', lineHeight: 1.5 }}>{structure.cooldown}</div>
             </div>
           )}
+
+          {steps && (
+            <div style={{ marginTop: '16px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#a0a0b0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Workout steps
+              </div>
+              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <StepTimeline steps={steps} />
+              </div>
+            </div>
+          )}
+
           {km == null && !hasPace && w.hr_ceiling == null && !structure && (
             <div style={{ fontSize: '13px', color: '#666' }}>No prescribed targets for this day.</div>
           )}

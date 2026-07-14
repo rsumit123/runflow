@@ -31,6 +31,7 @@ _MIGRATIONS = {
     },
     "planned_workouts": {
         "structure": "JSON",
+        "garmin_workout_id": "BIGINT",
     },
 }
 
