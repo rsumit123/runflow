@@ -4,6 +4,11 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import api from '../api';
+import { color, font, space, button } from '../theme';
+import TodayHero from '../components/TodayHero';
+import Collapse from '../components/Collapse';
+import PaceHrScatter from '../components/PaceHrScatter';
+import ReadinessTrend from '../components/ReadinessTrend';
 
 function formatPace(secPerKm) {
   if (secPerKm === null || secPerKm === undefined) return '-';
@@ -132,6 +137,8 @@ function PlanSection() {
   const [guidance, setGuidance] = useState(null); // { readiness, recommendation, heat }
   const [guidanceApplying, setGuidanceApplying] = useState(false);
   const [guidanceRefreshing, setGuidanceRefreshing] = useState(false);
+  const [paceHr, setPaceHr] = useState(null);
+  const [wellness, setWellness] = useState(null);
   const [guidanceNotice, setGuidanceNotice] = useState(null);
 
   const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
@@ -148,6 +155,11 @@ function PlanSection() {
     setGuidanceRefreshing(true);
     loadGuidance(true).finally(() => setGuidanceRefreshing(false));
   };
+
+  const loadCharts = () => Promise.all([
+    api.get('/analysis/pace-hr').then((res) => setPaceHr(res.data)).catch(() => setPaceHr(null)),
+    api.get('/wellness/history').then((res) => setWellness(res.data)).catch(() => setWellness(null)),
+  ]);
 
   const acceptGuidance = () => {
     setGuidanceApplying(true);
@@ -204,7 +216,7 @@ function PlanSection() {
         if (!res.data.plan) return loadProjections();
         // Sprint plans have no suggestions or pace-calibration pipeline.
         if (res.data.plan.goal_type === 'sprint_100m') return undefined;
-        return Promise.all([loadSuggestions(), loadCalibration(), loadGuidance()]);
+        return Promise.all([loadSuggestions(), loadCalibration(), loadGuidance(), loadCharts()]);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -488,232 +500,154 @@ function PlanSection() {
           </div>
         )}
 
-        {/* a1a) Today's conditions — readiness + heat, before you head out */}
+        {/* a1a) TODAY — the page's whole reason for existing */}
+        {!isSprint && (
+          <TodayHero
+            workout={todayWorkout}
+            guidance={guidance}
+            applying={guidanceApplying}
+            onOpen={todayCardId != null ? () => navigate('/plan/workout/' + todayCardId) : undefined}
+            onAccept={acceptGuidance}
+          />
+        )}
+        {!isSprint && guidanceNotice && (
+          <div style={{ ...font.small, color: color.good, marginBottom: space(4) }}>
+            ✓ {guidanceNotice}
+          </div>
+        )}
+
+        {/* a1b) Readiness detail — available, not loud */}
         {!isSprint && guidance && (guidance.readiness || {}).available && (() => {
           const r = guidance.readiness;
-          const rec = guidance.recommendation || {};
-          const h = guidance.heat;
-          const TONE = {
-            high: '#22c55e', moderate: '#22c55e', low: '#f59e0b', very_low: '#ef4444',
-          };
-          const tone = TONE[r.level] || '#94a3b8';
-          const DOT = { good: '#22c55e', bad: '#ef4444', unknown: '#64748b', neutral: '#94a3b8' };
-          const alert = rec.action === 'downgrade' || rec.action === 'rest';
+          const DOT = { good: color.good, bad: color.bad, unknown: color.textMuted, neutral: color.neutral };
+          const bad = (r.factors || []).filter((f) => f.verdict === 'bad');
+          const summary = bad.length
+            ? `Held back by ${bad.map((f) => f.name.toLowerCase()).join(' and ')}`
+            : (r.garmin_level || '').toLowerCase().replace('_', ' ') || 'recovered';
           return (
-            <div style={{
-              backgroundColor: '#16213e', borderRadius: '8px', padding: '16px', marginBottom: '18px',
-              border: '1px solid ' + (alert ? '#f59e0b55' : '#2a3f5f'),
-              borderLeft: '4px solid ' + tone,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>
-                  Readiness {r.score}/100
-                </div>
-                <div style={{ fontSize: '11px', color: tone, fontWeight: 600, textTransform: 'capitalize' }}>
-                  {(r.garmin_level || r.level || '').toLowerCase().replace('_', ' ')}
-                </div>
-                <button
-                  onClick={refreshGuidance}
-                  disabled={guidanceRefreshing}
-                  title="Re-pull today's numbers from Garmin"
-                  style={{
-                    marginLeft: 'auto', background: 'none', border: 'none', color: '#94a3b8',
-                    fontSize: '12px', cursor: guidanceRefreshing ? 'default' : 'pointer',
-                    padding: '4px 0', minHeight: '44px',
-                  }}
-                >
-                  {guidanceRefreshing ? 'Refreshing…' : '↻ Refresh'}
-                </button>
-              </div>
-
-              <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: 1.5, marginTop: '6px' }}>
-                {rec.reason}
-              </div>
-
-              {/* the factors behind the score — never just a number */}
-              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <Collapse
+              label={`Readiness · ${r.score}/100`}
+              summary={summary.charAt(0).toUpperCase() + summary.slice(1)}
+              tone={bad.length ? color.warn : color.text}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: space(3) }}>
                 {(r.factors || []).map((f, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
+                  <div key={i} style={{ display: 'flex', gap: space(3) }}>
                     <span style={{
                       width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
-                      backgroundColor: DOT[f.verdict] || '#64748b', marginTop: '5px',
+                      backgroundColor: DOT[f.verdict] || color.neutral, marginTop: '7px',
                     }}
                     />
-                    <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
-                      <strong style={{ color: '#cbd5e1' }}>{f.name}: {f.value}</strong>
+                    <div style={{ ...font.small, color: color.textSecondary }}>
+                      <strong style={{ color: color.text }}>{f.name}: {f.value}</strong>
                       {' — '}{f.detail}
                     </div>
                   </div>
                 ))}
               </div>
-
-              {h && (
+              {guidance.heat && (
                 <div style={{
-                  marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #2a3f5f',
-                }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#e2e8f0' }}>
-                    {h.adjusted
-                      ? `Heat: run ${h.adjusted_band}/km today (+${h.penalty_sec} s/km)`
-                      : `Heat: no adjustment needed`}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.5, marginTop: '4px' }}>
-                    {h.detail}
-                  </div>
-                </div>
-              )}
-
-              {guidance.can_apply && (
-                <button
-                  onClick={acceptGuidance}
-                  disabled={guidanceApplying}
-                  style={{
-                    backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
-                    fontSize: '13px', fontWeight: 700, padding: '10px 16px', minHeight: '44px',
-                    cursor: guidanceApplying ? 'default' : 'pointer',
-                    opacity: guidanceApplying ? 0.6 : 1, marginTop: '14px',
-                  }}
+                  marginTop: space(4), paddingTop: space(4), borderTop: `1px solid ${color.hairline}`,
+                  ...font.small, color: color.textSecondary,
+                }}
                 >
-                  {guidanceApplying
-                    ? 'Adjusting…'
-                    : rec.action === 'rest' ? 'Take today off' : 'Ease today back'}
-                </button>
-              )}
-
-              {guidanceNotice && (
-                <div style={{ fontSize: '12px', color: '#22c55e', marginTop: '10px' }}>
-                  ✓ {guidanceNotice}
+                  {guidance.heat.detail}
                 </div>
               )}
-            </div>
+              <button onClick={refreshGuidance} disabled={guidanceRefreshing}
+                      style={{ ...button.quiet, marginTop: space(2) }}>
+                {guidanceRefreshing ? 'Refreshing…' : '↻ Refresh from Garmin'}
+              </button>
+            </Collapse>
           );
         })()}
 
-        {/* a1b) Pace calibration — why your targets are what they are */}
+        {/* a1c) Pace calibration — the evidence, on demand */}
         {!isSprint && calibration && (calibration.insights || []).length > 0 && (() => {
-          const CONF = {
-            high: { label: 'High confidence', color: '#22c55e' },
-            medium: { label: 'Medium confidence', color: '#22c55e' },
-            low: { label: 'Low confidence', color: '#f59e0b' },
-            none: { label: 'Not enough data', color: '#94a3b8' },
-          };
           const assumed = calibration.plan_assumed || {};
+          const lead = calibration.insights[0];
+          const CONF = { high: color.good, medium: color.good, low: color.warn, none: color.textMuted };
           return (
-            <div style={{
-              backgroundColor: '#16213e', border: '1px solid #2a3f5f', borderRadius: '8px',
-              padding: '16px', marginBottom: '18px',
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>
-                  Why your paces are what they are
+            <Collapse
+              label="Why your paces are what they are"
+              summary={lead.title}
+              tone={calibration.has_changes ? color.accent : color.text}
+            >
+              {calibration.insights.map((ins, i) => (
+                <div key={i} style={{ marginBottom: space(5) }}>
+                  <div style={{ ...font.small, color: color.text, fontWeight: 600 }}>{ins.title}</div>
+                  <p style={{ ...font.small, color: color.textSecondary, margin: `${space(1)} 0 0` }}>
+                    {ins.detail}
+                  </p>
+                  {(ins.evidence || []).length > 0 && (
+                    <div style={{ marginTop: space(3), overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', ...font.numeric }}>
+                        <thead>
+                          <tr style={{ ...font.label, color: color.textMuted, textAlign: 'left' }}>
+                            <th style={{ padding: `${space(1)} ${space(3)} ${space(1)} 0` }}>Run</th>
+                            <th style={{ padding: `${space(1)} ${space(3)} ${space(1)} 0` }}>Dist</th>
+                            <th style={{ padding: `${space(1)} ${space(3)} ${space(1)} 0` }}>Pace</th>
+                            <th style={{ padding: `${space(1)} 0` }}>Avg HR</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ins.evidence.map((e, j) => {
+                            const over = assumed.easy_hr_ceiling && e.avg_hr > assumed.easy_hr_ceiling;
+                            return (
+                              <tr key={j} style={{ borderTop: `1px solid ${color.hairline}`, ...font.small, color: color.textSecondary }}>
+                                <td style={{ padding: `${space(2)} ${space(3)} ${space(2)} 0` }}>{e.date}</td>
+                                <td style={{ padding: `${space(2)} ${space(3)} ${space(2)} 0` }}>{e.distance_km} km</td>
+                                <td style={{ padding: `${space(2)} ${space(3)} ${space(2)} 0` }}>{e.pace}/km</td>
+                                <td style={{ padding: `${space(2)} 0`, color: over ? color.bad : color.good, fontWeight: 600 }}>
+                                  {e.avg_hr != null ? `${e.avg_hr} bpm` : '—'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div style={{ ...font.label, color: CONF[ins.confidence] || color.textMuted, marginTop: space(2) }}>
+                    {ins.confidence === 'none' ? 'Not enough data' : `${ins.confidence} confidence`}
+                  </div>
                 </div>
-                <button
-                  onClick={() => setCalOpen(!calOpen)}
-                  style={{
-                    background: 'none', border: 'none', color: '#94a3b8', fontSize: '12px',
-                    cursor: 'pointer', padding: '4px 0', minHeight: '44px',
-                  }}
-                >
-                  {calOpen ? 'Hide the numbers' : 'Show the numbers'}
-                </button>
+              ))}
+
+              <div style={{ ...font.small, color: color.textMuted, paddingTop: space(3), borderTop: `1px solid ${color.hairline}` }}>
+                Easy HR ceiling {assumed.easy_hr_ceiling} bpm. Plan built on an easy pace of {assumed.easy_pace}/km
+                {assumed.easy_pace_method === 'estimate'
+                  ? ' — an estimate, because there were no easy-HR runs to measure from.'
+                  : ' — measured from your runs.'}
+                {' '}Evidence window: {calibration.window_days} days.
               </div>
 
-              {(calibration.insights || []).map((ins, i) => {
-                const conf = CONF[ins.confidence] || CONF.none;
-                return (
-                  <div key={i} style={{ marginTop: '12px' }}>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0' }}>
-                      {ins.title}
-                    </div>
-                    <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5, marginTop: '4px' }}>
-                      {ins.detail}
-                    </div>
-                    <div style={{ fontSize: '11px', color: conf.color, marginTop: '6px', fontWeight: 600 }}>
-                      {conf.label}
-                    </div>
-
-                    {calOpen && (ins.evidence || []).length > 0 && (
-                      <div style={{
-                        marginTop: '8px', border: '1px solid #2a3f5f', borderRadius: '6px',
-                        overflowX: 'auto',
-                      }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                          <thead>
-                            <tr style={{ color: '#64748b', textAlign: 'left' }}>
-                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Run</th>
-                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Distance</th>
-                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Pace</th>
-                              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Avg HR</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {ins.evidence.map((e, j) => {
-                              const over = assumed.easy_hr_ceiling && e.avg_hr > assumed.easy_hr_ceiling;
-                              return (
-                                <tr key={j} style={{ borderTop: '1px solid #2a3f5f', color: '#cbd5e1' }}>
-                                  <td style={{ padding: '6px 8px' }}>{e.date}</td>
-                                  <td style={{ padding: '6px 8px' }}>{e.distance_km} km</td>
-                                  <td style={{ padding: '6px 8px' }}>{e.pace}/km</td>
-                                  <td style={{ padding: '6px 8px', color: over ? '#ef4444' : '#22c55e', fontWeight: 600 }}>
-                                    {e.avg_hr != null ? e.avg_hr + ' bpm' : '—'}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              {calOpen && (
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '12px', lineHeight: 1.5 }}>
-                  Your easy HR ceiling is {assumed.easy_hr_ceiling} bpm. The plan was built assuming an
-                  easy pace of {assumed.easy_pace}/km
-                  {assumed.easy_pace_method === 'estimate'
-                    ? ' — an estimate, because there were no easy-HR runs to measure from.'
-                    : ' — measured from your runs.'}
-                  {' '}Evidence window: last {calibration.window_days} days.
-                </div>
-              )}
-
               {(calibration.changes || []).length > 0 && (
-                <div style={{
-                  marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #2a3f5f',
-                }}>
+                <div style={{ marginTop: space(4) }}>
                   {calibration.changes.map((c, i) => (
-                    <div key={i} style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '8px' }}>
-                      <strong style={{ color: '#e2e8f0' }}>{c.from} → {c.to}</strong>
-                      <div style={{ color: '#94a3b8', marginTop: '2px' }}>{c.reason}</div>
+                    <div key={i} style={{ ...font.small, color: color.textSecondary, marginBottom: space(2) }}>
+                      <strong style={{ color: color.text }}>{c.from} → {c.to}</strong>
+                      <div>{c.reason}</div>
                     </div>
                   ))}
-                  <button
-                    onClick={applyCalibration}
-                    disabled={calApplying}
-                    style={{
-                      backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
-                      fontSize: '13px', fontWeight: 700, padding: '10px 16px', minHeight: '44px',
-                      cursor: calApplying ? 'default' : 'pointer', opacity: calApplying ? 0.6 : 1,
-                      marginTop: '4px',
-                    }}
-                  >
+                  <button onClick={applyCalibration} disabled={calApplying}
+                          style={{ ...button.primary, opacity: calApplying ? 0.6 : 1 }}>
                     {calApplying ? 'Re-aiming…' : 'Update my remaining workouts'}
                   </button>
                 </div>
               )}
-
               {calNotice && (
-                <div style={{ fontSize: '12px', color: '#22c55e', marginTop: '10px' }}>✓ {calNotice}</div>
+                <div style={{ ...font.small, color: color.good, marginTop: space(3) }}>✓ {calNotice}</div>
               )}
               {calError && (
-                <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '10px' }}>{calError}</div>
+                <div style={{ ...font.small, color: color.bad, marginTop: space(3) }}>{calError}</div>
               )}
-            </div>
+            </Collapse>
           );
         })()}
 
-        {/* a2) Today — the primary focal point */}
+        {/* a2) Today — sprint plans keep the original card (no guidance pipeline) */}
+        {isSprint && (
         <div
           onClick={todayCardId != null ? () => navigate('/plan/workout/' + todayCardId) : undefined}
           style={{
@@ -808,6 +742,7 @@ function PlanSection() {
             </div>
           )}
         </div>
+        )}
 
         {narrative && narrative.overview && (
           <div style={{
@@ -1208,6 +1143,14 @@ function PlanSection() {
             );
           })}
         </div>
+
+        {/* e) The story — what the numbers look like over time */}
+        {!isSprint && (
+          <div style={{ marginTop: space(10), display: 'flex', flexDirection: 'column', gap: space(10) }}>
+            <PaceHrScatter data={paceHr} />
+            <ReadinessTrend data={wellness} />
+          </div>
+        )}
       </div>
     );
   }
