@@ -65,6 +65,34 @@ def classify_run(
 
 EASY_MEASURE_DAYS = 365   # a season, not a career — beyond this is a different athlete
 MIN_EASY_RUNS = 3         # below this it's an anecdote, not a measurement
+FRESH_EASY_DAYS = 42      # newer than this and the measurement stands on its own
+MAX_DETRAINING = 1.35     # cap: even a long layoff shouldn't slow easy pace by >35%
+
+
+def _fitness_decay(acts: list[dict[str, Any]], now: datetime,
+                   since: datetime) -> float:
+    """How much slower the runner's top end is NOW than it was around `since`.
+
+    Both ends measured on heat-normalised pace, so a monsoon doesn't get logged
+    as detraining. Returns a multiplier ≥ 1.0 (1.18 = 18% slower than they were).
+    """
+    def best(lo: datetime, hi: datetime) -> Optional[float]:
+        paces = [
+            a.get("normalized_pace_sec") or _pace_sec_per_km(a.get("average_speed"))
+            for a in acts
+            if (a.get("distance") or 0) >= 1500 and a.get("start_date")
+            and lo <= a["start_date"] < hi
+            and (a.get("normalized_pace_sec") or a.get("average_speed"))
+        ]
+        return min(paces) if paces else None
+
+    recent = best(now - timedelta(days=FRESH_EASY_DAYS), now)
+    era = best(since - timedelta(days=60), since + timedelta(days=14))
+    if not recent or not era or era <= 0:
+        return 1.0
+    # Only ever penalise. If they've got FASTER since, the easy measurement is
+    # already conservative and we leave it alone.
+    return max(1.0, min(MAX_DETRAINING, recent / era))
 
 
 def _estimate_easy_pace(
@@ -102,6 +130,26 @@ def _estimate_easy_pace(
         easy.sort(key=lambda p: p[0], reverse=True)
         used = easy[:10]
         measured = sum(p for _, p in used) / len(used)
+        newest = used[0][0]
+        stale_days = (now - newest).days
+
+        # A measurement from before a layoff describes a runner who no longer
+        # exists. Scale it by how much top-end fitness has actually moved since
+        # then — measured on normalised pace, so we're not just charging them for
+        # the weather twice.
+        if stale_days > FRESH_EASY_DAYS:
+            decay = _fitness_decay(acts, now, newest)
+            adjusted = measured * decay
+            return {
+                "easy_pace_sec": round(adjusted),
+                "method": "measured_stale" if decay > 1.0 else "measured",
+                "measured_easy_pace_sec": round(measured),
+                "staleness_days": stale_days,
+                "detraining_factor": round(decay, 3),
+                "easy_runs_used": len(used),
+                "easy_runs_available": len(easy),
+            }
+
         return {
             "easy_pace_sec": round(measured),
             "method": "measured",
