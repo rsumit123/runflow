@@ -120,6 +120,10 @@ function PlanSection() {
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState(null);
   const [moveWarning, setMoveWarning] = useState(null);
+  const [moveNotice, setMoveNotice] = useState(null); // { text, tone: 'good' | 'warn' }
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null); // { pushed, total_failed }
+  const [syncError, setSyncError] = useState(null);
 
   const loadProjections = () => api.get('/plan/projections').then((res) => setProjections(res.data));
 
@@ -206,9 +210,33 @@ function PlanSection() {
         setEditingId(null);
         setEditDate('');
         setMoveWarning(res.data.warning || null);
+        const synced = res.data.garmin_synced;
+        if (synced === true) setMoveNotice({ text: 'Moved — and updated on your watch.', tone: 'good' });
+        else if (synced === false) setMoveNotice({ text: "Moved, but couldn't update your watch.", tone: 'warn' });
+        else setMoveNotice(null);
       })
       .catch(() => setMoveError("Couldn't move — try again."))
       .finally(() => setMoving(false));
+  };
+
+  // Push every upcoming structured workout in the plan to the Garmin watch.
+  const syncPlanToWatch = () => {
+    setSyncing(true);
+    setSyncError(null);
+    setSyncResult(null);
+    api.post('/plan/sync-to-watch')
+      .then((res) => {
+        setSyncResult({
+          pushed: res.data.pushed || 0,
+          total_failed: res.data.total_failed || 0,
+        });
+        // Refresh so each day card's garmin_workout_id is up to date.
+        return loadPlan();
+      })
+      .catch((err) => {
+        setSyncError(err.response?.data?.detail || 'Couldn\'t reach Garmin — try again.');
+      })
+      .finally(() => setSyncing(false));
   };
 
   const buildPlan = (weeks, targetTimeSec) => {
@@ -365,6 +393,38 @@ function PlanSection() {
             Abandon plan
           </button>
         </div>
+
+        {/* a1) Sync the plan's structured workouts to Garmin (5K plans only) */}
+        {!isSprint && (
+          <div style={{ marginBottom: '16px' }}>
+            <button
+              onClick={syncPlanToWatch}
+              disabled={syncing}
+              style={{
+                backgroundColor: '#fc5200', border: 'none', borderRadius: '6px', color: '#fff',
+                fontSize: '13px', fontWeight: 700, padding: '10px 16px', minHeight: '44px',
+                cursor: syncing ? 'default' : 'pointer', opacity: syncing ? 0.6 : 1,
+              }}
+            >
+              {syncing ? 'Syncing…' : '⌚ Sync plan to watch'}
+            </button>
+            {syncResult && (
+              <div style={{ marginTop: '8px' }}>
+                <div style={{ fontSize: '12px', color: '#22c55e' }}>
+                  ✓ {syncResult.pushed} workout{syncResult.pushed === 1 ? '' : 's'} on your watch
+                </div>
+                {syncResult.total_failed > 0 && (
+                  <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '4px' }}>
+                    {syncResult.total_failed} couldn't be sent
+                  </div>
+                )}
+              </div>
+            )}
+            {syncError && (
+              <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '8px' }}>{syncError}</div>
+            )}
+          </div>
+        )}
 
         {/* a2) Today — the primary focal point */}
         <div
@@ -670,6 +730,34 @@ function PlanSection() {
           </div>
         )}
 
+        {/* Garmin auto-resync feedback after a move */}
+        {moveNotice && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: '8px',
+            backgroundColor: moveNotice.tone === 'good' ? '#22c55e18' : '#f59e0b18',
+            border: `1px solid ${moveNotice.tone === 'good' ? '#22c55e55' : '#f59e0b55'}`,
+            borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
+          }}>
+            <span style={{
+              flex: 1, fontSize: '12px', lineHeight: 1.4,
+              color: moveNotice.tone === 'good' ? '#22c55e' : '#f59e0b',
+            }}>
+              {moveNotice.tone === 'good' ? '⌚ ' : ''}{moveNotice.text}
+            </span>
+            <button
+              onClick={() => setMoveNotice(null)}
+              style={{
+                background: 'none', border: 'none', fontSize: '14px', fontWeight: 700,
+                cursor: 'pointer', padding: '0 2px', lineHeight: 1,
+                color: moveNotice.tone === 'good' ? '#22c55e' : '#f59e0b',
+              }}
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Day cards for the selected week */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {selWorkouts.length === 0 ? (
@@ -708,13 +796,20 @@ function PlanSection() {
                   {marker ? marker.ch : ''}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '11px', color: '#a0a0b0' }}>{formatDate(w.date)}</span>
-                    <span style={{
-                      color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
-                      fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
-                    }}>
-                      {dtLabel}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {!isSprint && w.garmin_workout_id != null && (
+                        <span style={{ fontSize: '10px', fontWeight: 600, color: '#22c55e' }}>
+                          ⌚ on watch
+                        </span>
+                      )}
+                      <span style={{
+                        color: dc, backgroundColor: `${dc}22`, padding: '2px 7px', borderRadius: '4px',
+                        fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
+                      }}>
+                        {dtLabel}
+                      </span>
                     </span>
                   </div>
                   <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>

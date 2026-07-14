@@ -946,9 +946,20 @@ async def move_workout(workout_id: int, req: WorkoutMoveRequest,
         wk = int((nd_mon - w0_mon).days / 7) + 1
         w.week_number = max(1, min(plan.weeks, wk))
 
+    # If it's already on the watch, keep Garmin in step with the move.
+    synced = None
+    if w.garmin_workout_id:
+        try:
+            await _garmin_push(w)
+            synced = True
+        except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not block the move
+            logger.warning("Garmin re-sync after move failed for %s: %s", workout_id, exc)
+            synced = False
+
     await session.commit()
     resp = await _plan_response(session, plan)
     resp["warning"] = warning
+    resp["garmin_synced"] = synced
     return resp
 
 
@@ -2779,6 +2790,52 @@ async def run_chat_endpoint(activity_id: int, req: RunChatRequest,
 # Push a structured workout to the Garmin watch
 # ---------------------------------------------------------------------------
 
+async def _garmin_push(w: PlannedWorkout) -> Optional[int]:
+    """Upload+schedule this workout on Garmin, replacing any previous push so we
+    never leave a duplicate (or a stale date) on the watch."""
+    steps = (w.structure or {}).get("steps")
+    if not steps:
+        return None
+    if w.garmin_workout_id:
+        try:
+            await garmin.remove_workout(w.garmin_workout_id)
+        except Exception as exc:  # noqa: BLE001 — a stale id shouldn't block a re-push
+            logger.warning("Could not remove old Garmin workout %s: %s", w.garmin_workout_id, exc)
+        w.garmin_workout_id = None
+    res = await garmin.push_workout(w.title or "RunFlow workout", steps,
+                                    w.date.date().isoformat())
+    w.garmin_workout_id = res["workout_id"]
+    return w.garmin_workout_id
+
+
+@app.post("/api/plan/sync-to-watch")
+async def sync_plan_to_watch(session: AsyncSession = Depends(get_session)):
+    """Push every upcoming structured workout in the active plan to the Garmin watch."""
+    plan = await _active_plan(session)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No active plan")
+    today = datetime.utcnow().date()
+    wos = (await session.execute(
+        select(PlannedWorkout).where(PlannedWorkout.plan_id == plan.id)
+        .order_by(PlannedWorkout.date)
+    )).scalars().all()
+
+    pushed, failed = 0, []
+    for w in wos:
+        if w.day_type == "rest" or not (w.structure or {}).get("steps"):
+            continue
+        if w.date.date() < today:      # don't schedule the past onto the watch
+            continue
+        try:
+            await _garmin_push(w)
+            pushed += 1
+        except Exception as exc:  # noqa: BLE001 — one bad workout shouldn't abort the sync
+            logger.warning("Garmin sync failed for workout %s: %s", w.id, exc)
+            failed.append({"id": w.id, "title": w.title, "error": str(exc)[:120]})
+    await session.commit()
+    return {"pushed": pushed, "failed": failed, "total_failed": len(failed)}
+
+
 @app.post("/api/plan/workout/{workout_id}/push")
 async def push_workout_to_garmin(workout_id: int,
                                  session: AsyncSession = Depends(get_session)):
@@ -2787,26 +2844,14 @@ async def push_workout_to_garmin(workout_id: int,
     w = await session.get(PlannedWorkout, workout_id)
     if w is None:
         raise HTTPException(status_code=404, detail="Workout not found")
-    steps = (w.structure or {}).get("steps")
-    if not steps:
+    if not (w.structure or {}).get("steps"):
         raise HTTPException(status_code=400,
                             detail="This workout has no structured steps to send.")
-    if w.garmin_workout_id:
-        # Replace the previous push so we never leave duplicates on the watch.
-        try:
-            await garmin.remove_workout(w.garmin_workout_id)
-        except Exception as exc:  # noqa: BLE001 — stale id shouldn't block a re-push
-            logger.warning("Could not remove old Garmin workout %s: %s", w.garmin_workout_id, exc)
-        w.garmin_workout_id = None
-
     try:
-        res = await garmin.push_workout(w.title or "RunFlow workout", steps,
-                                        w.date.date().isoformat())
+        await _garmin_push(w)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Garmin push failed for workout %s: %s", workout_id, exc)
         raise HTTPException(status_code=502, detail=f"Garmin push failed: {exc}")
-
-    w.garmin_workout_id = res["workout_id"]
     await session.commit()
     return {"garmin_workout_id": w.garmin_workout_id,
             "date": w.date.date().isoformat(), "title": w.title}
