@@ -2969,6 +2969,16 @@ async def wellness_history(days: int = 30, session: AsyncSession = Depends(get_s
     } for r in reversed(rows)]}
 
 
+async def _typical_run_hour(session: AsyncSession) -> Optional[int]:
+    """The hour (UTC) this runner usually runs — the median of their recent starts."""
+    rows = (await session.execute(
+        select(Activity.start_date).where(Activity.start_date.isnot(None))
+        .order_by(Activity.start_date.desc()).limit(30)
+    )).scalars().all()
+    hours = sorted(d.hour for d in rows if d)
+    return hours[len(hours) // 2] if hours else None
+
+
 async def _run_location(session: AsyncSession) -> Optional[tuple[float, float]]:
     """Where the runner actually runs — taken from their most recent GPS run."""
     row = (await session.execute(
@@ -3011,12 +3021,16 @@ async def today_guidance(refresh: bool = False,
     heat_out = None
     loc = await _run_location(session)
     if loc and w and w.day_type != "rest":
-        conds = await weather.conditions(*loc)
+        hour = await _typical_run_hour(session)
+        conds = (await weather.conditions_at_hour(*loc, hour) if hour is not None
+                 else await weather.conditions(*loc))
         if conds:
             heat_out = heat.adjust(conds["temp_c"], conds["dew_point_c"],
                                    w.pace_low_sec, w.pace_high_sec)
             heat_out["humidity_pct"] = conds.get("humidity_pct")
             heat_out["feels_like_c"] = conds.get("feels_like_c")
+            heat_out["cloud_cover_pct"] = conds.get("cloud_cover_pct")
+            heat_out["local_hour"] = conds.get("local_hour")
 
     dicts = await _workout_dicts(session, plan)
     return {

@@ -16,17 +16,25 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-# (max sum of °F temp + °F dew point, slowdown fraction, label)
-STRESS_BANDS: list[tuple[int, float, str]] = [
-    (100, 0.000, "ideal"),
-    (110, 0.005, "mild"),
-    (120, 0.010, "mild"),
-    (130, 0.020, "moderate"),
-    (140, 0.030, "moderate"),
-    (150, 0.045, "hard"),
-    (160, 0.060, "hard"),
-    (170, 0.080, "severe"),
-    (999, 0.100, "extreme"),
+# Breakpoints on the coaching table: (temp+dew in °F, slowdown fraction).
+# We INTERPOLATE between these rather than snapping to the top of a band — the
+# table gives 6–8% for 160–170, and charging everyone 8% for an index of 161 is
+# not what it says.
+STRESS_POINTS: list[tuple[float, float]] = [
+    (100, 0.000),
+    (110, 0.005),
+    (120, 0.010),
+    (130, 0.020),
+    (140, 0.030),
+    (150, 0.045),
+    (160, 0.060),
+    (170, 0.080),
+    (180, 0.100),
+]
+
+LABELS: list[tuple[float, str]] = [
+    (100, "ideal"), (120, "mild"), (140, "moderate"),
+    (155, "hard"), (170, "severe"), (999, "extreme"),
 ]
 
 # Below this there is nothing worth telling the runner about.
@@ -43,10 +51,18 @@ def stress_index(temp_c: float, dew_point_c: float) -> float:
 
 
 def _band(index: float) -> tuple[float, str]:
-    for ceiling, frac, label in STRESS_BANDS:
-        if index <= ceiling:
-            return frac, label
-    return STRESS_BANDS[-1][1], STRESS_BANDS[-1][2]
+    label = next(lbl for ceiling, lbl in LABELS if index <= ceiling)
+
+    if index <= STRESS_POINTS[0][0]:
+        return 0.0, label
+    if index >= STRESS_POINTS[-1][0]:
+        return STRESS_POINTS[-1][1], label
+
+    for (x0, y0), (x1, y1) in zip(STRESS_POINTS, STRESS_POINTS[1:]):
+        if x0 <= index <= x1:
+            t = (index - x0) / (x1 - x0)
+            return y0 + t * (y1 - y0), label
+    return STRESS_POINTS[-1][1], label
 
 
 def _fmt(sec: Optional[float]) -> Optional[str]:
@@ -83,12 +99,17 @@ def adjust(temp_c: float, dew_point_c: float, pace_low_sec: Optional[int],
         out["pace_high_sec"] = pace_high_sec + penalty
         out["original_band"] = f"{_fmt(pace_low_sec)}-{_fmt(pace_high_sec)}"
         out["adjusted_band"] = f"{_fmt(pace_low_sec + penalty)}-{_fmt(pace_high_sec + penalty)}"
+        humid = dew_point_c >= 20
         out["detail"] = (
-            f"{round(temp_c)}°C with a {round(dew_point_c)}°C dew point is {label} heat stress. "
-            f"Sweat evaporates poorly in air this saturated, so the same effort costs you about "
-            f"{penalty} s/km. Run {out['adjusted_band']}/km today — that is the SAME effort, "
-            f"not an easier one. Chasing your usual pace in this would turn an easy run into a "
-            f"hard one without you noticing."
+            f"{round(temp_c)}°C with a {round(dew_point_c)}°C dew point is {label} heat stress"
+            + (" — and it's the humidity doing it, not the sun. " if humid else ". ")
+            + ("Air this saturated can't absorb your sweat, so you lose your main way of cooling. "
+               "An overcast, rainy, 90%-humidity day is HARDER to run in than a dry sunny one. "
+               if humid else
+               "Heat blunts cooling, so the same effort costs more. ")
+            + f"Expect to give up about {penalty} s/km for it. Run {out['adjusted_band']}/km — "
+            f"that is the SAME effort as your normal target, not an easier run. Chase your usual "
+            f"pace in this and an easy run quietly becomes a hard one."
         )
     elif label == "ideal":
         out["detail"] = (

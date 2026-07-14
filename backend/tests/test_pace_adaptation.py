@@ -65,10 +65,32 @@ def test_no_easy_runs_produces_the_explaining_insight_not_a_silent_nochange():
     acts = [_act(2, 2.88, 396, hr=187), _act(4, 2.4, 378, hr=180)]
     out = pa.calibrate(SNAPSHOT, acts, NOW)
     assert out["has_changes"] is False
-    ins = next(i for i in out["insights"] if i["kind"] == "no_easy_runs")
+    ins = next(i for i in out["insights"] if i["kind"] == "no_recent_easy_runs")
     assert "160" in ins["detail"]          # names the ceiling
     assert "180" in ins["detail"]          # names what they actually ran at
     assert ins["evidence"]                 # and shows the runs
+    assert "never been measured" in ins["detail"]   # true: this runner has none
+
+
+def test_it_never_claims_never_when_the_runner_has_older_easy_runs():
+    # The user's real shape: nothing easy lately, but 12 easy-HR runs in history.
+    recent = [_act(2, 2.88, 396, hr=187), _act(4, 2.45, 395, hr=187)]
+    old = [_act(80 + i * 10, 3.0, 400, hr=150, aid=100 + i) for i in range(12)]
+    out = pa.calibrate(SNAPSHOT, recent + old, NOW)
+
+    ins = next(i for i in out["insights"] if i["kind"] == "no_recent_easy_runs")
+    assert "never been measured" not in ins["detail"]   # that would be a lie
+    assert ins["title"] == "Your easy pace hasn't been measured recently"
+    assert ins["historical"]["count"] == 12
+    assert ins["historical"]["avg_pace"] == "6:40"
+    assert "not incapable" in ins["detail"]
+    # Stale runs still must NOT move the current target.
+    assert out["has_changes"] is False
+
+
+def test_historical_easy_ignores_runs_inside_the_live_window():
+    fresh = [_act(3, 3.0, 400, hr=150)]
+    assert pa.historical_easy(fresh, CEILING, NOW)["count"] == 0
 
 
 def test_measured_improvement_moves_the_easy_band_faster():
