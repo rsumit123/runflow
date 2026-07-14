@@ -33,6 +33,16 @@ class Activity(Base):
     hr_zones = Column(JSON, nullable=True)            # [{zone, secs}, ...]
     running_dynamics = Column(JSON, nullable=True)    # {stride_length, gct, vertical_oscillation}
 
+    # Conditions this run was actually run in. Without these, a 14 C February run
+    # and a 31 C monsoon run get compared as if they were the same effort — which
+    # is the flaw in every pace trend this app (and Garmin, and Strava) draws.
+    temp_c = Column(Float, nullable=True)
+    dew_point_c = Column(Float, nullable=True)
+    heat_index = Column(Float, nullable=True)          # temp+dew in F, the coaching table's index
+    heat_penalty_sec = Column(Float, nullable=True)    # s/km the conditions cost
+    normalized_pace_sec = Column(Float, nullable=True) # pace as it would have been on a cool day
+    weather_checked = Column(Boolean, default=False)   # so we don't refetch known-missing days
+
     splits = relationship("Split", back_populates="activity", cascade="all, delete-orphan")
     streams = relationship("Stream", back_populates="activity", cascade="all, delete-orphan")
     best_efforts = relationship("BestEffort", back_populates="activity", cascade="all, delete-orphan")

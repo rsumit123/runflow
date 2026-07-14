@@ -496,7 +496,11 @@ async def _plan_activity_dicts(session: AsyncSession) -> list[dict[str, Any]]:
     return [
         {"id": a.id, "name": a.name, "distance": a.distance, "start_date": a.start_date,
          "average_speed": a.average_speed, "average_heartrate": a.average_heartrate,
-         "max_heartrate": a.max_heartrate}
+         "max_heartrate": a.max_heartrate,
+         # Heat-normalised pace — what every cross-season comparison should use.
+         "normalized_pace_sec": a.normalized_pace_sec,
+         "temp_c": a.temp_c, "dew_point_c": a.dew_point_c,
+         "heat_penalty_sec": a.heat_penalty_sec}
         for a in acts
     ]
 
@@ -2897,6 +2901,74 @@ async def _wellness(session: AsyncSession, day: str,
     row.fetched_at = datetime.utcnow()
     await session.commit()
     return assessment
+
+
+async def _backfill_weather(session: AsyncSession, force: bool = False) -> dict[str, Any]:
+    """Attach the conditions each run was actually run in, and a heat-normalised pace.
+
+    Fetched in one archive request per calendar year rather than one per run.
+    """
+    q = select(Activity).where(Activity.average_speed.isnot(None),
+                               Activity.start_date.isnot(None))
+    if not force:
+        q = q.where(Activity.weather_checked.is_(False) | Activity.weather_checked.is_(None))
+    acts = (await session.execute(q)).scalars().all()
+    if not acts:
+        return {"updated": 0, "skipped": 0}
+
+    loc = await _run_location(session)
+    if not loc:
+        return {"updated": 0, "skipped": len(acts), "error": "no GPS location on any run"}
+    lat, lon = loc
+
+    by_year: dict[int, list[Activity]] = {}
+    for a in acts:
+        by_year.setdefault(a.start_date.year, []).append(a)
+
+    updated = skipped = 0
+    for year, rows in sorted(by_year.items()):
+        lo = min(a.start_date for a in rows).date().isoformat()
+        hi = min(max(a.start_date for a in rows).date(),
+                 (datetime.utcnow() - timedelta(days=1)).date()).isoformat()
+        if lo > hi:
+            skipped += len(rows)
+            continue
+
+        hourly = await weather.archive_hourly(lat, lon, lo, hi)
+        offset_h = hourly.pop("_utc_offset_h", 0.0) if hourly else 0.0
+        if not hourly:
+            skipped += len(rows)
+            continue
+
+        for a in rows:
+            local = a.start_date + timedelta(hours=offset_h)
+            key = local.strftime("%Y-%m-%dT%H:00")
+            cond = hourly.get(key)
+            a.weather_checked = True
+            if not cond:
+                skipped += 1
+                continue
+            temp_c, dew_c = cond
+            pace = 1000.0 / a.average_speed
+            adj = heat.adjust(temp_c, dew_c, round(pace), round(pace))
+            a.temp_c = temp_c
+            a.dew_point_c = dew_c
+            a.heat_index = adj["stress_index"]
+            a.heat_penalty_sec = adj["penalty_sec"]
+            # The pace this effort would have produced on a neutral day. THIS is
+            # the number any cross-season comparison should use.
+            a.normalized_pace_sec = round(pace - adj["penalty_sec"], 1)
+            updated += 1
+        await session.commit()
+
+    return {"updated": updated, "skipped": skipped, "total": len(acts)}
+
+
+@app.post("/api/analysis/backfill-weather")
+async def backfill_weather(force: bool = False,
+                           session: AsyncSession = Depends(get_session)):
+    """Backfill historical conditions onto every run (idempotent)."""
+    return await _backfill_weather(session, force=force)
 
 
 @app.get("/api/sync/status")
