@@ -61,10 +61,38 @@ strava = StravaClient()
 import_progress: dict[str, dict[str, Any]] = {}
 
 
+# Everything downstream — calibration, adherence, readiness — is only as fresh as
+# the last import. Leaving that to a button meant a run could land on the watch and
+# never reach the plan.
+AUTO_SYNC_INTERVAL_SEC = 2 * 60 * 60
+last_auto_sync: dict[str, Any] = {"at": None, "imported": 0, "error": None}
+
+
+async def _auto_sync_loop() -> None:
+    while True:
+        try:
+            async with async_session() as session:
+                res = await import_garmin_sync(session)
+            # Today's recovery numbers keep settling through the morning, so refresh
+            # them on the same beat rather than pinning whatever we saw first.
+            async with async_session() as session:
+                await _wellness(session, datetime.utcnow().date().isoformat(), refresh=True)
+            last_auto_sync.update({"at": datetime.utcnow().isoformat(),
+                                   "imported": res.get("imported", 0), "error": None})
+            if res.get("imported"):
+                logger.info("Auto-sync imported %s new run(s)", res["imported"])
+        except Exception as exc:  # noqa: BLE001 — a failed sync must never kill the loop
+            logger.warning("Auto-sync failed: %s", exc)
+            last_auto_sync.update({"at": datetime.utcnow().isoformat(), "error": str(exc)[:200]})
+        await _asyncio.sleep(AUTO_SYNC_INTERVAL_SEC)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    task = _asyncio.create_task(_auto_sync_loop())
     yield
+    task.cancel()
     await strava.close()
 
 
@@ -2869,6 +2897,61 @@ async def _wellness(session: AsyncSession, day: str,
     row.fetched_at = datetime.utcnow()
     await session.commit()
     return assessment
+
+
+@app.get("/api/sync/status")
+async def sync_status():
+    """When the data behind the plan was last refreshed."""
+    return {**last_auto_sync, "interval_sec": AUTO_SYNC_INTERVAL_SEC}
+
+
+@app.get("/api/analysis/pace-hr")
+async def pace_hr_scatter(days: int = 365, session: AsyncSession = Depends(get_session)):
+    """Every run as a (pace, heart-rate) point, against the easy zone.
+
+    One picture of the thing three paragraphs were trying to say: whether the
+    easy runs are actually easy.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    acts = (await session.execute(
+        select(Activity).where(
+            Activity.start_date >= cutoff,
+            Activity.average_heartrate.isnot(None),
+            Activity.average_speed.isnot(None),
+            Activity.distance > 1000,
+        ).order_by(Activity.start_date)
+    )).scalars().all()
+
+    plan = await _active_plan(session)
+    snap = (plan.fitness_snapshot if plan else None) or {}
+    if not snap:
+        dicts = await _plan_activity_dicts(session)
+        snap = fmodel.build_fitness_model(dicts, datetime.utcnow())
+    ceiling = snap.get("easy_hr_ceiling")
+    easy_pace = snap.get("easy_pace_sec")
+
+    runs = []
+    for a in acts:
+        pace = 1000.0 / a.average_speed
+        runs.append({
+            "id": a.id,
+            "date": a.start_date.date().isoformat(),
+            "name": a.name,
+            "distance_km": round(a.distance / 1000.0, 2),
+            "pace_sec": round(pace),
+            "avg_hr": round(a.average_heartrate),
+            "in_easy_zone": bool(ceiling and a.average_heartrate <= ceiling),
+        })
+
+    in_zone = sum(1 for r in runs if r["in_easy_zone"])
+    return {
+        "runs": runs,
+        "easy_hr_ceiling": ceiling,
+        "easy_pace_sec": easy_pace,
+        "max_hr": snap.get("athlete_max_hr"),
+        "in_easy_zone": in_zone,
+        "total": len(runs),
+    }
 
 
 @app.get("/api/wellness/history")
