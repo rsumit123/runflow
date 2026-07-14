@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 LOOKBACK_DAYS = 42          # how far back we look for evidence
+HISTORICAL_MAX_DAYS = 365   # "have you done this lately" — not "ever"
 MIN_DIST_M = 1000           # ignore sub-1 km jogs — too noisy to read a pace from
 HR_TOLERANCE = 3            # a few bpm over the ceiling still counts as easy
 MIN_THRESHOLD_DIST_M = 1500 # a "hard" effort has to be a real sustained one
@@ -104,15 +105,22 @@ def measure_easy_pace(acts: list[dict[str, Any]], easy_hr_ceiling: int,
 
 def historical_easy(acts: list[dict[str, Any]], easy_hr_ceiling: int,
                     now: datetime) -> dict[str, Any]:
-    """Easy-HR runs of ANY age. Too stale to set a target, but they answer a
-    different and important question: has this runner ever done it?"""
+    """Easy-HR runs older than the live window but still recent enough to mean
+    something. Too stale to set a target; they answer a different question —
+    has this runner done it lately?
+
+    Capped at a year on purpose. Reaching further back finds a fitter athlete
+    from two seasons ago, and telling someone rebuilding that they "used to run
+    5:43/km easy" is neither useful nor kind.
+    """
+    floor = now - timedelta(days=HISTORICAL_MAX_DAYS)
     old = [a for a in acts
            if a.get("average_heartrate")
            and a["average_heartrate"] <= easy_hr_ceiling + HR_TOLERANCE
            and (a.get("distance") or 0) >= MIN_DIST_M
            and _pace_sec_per_km(a.get("average_speed"))
            and a.get("start_date")
-           and a["start_date"] < now - timedelta(days=LOOKBACK_DAYS)]
+           and floor <= a["start_date"] < now - timedelta(days=LOOKBACK_DAYS)]
     if not old:
         return {"count": 0, "avg_pace": None, "last_date": None, "evidence": []}
 
@@ -284,11 +292,11 @@ def calibrate(snapshot: dict[str, Any], acts: list[dict[str, Any]],
 
         if hist["count"]:
             detail += (
-                f" You are not incapable of it, though: you have {hist['count']} easy-HR runs in "
-                f"your history, averaging {hist['avg_pace']}/km, the most recent on "
-                f"{hist['last_date']}. They're older than the {LOOKBACK_DAYS}-day window, so they "
-                f"can't set your current target — but they show what you were doing before the "
-                f"heat and the training gap, and what you can get back to."
+                f" You are not incapable of it, though: in the past year you have {hist['count']} "
+                f"run(s) at an easy heart rate, averaging {hist['avg_pace']}/km, the most recent "
+                f"on {hist['last_date']}. They sit outside the {LOOKBACK_DAYS}-day window so they "
+                f"can't set your current target — but they show this is something you were doing "
+                f"before the training gap and the monsoon, not something you've never managed."
             )
         else:
             detail += (
