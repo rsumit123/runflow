@@ -682,9 +682,37 @@ async def plan_projections(session: AsyncSession = Depends(get_session)):
     return fproj.projections(dicts, datetime.utcnow())
 
 
-async def _abandon_active_plans(session: AsyncSession) -> None:
+async def _unschedule_plan(session: AsyncSession, plan: Plan) -> int:
+    """Pull a plan's workouts off the Garmin watch/calendar.
+
+    Abandoning a plan in the DB while its workouts stay on the watch leaves the
+    runner looking at two plans at once — the old one still telling them to run
+    on a day the new one calls a rest day.
+    """
+    wos = (await session.execute(
+        select(PlannedWorkout).where(
+            PlannedWorkout.plan_id == plan.id,
+            PlannedWorkout.garmin_workout_id.isnot(None),
+        )
+    )).scalars().all()
+    removed = 0
+    for w in wos:
+        try:
+            await garmin.remove_workout(w.garmin_workout_id)
+            removed += 1
+        except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not block retiring the plan
+            logger.warning("Could not remove Garmin workout %s: %s", w.garmin_workout_id, exc)
+        w.garmin_workout_id = None
+    return removed
+
+
+async def _abandon_active_plans(session: AsyncSession) -> int:
+    """Retire every active plan — in the DB AND on the watch."""
+    removed = 0
     for old in (await session.execute(select(Plan).where(Plan.status == "active"))).scalars().all():
+        removed += await _unschedule_plan(session, old)
         old.status = "abandoned"
+    return removed
 
 
 async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> dict[str, Any]:
@@ -730,9 +758,8 @@ async def create_plan(req: PlanCreateRequest, session: AsyncSession = Depends(ge
     model = fmodel.build_fitness_model(dicts, now)
     gen = pgen.generate_plan(model, req.weeks, req.target_time_sec, now)
 
-    # Only one active plan at a time.
-    for old in (await session.execute(select(Plan).where(Plan.status == "active"))).scalars().all():
-        old.status = "abandoned"
+    # Only one active plan at a time — and it must be the only one on the watch too.
+    await _abandon_active_plans(session)
 
     plan = Plan(
         goal_type="5k", goal_distance_m=5000.0, target_time_sec=req.target_time_sec,
@@ -768,22 +795,7 @@ async def abandon_plan(plan_id: int, session: AsyncSession = Depends(get_session
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    # Pull this plan's workouts off the Garmin watch so we don't strand them there.
-    wos = (await session.execute(
-        select(PlannedWorkout).where(
-            PlannedWorkout.plan_id == plan.id,
-            PlannedWorkout.garmin_workout_id.isnot(None),
-        )
-    )).scalars().all()
-    removed = 0
-    for w in wos:
-        try:
-            await garmin.remove_workout(w.garmin_workout_id)
-            removed += 1
-        except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not block abandoning
-            logger.warning("Could not remove Garmin workout %s: %s", w.garmin_workout_id, exc)
-        w.garmin_workout_id = None
-
+    removed = await _unschedule_plan(session, plan)
     plan.status = "abandoned"
     await session.commit()
     return {"status": "abandoned", "id": plan_id, "removed_from_watch": removed}
@@ -3323,6 +3335,31 @@ async def apply_plan_calibration(session: AsyncSession = Depends(get_session)):
     resp["calibration"] = {"workouts_updated": updated, "repushed_to_watch": repushed,
                            "changes": cal["changes"], "failed": failed}
     return resp
+
+
+@app.post("/api/plan/prune-watch")
+async def prune_watch(session: AsyncSession = Depends(get_session)):
+    """Remove any workout on the watch that belongs to a plan that is no longer active.
+
+    Repairs calendars stranded by the bug where creating a new plan abandoned the
+    old one in the DB but left its workouts scheduled on Garmin.
+    """
+    stale = (await session.execute(
+        select(PlannedWorkout).join(Plan, Plan.id == PlannedWorkout.plan_id)
+        .where(Plan.status != "active", PlannedWorkout.garmin_workout_id.isnot(None))
+    )).scalars().all()
+
+    removed, failed = 0, []
+    for w in stale:
+        try:
+            await garmin.remove_workout(w.garmin_workout_id)
+            removed += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Prune failed for garmin workout %s: %s", w.garmin_workout_id, exc)
+            failed.append(w.garmin_workout_id)
+        w.garmin_workout_id = None
+    await session.commit()
+    return {"removed": removed, "failed": len(failed), "candidates": len(stale)}
 
 
 @app.post("/api/plan/sync-to-watch")
