@@ -28,6 +28,10 @@ _MIGRATIONS = {
         "heat_penalty_sec": "FLOAT",
         "normalized_pace_sec": "FLOAT",
         "weather_checked": "BOOLEAN DEFAULT 0",
+        "aerobic_te": "FLOAT",
+        "anaerobic_te": "FLOAT",
+        "training_effect_label": "TEXT",
+        "training_load": "FLOAT",
     },
     "splits": {
         "average_cadence": "FLOAT",

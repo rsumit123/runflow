@@ -272,6 +272,33 @@ function PlanWorkoutDetail() {
         </div>
       )}
 
+      {/* Garmin's independent second opinion on the stimulus */}
+      {data.garmin_check && (() => {
+        const gc = data.garmin_check;
+        const TONE = { good: '#3ddc84', warn: '#f5a623', bad: '#ff4d4f', neutral: '#93a1b1' };
+        const tone = TONE[gc.garmin.tone] || '#93a1b1';
+        return (
+          <div style={{
+            backgroundColor: '#111820', borderRadius: '8px', padding: '14px 16px', marginBottom: '16px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px', color: tone,
+                backgroundColor: `${tone}1e`, padding: '3px 9px', borderRadius: '4px',
+                fontSize: '12px', fontWeight: 700,
+              }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: tone }} />
+                Garmin: {gc.garmin.name}
+              </span>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: gc.agree ? '#3ddc84' : '#f5a623' }}>
+                {gc.agree ? '✓ agrees with our read' : '⚠ differs from our read'}
+              </span>
+            </div>
+            <div style={{ fontSize: '13px', color: '#93a1b1', lineHeight: 1.5 }}>{gc.note}</div>
+          </div>
+        );
+      })()}
+
       {/* Planned — sprint */}
       {isSprint ? (
         <div style={cardStyle}>
