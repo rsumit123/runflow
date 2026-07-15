@@ -26,6 +26,45 @@ def _pace_sec(speed_mps: Optional[float]) -> Optional[int]:
     return round(1000.0 / speed_mps)
 
 
+# How far over the pace band still counts as "ran to pace" — a few s/km is noise.
+PACE_OVER_MARGIN = 10
+
+
+def _grade_easy(w: dict[str, Any], act: dict[str, Any]) -> Optional[str]:
+    """Grade how an easy day was executed.
+
+    The old grading looked ONLY at heart rate, so a run paced perfectly to target
+    but pushed over the HR ceiling by heat-driven cardiac drift got branded
+    "ran hard" — which reads as a telling-off for a run the athlete executed
+    exactly right. Separate the two things the runner actually controls:
+
+      - Did they run at the prescribed PACE? (fully in their hands)
+      - Did the effort land under the HR ceiling? (heat, hydration, drift — not)
+
+    Only running FASTER than the band is genuinely "ran hard". Nailing the pace
+    but drifting over on HR is its own, non-punitive state.
+    """
+    if w.get("day_type") not in EASY_TYPES:
+        return None
+    ceiling = w.get("hr_ceiling")
+    hr = act.get("average_heartrate")
+    if not ceiling or not hr:
+        return None
+
+    hr_ok = hr <= ceiling + RAN_HARD_MARGIN
+    if hr_ok:
+        return "on_target"
+
+    # HR was high. Was the pace actually too fast, or did they run to target and
+    # drift up anyway?
+    band_slow = w.get("pace_high_sec")   # slower bound of the band (larger sec/km)
+    pace = _pace_sec(act.get("average_speed"))
+    if band_slow and pace and pace >= band_slow - PACE_OVER_MARGIN:
+        # At or slower than the prescribed pace — they did their job; HR drifted.
+        return "hr_drift"
+    return "ran_hard"
+
+
 def match_and_grade(
     workouts: list[dict[str, Any]], activities: list[dict[str, Any]], now: datetime,
     plan_start: Optional[datetime] = None,
@@ -73,14 +112,11 @@ def match_and_grade(
                 "avg_hr": best.get("average_heartrate"),
                 "distance_m": best.get("distance"),
             }
-            compliance = None
-            if w.get("day_type") in EASY_TYPES and w.get("hr_ceiling") and best.get("average_heartrate"):
+            compliance = _grade_easy(w, best)
+            if compliance is not None:
                 easy_graded += 1
-                if best["average_heartrate"] > w["hr_ceiling"] + RAN_HARD_MARGIN:
-                    compliance = "ran_hard"
+                if compliance == "ran_hard":
                     easy_run_hard += 1
-                else:
-                    compliance = "on_target"
             e.update(status="done", actual=actual, compliance=compliance)
         elif is_past:
             missed += 1

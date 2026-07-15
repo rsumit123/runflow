@@ -32,6 +32,28 @@ const ZONE_COLORS = { easy: '#3ddc84', gray: '#f5a623', hard: '#ff4d4f', unknown
 const WARN_COLORS = { danger: '#ff4d4f', warn: '#f5a623', info: '#3b82f6' };
 const DAY_TYPE_COLORS = { easy: '#3ddc84', long: '#3b82f6', quality: '#ff4d4f', strides: '#f5a623', rest: '#5d6b7a' };
 
+// How an easy day was executed. 'hr_drift' is deliberately NOT red: the runner
+// hit the prescribed pace and the HR climbed from heat/drift, which they did
+// right, not wrong.
+const COMPLIANCE_BADGE = {
+  on_target: { label: '✓ easy', color: '#3ddc84' },
+  hr_drift: { label: 'paced right · HR drifted', color: '#f5a623' },
+  ran_hard: { label: 'ran hard', color: '#ff4d4f' },
+};
+
+function ComplianceBadge({ compliance }) {
+  const b = COMPLIANCE_BADGE[compliance];
+  if (!b) return null;
+  return (
+    <span style={{
+      fontSize: '10px', fontWeight: 700, color: b.color, backgroundColor: `${b.color}22`,
+      padding: '2px 7px', borderRadius: '4px',
+    }}>
+      {b.label}
+    </span>
+  );
+}
+
 // Sprint (100m) plan day types — colored label + display text.
 const SPRINT_DAY_TYPE = {
   accel: { color: '#ff5a1f', label: 'Accel' },
@@ -707,22 +729,7 @@ function PlanSection() {
                       Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
                       {actual.avg_hr != null ? ` · ${Math.round(actual.avg_hr)} bpm` : ''}
                     </span>
-                    {w.compliance === 'ran_hard' && (
-                      <span style={{
-                        fontSize: '10px', fontWeight: 700, color: '#ff4d4f', backgroundColor: '#ff4d4f22',
-                        padding: '2px 7px', borderRadius: '4px',
-                      }}>
-                        ran hard
-                      </span>
-                    )}
-                    {w.compliance === 'on_target' && (
-                      <span style={{
-                        fontSize: '10px', fontWeight: 700, color: '#3ddc84', backgroundColor: '#3ddc8422',
-                        padding: '2px 7px', borderRadius: '4px',
-                      }}>
-                        ✓ easy
-                      </span>
-                    )}
+                    <ComplianceBadge compliance={w.compliance} />
                   </div>
                 )}
               </>
@@ -1066,22 +1073,7 @@ function PlanSection() {
                         Ran: {actual.pace_sec != null ? `${formatPace(actual.pace_sec)}/km` : '—'}
                         {actual.avg_hr != null ? ` · ${Math.round(actual.avg_hr)} bpm` : ''}
                       </span>
-                      {w.compliance === 'ran_hard' && (
-                        <span style={{
-                          fontSize: '10px', fontWeight: 700, color: '#ff4d4f', backgroundColor: '#ff4d4f22',
-                          padding: '2px 7px', borderRadius: '4px',
-                        }}>
-                          ran hard
-                        </span>
-                      )}
-                      {w.compliance === 'on_target' && (
-                        <span style={{
-                          fontSize: '10px', fontWeight: 700, color: '#3ddc84', backgroundColor: '#3ddc8422',
-                          padding: '2px 7px', borderRadius: '4px',
-                        }}>
-                          ✓ easy
-                        </span>
-                      )}
+                      <ComplianceBadge compliance={w.compliance} />
                     </div>
                   )}
                   {!isRest && !isEditing && (

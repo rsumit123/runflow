@@ -78,3 +78,35 @@ def test_suggest_soften_quality_after_hard_easy():
     soft = [s for s in sugg if s["type"] == "soften_quality"]
     assert soft
     assert any(c["field"] == "day_type" and c["value"] == "easy" for c in soft[0]["changes"])
+
+
+# --- compliance distinguishes 'ran hard' from heat-driven HR drift -----------
+
+def test_paced_right_but_hr_high_is_hr_drift_not_ran_hard():
+    # Today's real run: 7:32/km (band 7:00-7:35), avg HR 173, ceiling 160.
+    wo = [_wo(1, 0, "easy", 2.5)]                       # band 420-455 (7:00-7:35)
+    act = [_act(100, 0, 3.0, 452, 173)]                # paced right, HR over
+    r = pa.match_and_grade(wo, act, NOW)
+    assert r["workouts"][0]["compliance"] == "hr_drift"
+
+
+def test_running_faster_than_the_band_with_high_hr_is_ran_hard():
+    wo = [_wo(1, 0, "easy", 2.5)]
+    act = [_act(100, 0, 3.0, 400, 173)]                # 6:40/km — faster than 7:35 band, HR high
+    r = pa.match_and_grade(wo, act, NOW)
+    assert r["workouts"][0]["compliance"] == "ran_hard"
+
+
+def test_hr_under_ceiling_is_always_on_target():
+    wo = [_wo(1, 0, "easy", 2.5)]
+    act = [_act(100, 0, 3.0, 452, 150)]
+    r = pa.match_and_grade(wo, act, NOW)
+    assert r["workouts"][0]["compliance"] == "on_target"
+
+
+def test_hr_drift_does_not_count_against_the_ran_hard_tally():
+    wo = [_wo(1, 0, "easy", 2.5)]
+    act = [_act(100, 0, 3.0, 452, 173)]
+    r = pa.match_and_grade(wo, act, NOW)
+    # It's still graded (an easy day we assessed) but it is NOT a ran-hard.
+    assert r.get("easy_run_hard", 0) == 0
