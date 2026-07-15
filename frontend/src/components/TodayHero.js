@@ -7,6 +7,13 @@ const RING_TONE = {
   high: color.good, moderate: color.good, low: color.warn, very_low: color.bad,
 };
 
+const COMPLIANCE = {
+  on_target: { label: '✓ Ran easy', color: color.good },
+  hr_drift: { label: 'Paced right · HR drifted', color: color.warn },
+  ran_hard: { label: 'Ran hard', color: color.bad },
+  done: { label: '✓ Completed', color: color.good },
+};
+
 /** Readiness as a ring. A number you can read without reading. */
 function ReadinessRing({ score, level, size = 56 }) {
   const stroke = 4;
@@ -57,6 +64,72 @@ export default function TodayHero({ workout, guidance, onOpen, onAccept, applyin
         <p style={{ ...font.small, color: color.textSecondary, margin: `${space(2)} 0 0` }}>
           Rest is when the training you already did turns into fitness.
         </p>
+      </section>
+    );
+  }
+
+  // Already run today? Then the hero's job is to confirm it's done and how it
+  // went — not to keep prescribing a session the runner has already completed.
+  if (workout.status === 'done' && workout.actual) {
+    const a = workout.actual;
+    const badge = COMPLIANCE[workout.compliance] || COMPLIANCE.done;
+    return (
+      <section style={{
+        backgroundColor: color.surface, borderRadius: radius.lg, padding: space(7),
+        marginBottom: space(6), borderLeft: `3px solid ${color.good}`,
+      }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: space(4) }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...font.label, color: color.good }}>✓ Done today · Week {workout.week_number}</div>
+            <h1
+              onClick={onOpen}
+              style={{ ...font.h1, color: color.text, margin: `${space(3)} 0 0`, cursor: onOpen ? 'pointer' : 'default' }}
+            >
+              {workout.title}
+            </h1>
+          </div>
+          <span style={{
+            ...font.small, fontWeight: 700, color: badge.color, backgroundColor: `${badge.color}22`,
+            padding: `${space(1)} ${space(3)}`, borderRadius: radius.sm, whiteSpace: 'nowrap',
+          }}
+          >
+            {badge.label}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: space(6), flexWrap: 'wrap', marginTop: space(5) }}>
+          {a.distance_m != null && (
+            <div>
+              <div style={{ ...font.label, color: color.textMuted }}>Distance</div>
+              <div style={{ ...font.h2, ...font.numeric, color: color.text, marginTop: space(1) }}>
+                {(a.distance_m / 1000).toFixed(2)} km
+              </div>
+            </div>
+          )}
+          {a.pace_sec != null && (
+            <div>
+              <div style={{ ...font.label, color: color.textMuted }}>Pace</div>
+              <div style={{ ...font.h2, ...font.numeric, color: color.text, marginTop: space(1) }}>
+                {fmtPace(a.pace_sec)}<span style={{ ...font.small }}> /km</span>
+              </div>
+            </div>
+          )}
+          {a.avg_hr != null && (
+            <div>
+              <div style={{ ...font.label, color: color.textMuted }}>Avg HR</div>
+              <div style={{ ...font.h2, ...font.numeric, color: color.text, marginTop: space(1) }}>
+                {Math.round(a.avg_hr)}<span style={{ ...font.small }}> bpm</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {onOpen && (
+          <button onClick={onOpen} style={{ ...button.quiet, color: color.accent, marginTop: space(5) }}>
+            See how it went →
+          </button>
+        )}
       </section>
     );
   }

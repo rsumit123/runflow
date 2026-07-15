@@ -1004,22 +1004,32 @@ function PlanSection() {
             const isEditing = editingId === w.id;
 
             // Left status marker
+            const isDone = status === 'done';
+            const isMissed = status === 'missed';
             let marker = null;
-            if (status === 'done') marker = { ch: '●', color: '#3ddc84' };
-            else if (status === 'missed') marker = { ch: '✗', color: '#ff4d4f' };
+            if (isDone) marker = { ch: '✓', color: '#3ddc84' };
+            else if (isMissed) marker = { ch: '✗', color: '#ff4d4f' };
             else if (status === 'upcoming') marker = { ch: '○', color: '#5d6b7a' };
+
+            // A completed card should read as completed at a glance — not lean on a
+            // single tiny dot against an otherwise-identical upcoming card.
+            const statusChip = isDone
+              ? { label: '✓ Done', color: '#3ddc84' }
+              : isMissed ? { label: 'Missed', color: '#ff4d4f' } : null;
 
             return (
               <div
                 key={w.id}
                 onClick={() => navigate('/plan/workout/' + w.id)}
                 style={{
-                  display: 'flex', gap: '10px', backgroundColor: '#111820', borderRadius: '8px',
-                  padding: '12px', borderLeft: `3px solid ${dc}`, cursor: 'pointer',
+                  display: 'flex', gap: '10px', borderRadius: '8px',
+                  backgroundColor: isDone ? '#12211a' : '#111820',
+                  opacity: isMissed ? 0.65 : 1,
+                  padding: '12px', borderLeft: `3px solid ${isDone ? '#3ddc84' : dc}`, cursor: 'pointer',
                 }}
               >
                 <div style={{
-                  width: '18px', flex: '0 0 18px', textAlign: 'center', fontSize: '15px',
+                  width: '18px', flex: '0 0 18px', textAlign: 'center', fontSize: '15px', fontWeight: 700,
                   color: marker ? marker.color : 'transparent', lineHeight: '20px',
                 }}>
                   {marker ? marker.ch : ''}
@@ -1028,7 +1038,16 @@ function PlanSection() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '11px', color: '#93a1b1' }}>{formatDate(w.date)}</span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {!isSprint && w.garmin_workout_id != null && (
+                      {statusChip && (
+                        <span style={{
+                          color: statusChip.color, backgroundColor: `${statusChip.color}22`,
+                          padding: '2px 7px', borderRadius: '4px', fontSize: '10px', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '0.5px',
+                        }}>
+                          {statusChip.label}
+                        </span>
+                      )}
+                      {!isSprint && !isDone && w.garmin_workout_id != null && (
                         <span style={{ fontSize: '10px', fontWeight: 600, color: '#3ddc84' }}>
                           ⌚ on watch
                         </span>
@@ -1055,7 +1074,7 @@ function PlanSection() {
                       {w.hr_ceiling != null && <span>≤{w.hr_ceiling} bpm</span>}
                     </div>
                   )}
-                  {w.description && (
+                  {w.description && !isDone && (
                     <div style={{ fontSize: '11px', color: '#777', lineHeight: 1.4 }}>{w.description}</div>
                   )}
                   {isSprint && status === 'done' && actual && (
