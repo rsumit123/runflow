@@ -51,6 +51,10 @@ def summary_to_activity_fields(summary: dict[str, Any]) -> dict[str, Any]:
         "max_heartrate": summary.get("maxHR"),
         "average_cadence": summary.get("averageRunningCadenceInStepsPerMinute"),
         "source": "garmin",
+        "aerobic_te": summary.get("aerobicTrainingEffect"),
+        "anaerobic_te": summary.get("anaerobicTrainingEffect"),
+        "training_effect_label": summary.get("trainingEffectLabel"),
+        "training_load": summary.get("activityTrainingLoad"),
     }
 
 

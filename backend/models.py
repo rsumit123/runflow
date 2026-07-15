@@ -43,6 +43,14 @@ class Activity(Base):
     normalized_pace_sec = Column(Float, nullable=True) # pace as it would have been on a cool day
     weather_checked = Column(Boolean, default=False)   # so we don't refetch known-missing days
 
+    # Garmin's own Firstbeat verdict on the training stimulus — personalised to
+    # the athlete's physiology, so a useful independent cross-check on whether an
+    # "easy" run was actually easy. (Garmin/wearable-sourced runs only.)
+    aerobic_te = Column(Float, nullable=True)          # aerobic Training Effect 0–5
+    anaerobic_te = Column(Float, nullable=True)        # anaerobic Training Effect 0–5
+    training_effect_label = Column(String, nullable=True)  # RECOVERY|BASE|TEMPO|THRESHOLD|VO2MAX|...
+    training_load = Column(Float, nullable=True)
+
     splits = relationship("Split", back_populates="activity", cascade="all, delete-orphan")
     streams = relationship("Stream", back_populates="activity", cascade="all, delete-orphan")
     best_efforts = relationship("BestEffort", back_populates="activity", cascade="all, delete-orphan")

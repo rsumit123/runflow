@@ -23,6 +23,29 @@ function levelFor(index) {
   return 'extreme';
 }
 
+const BENEFIT_TONE = { good: color.good, warn: color.warn, bad: color.bad, neutral: color.textMuted };
+
+/** Garmin's own verdict on the training stimulus — a personalised second opinion. */
+export function PrimaryBenefit({ activity }) {
+  const pb = activity && activity.primary_benefit;
+  if (!pb) return null;
+  const tone = BENEFIT_TONE[pb.tone] || color.textMuted;
+  const te = activity.aerobic_te;
+  return (
+    <span
+      title="Garmin's Primary Benefit — the main training stimulus this run produced, from its Firstbeat engine"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: space(2),
+        ...font.small, fontWeight: 600, color: tone, backgroundColor: `${tone}1e`,
+        padding: `${space(1)} ${space(3)}`, borderRadius: radius.sm, whiteSpace: 'nowrap',
+      }}
+    >
+      <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: tone }} />
+      Garmin: {pb.name}{te != null ? ` · TE ${te.toFixed(1)}` : ''}
+    </span>
+  );
+}
+
 /**
  * What the weather cost this run.
  *
@@ -50,7 +73,10 @@ export default function Conditions({ activity }) {
       marginBottom: space(6),
     }}
     >
-      <div style={{ ...font.label, color: color.textMuted }}>Conditions</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: space(3) }}>
+        <div style={{ ...font.label, color: color.textMuted }}>Conditions</div>
+        <PrimaryBenefit activity={activity} />
+      </div>
 
       <div style={{
         display: 'flex', gap: space(5), flexWrap: 'wrap', alignItems: 'baseline',

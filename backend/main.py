@@ -43,6 +43,7 @@ import pace_adaptation as padapt
 import readiness as rdns
 import heat
 import weather
+import training_effect as teff
 import coach_llm
 
 garmin = GarminClient()
@@ -162,6 +163,11 @@ def _activity_to_dict(act: Activity) -> dict[str, Any]:
         "heat_index": act.heat_index,
         "heat_penalty_sec": act.heat_penalty_sec,
         "normalized_pace_sec": act.normalized_pace_sec,
+        # Garmin's own verdict on the training stimulus (wearable runs only).
+        "aerobic_te": act.aerobic_te,
+        "anaerobic_te": act.anaerobic_te,
+        "training_effect_label": act.training_effect_label,
+        "primary_benefit": teff.classify(act.training_effect_label),
         "average_heartrate": act.average_heartrate,
         "max_heartrate": act.max_heartrate,
         "average_cadence": act.average_cadence,
@@ -945,6 +951,7 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
     ew = next((x for x in graded["workouts"] if x["id"] == workout_id), None)
 
     actual = None
+    act = None
     if ew and ew.get("actual"):
         aid = ew["actual"]["activity_id"]
         act = await session.get(Activity, aid)
@@ -964,7 +971,14 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
             "hr_zones": act.hr_zones if act else None,
             "heartrate": _downsample(streams.get("heartrate")),
             "phases": wcd.detect_warmup_cooldown(streams.get("distance"), streams.get("time")),
+            "primary_benefit": teff.classify(act.training_effect_label) if act else None,
+            "aerobic_te": act.aerobic_te if act else None,
         }
+
+    garmin_check = teff.cross_check(
+        w.day_type, ew.get("compliance") if ew else None,
+        act.training_effect_label if act else None,
+    ) if act else None
 
     return {
         "workout": {
@@ -982,6 +996,7 @@ async def plan_workout_detail(workout_id: int, session: AsyncSession = Depends(g
                  if plan else None),
         "actual": actual,
         "verdict": _workout_verdict(w, ew, actual),
+        "garmin_check": garmin_check,
     }
 
 
@@ -3063,6 +3078,53 @@ async def _backfill_weather(session: AsyncSession, force: bool = False) -> dict[
         await session.commit()
 
     return {"updated": updated, "skipped": skipped, "total": len(acts)}
+
+
+@app.post("/api/analysis/backfill-training-effect")
+async def backfill_training_effect(session: AsyncSession = Depends(get_session)):
+    """Pull Garmin's Training Effect / Primary Benefit onto stored wearable runs.
+
+    The fields ride along in the activity list, so we page through Garmin once and
+    match by id rather than fetching each run's detail.
+    """
+    have = {a.id for a in (await session.execute(
+        select(Activity).where(Activity.source == "garmin")
+    )).scalars().all()}
+    if not have:
+        return {"updated": 0, "reason": "no garmin activities"}
+
+    updated, start, page = 0, 0, 50
+    while True:
+        try:
+            acts = await garmin.get_recent_running(limit=page, start=start)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("TE backfill fetch failed at %d: %s", start, exc)
+            break
+        if not acts:
+            break
+        touched_this_page = False
+        for summary in acts:
+            aid = summary.get("activityId")
+            if aid not in have:
+                continue
+            row = await session.get(Activity, aid)
+            if row is None:
+                continue
+            label = summary.get("trainingEffectLabel")
+            if label and row.training_effect_label != label:
+                touched_this_page = True
+            row.aerobic_te = summary.get("aerobicTrainingEffect")
+            row.anaerobic_te = summary.get("anaerobicTrainingEffect")
+            row.training_effect_label = label
+            row.training_load = summary.get("activityTrainingLoad")
+            if label:
+                updated += 1
+        await session.commit()
+        start += page
+        if not touched_this_page and start > 100:  # past the runs that predate TE
+            break
+        await _asyncio.sleep(0.5)
+    return {"updated": updated}
 
 
 @app.post("/api/analysis/backfill-weather")
