@@ -833,8 +833,16 @@ def _workout_verdict(w: PlannedWorkout, ew: Optional[dict[str, Any]],
     if comp == "ran_hard" and avg and ceil:
         over = int(round(avg - ceil))
         return (f"You ran this easy day at {int(round(avg))} bpm — about {over} over the "
-                f"{ceil} bpm ceiling. Easy days are supposed to feel genuinely easy; that's what "
-                "builds the aerobic base you're chasing. Slow right down next time and let the HR settle.")
+                f"{ceil} bpm ceiling, and faster than the prescribed pace. Easy days are supposed "
+                "to feel genuinely easy; that's what builds the aerobic base you're chasing. "
+                "Slow right down next time and let the HR settle.")
+    if comp == "hr_drift" and avg and ceil:
+        over = int(round(avg - ceil))
+        return (f"You paced this exactly right — the part that's in your hands. Your HR still "
+                f"averaged {int(round(avg))} bpm, {over} over the {ceil} ceiling, but that's "
+                "cardiac drift from the heat, not you running too hard: it climbs through the run "
+                "even at a steady pace. Next time, drop to a walk for 20–30 s each time it crosses "
+                "the ceiling — that caps the drift and keeps the run genuinely easy.")
     base = None
     if comp == "on_target" and avg and ceil:
         base = (f"Nicely done — you held {int(round(avg))} bpm, under the {ceil} bpm ceiling. "

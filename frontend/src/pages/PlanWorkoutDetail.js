@@ -210,8 +210,10 @@ function PlanWorkoutDetail() {
   const km = w.target_distance_m != null ? +(w.target_distance_m / 1000).toFixed(1) : null;
   const hasPace = w.pace_low_sec != null && w.pace_high_sec != null;
 
-  // Verdict border color by compliance
-  const verdictColor = compliance === 'ran_hard' ? '#f5a623'
+  // Verdict border color by compliance. hr_drift is amber (did the pace right,
+  // HR climbed) — distinct from ran_hard (actually ran too fast).
+  const verdictColor = compliance === 'ran_hard' ? '#ff4d4f'
+    : compliance === 'hr_drift' ? '#f5a623'
     : compliance === 'on_target' ? '#3ddc84'
     : '#ff5a1f';
 
@@ -490,6 +492,11 @@ function PlanWorkoutDetail() {
             {compliance === 'ran_hard' && (
               <span style={{ fontSize: '11px', fontWeight: 700, color: '#ff4d4f', backgroundColor: '#ff4d4f22', padding: '3px 9px', borderRadius: '4px' }}>
                 ran hard
+              </span>
+            )}
+            {compliance === 'hr_drift' && (
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#f5a623', backgroundColor: '#f5a62322', padding: '3px 9px', borderRadius: '4px' }}>
+                paced right · HR drifted
               </span>
             )}
             {compliance === 'on_target' && (
