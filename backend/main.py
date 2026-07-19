@@ -506,6 +506,10 @@ class PlanCreateRequest(BaseModel):
     # Weekday offsets from Monday (0=Mon … 6=Sun) for the 3 weekly sessions.
     # Sprint only; kept in chronological order so the generator's spacing holds.
     training_days: Optional[list[int]] = None
+    # ISO date to anchor week 1 on. Defaults to today — but building mid-week
+    # back-dates week 1 to its Monday and strands the early sessions in the past,
+    # so callers can pass the upcoming Monday for a clean start.
+    start_date: Optional[str] = None
 
 
 async def _plan_activity_dicts(session: AsyncSession) -> list[dict[str, Any]]:
@@ -726,6 +730,12 @@ async def _abandon_active_plans(session: AsyncSession) -> int:
 
 async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> dict[str, Any]:
     now = datetime.utcnow()
+    anchor = now
+    if req.start_date:
+        try:
+            anchor = datetime.fromisoformat(req.start_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="start_date must be ISO (YYYY-MM-DD)")
     profile = await _sprint_profile(session, now)
     current = profile.get("best_100m_sec") or 20.0
     target = req.target_100m_sec
@@ -734,13 +744,13 @@ async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> 
     # Chronological weekday order keeps the generator's built-in recovery spacing
     # between hard sessions intact.
     days = tuple(sorted(req.training_days)[:3]) if req.training_days and len(req.training_days) >= 3 else (0, 2, 5)
-    gen = spgen.generate_sprint_plan(profile, req.weeks, target, now, days=days)
+    gen = spgen.generate_sprint_plan(profile, req.weeks, target, anchor, days=days)
 
     await _abandon_active_plans(session)
     plan = Plan(
         goal_type="sprint_100m", goal_distance_m=100.0,
         target_time_sec=round(target), sprint_target_sec=target,
-        start_date=now, goal_date=gen["goal_date"], weeks=req.weeks, status="active",
+        start_date=anchor, goal_date=gen["goal_date"], weeks=req.weeks, status="active",
         created_at=now, fitness_snapshot=profile,
     )
     session.add(plan)
