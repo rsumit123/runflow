@@ -1036,11 +1036,16 @@ async def move_workout(workout_id: int, req: WorkoutMoveRequest,
                 break
 
     w.date = new_date
-    # regroup into the right plan week
+    # Regroup into the right plan week. Compute on calendar DATES, not datetimes:
+    # start_date carries a creation time (e.g. 11:53), so subtracting a midnight
+    # target left a fractional day that .days truncated down — every moved workout
+    # landed one week too low.
     if plan and plan.start_date:
-        w0_mon = plan.start_date - timedelta(days=plan.start_date.weekday())
-        nd_mon = new_date - timedelta(days=new_date.weekday())
-        wk = int((nd_mon - w0_mon).days / 7) + 1
+        start_d = plan.start_date.date()
+        w0_mon = start_d - timedelta(days=start_d.weekday())
+        nd = new_date.date()
+        nd_mon = nd - timedelta(days=nd.weekday())
+        wk = (nd_mon - w0_mon).days // 7 + 1
         w.week_number = max(1, min(plan.weeks, wk))
 
     # Keep Garmin in step with the move.

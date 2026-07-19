@@ -110,3 +110,25 @@ def test_hr_drift_does_not_count_against_the_ran_hard_tally():
     r = pa.match_and_grade(wo, act, NOW)
     # It's still graded (an easy day we assessed) but it is NOT a ran-hard.
     assert r.get("easy_run_hard", 0) == 0
+
+
+# --- week-number recompute must be date-based, not datetime-based ------------
+
+def test_week_number_math_ignores_the_creation_time_of_day():
+    # Reproduces the move bug: a plan created at 11:53 gave moved workouts a week
+    # one too low, because start_date's time made the day-diff truncate down.
+    from datetime import datetime as _dt, timedelta as _td
+
+    start = _dt(2026, 7, 14, 11, 53, 42)          # a Tuesday, mid-morning
+    start_d = start.date()
+    w0_mon = start_d - _td(days=start_d.weekday())
+
+    def week_of(target_date):
+        nd_mon = target_date - _td(days=target_date.weekday())
+        return (nd_mon - w0_mon).days // 7 + 1
+
+    from datetime import date as _date
+    assert week_of(_date(2026, 7, 22)) == 2       # Wed of week 2 (was wrongly 1)
+    assert week_of(_date(2026, 7, 26)) == 2       # Sun, last day of week 2
+    assert week_of(_date(2026, 8, 2)) == 3
+    assert week_of(_date(2026, 7, 15)) == 1
