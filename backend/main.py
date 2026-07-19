@@ -503,6 +503,9 @@ class PlanCreateRequest(BaseModel):
     goal_type: str = "5k"                       # "5k" | "sprint_100m"
     target_time_sec: Optional[int] = None       # 5K target (whole sec)
     target_100m_sec: Optional[float] = None      # sprint target (sub-second); None -> horizon projection
+    # Weekday offsets from Monday (0=Mon … 6=Sun) for the 3 weekly sessions.
+    # Sprint only; kept in chronological order so the generator's spacing holds.
+    training_days: Optional[list[int]] = None
 
 
 async def _plan_activity_dicts(session: AsyncSession) -> list[dict[str, Any]]:
@@ -728,7 +731,10 @@ async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> 
     target = req.target_100m_sec
     if target is None:
         target = sproj.sprint_projections(current, now, horizons=(req.weeks,))["horizons"][0]["target_100m_sec"]
-    gen = spgen.generate_sprint_plan(profile, req.weeks, target, now)
+    # Chronological weekday order keeps the generator's built-in recovery spacing
+    # between hard sessions intact.
+    days = tuple(sorted(req.training_days)[:3]) if req.training_days and len(req.training_days) >= 3 else (0, 2, 5)
+    gen = spgen.generate_sprint_plan(profile, req.weeks, target, now, days=days)
 
     await _abandon_active_plans(session)
     plan = Plan(
