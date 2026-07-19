@@ -3499,6 +3499,29 @@ async def push_workout_to_garmin(workout_id: int,
             "date": w.date.date().isoformat(), "title": w.title}
 
 
+@app.delete("/api/plan/workout/{workout_id}")
+async def delete_planned_workout(workout_id: int,
+                                 session: AsyncSession = Depends(get_session)):
+    """Drop a session from the plan — off the watch and out of the plan.
+
+    Used when reshaping the week (e.g. compressing to fewer training days). Past
+    workouts are history and can't be deleted this way.
+    """
+    w = await session.get(PlannedWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    if w.date and w.date.date() < datetime.utcnow().date():
+        raise HTTPException(status_code=400, detail="Can't delete a past workout.")
+    if w.garmin_workout_id:
+        try:
+            await garmin.remove_workout(w.garmin_workout_id)
+        except Exception as exc:  # noqa: BLE001 — a Garmin hiccup shouldn't block the delete
+            logger.warning("Garmin remove failed while deleting workout %s: %s", workout_id, exc)
+    await session.delete(w)
+    await session.commit()
+    return {"deleted": workout_id}
+
+
 @app.delete("/api/plan/workout/{workout_id}/push")
 async def remove_workout_from_garmin(workout_id: int,
                                      session: AsyncSession = Depends(get_session)):
