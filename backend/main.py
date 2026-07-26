@@ -678,6 +678,45 @@ async def sprint_baseline_endpoint(session: AsyncSession = Depends(get_session))
     return await _sprint_profile(session, datetime.utcnow())
 
 
+class SprintBaselineRequest(BaseModel):
+    time_sec: float
+    note: Optional[str] = None
+
+
+@app.post("/api/plan/sprint/baseline")
+async def set_sprint_baseline(req: SprintBaselineRequest,
+                              session: AsyncSession = Depends(get_session)):
+    """Manually set the sprint baseline from a hand-timed test and re-aim the goal.
+
+    GPS can't measure a 100m sprint, so the trustworthy number is a stopwatch/lap
+    time over a fixed stretch. This records it and recomputes the target from the
+    weeks actually remaining to race day.
+    """
+    plan = await _active_plan(session)
+    if plan is None or plan.goal_type != "sprint_100m":
+        raise HTTPException(status_code=400, detail="No active sprint plan to update.")
+    if not (8.0 <= req.time_sec <= 40.0):
+        raise HTTPException(status_code=400, detail="time_sec looks off (expected 8–40s).")
+
+    now = datetime.utcnow()
+    weeks_left = max(1, round((plan.goal_date.date() - now.date()).days / 7)) if plan.goal_date else plan.weeks
+    target = sproj.sprint_projections(req.time_sec, now, horizons=(weeks_left,))["horizons"][0]["target_100m_sec"]
+
+    snap = dict(plan.fitness_snapshot or {})
+    snap["best_100m_sec"] = req.time_sec
+    snap["baseline_source"] = "hand_timed_test"
+    snap["baseline_date"] = now.date().isoformat()
+    if req.note:
+        snap["baseline_note"] = req.note
+    plan.fitness_snapshot = snap
+    plan.sprint_target_sec = target
+    plan.target_time_sec = round(target)
+    await session.commit()
+    resp = await _plan_response(session, plan)
+    resp["baseline"] = {"time_sec": req.time_sec, "target_sec": target, "weeks_left": weeks_left}
+    return resp
+
+
 @app.get("/api/plan/sprint/projections")
 async def sprint_projections_endpoint(session: AsyncSession = Depends(get_session)):
     """Sprint profile + realistic 100m targets at fixed horizons."""
