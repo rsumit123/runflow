@@ -36,6 +36,55 @@ def _athlete_max_hr(acts: list[dict[str, Any]]) -> int:
     return int(max(maxes)) if maxes else DEFAULT_MAX_HR
 
 
+# Garmin restates its stored zone boundaries every time it revises its max-HR
+# estimate, so "Z5" means 171 bpm on an early-July run and 186 bpm on an August
+# one. Recomputing every run against a single observed max is what makes
+# time-in-zone comparable across a training block.
+ZONE_FRACS = (0.50, 0.60, 0.70, 0.80, 0.90)  # zone floors as a fraction of max HR
+
+
+def zone_boundaries(max_hr: int) -> list[int]:
+    """Lower bpm bound of zones 1-5 for this athlete's max HR."""
+    return [round(frac * max_hr) for frac in ZONE_FRACS]
+
+
+def time_in_zones(
+    hr_stream: Optional[list[Optional[float]]],
+    time_stream: Optional[list[Optional[int]]],
+    boundaries: list[int],
+) -> Optional[list[dict[str, Any]]]:
+    """Seconds spent in each zone, from the raw HR stream.
+
+    Each sample holds until the next one, so irregular sampling is counted as
+    elapsed time rather than as one tick per reading. Returns None when the
+    streams can't support the computation — callers fall back to the stored payload.
+    """
+    if not hr_stream or not time_stream or len(hr_stream) != len(time_stream):
+        return None
+
+    secs = {z: 0.0 for z in range(1, len(boundaries) + 1)}
+    for i, (hr, t) in enumerate(zip(hr_stream, time_stream)):
+        if hr is None or t is None:
+            continue
+        if i + 1 < len(time_stream) and time_stream[i + 1] is not None:
+            held = float(time_stream[i + 1] - t)
+        else:
+            held = 1.0  # last sample: assume one more second at this HR
+        if held <= 0:
+            continue
+        zone = None
+        for z, low in enumerate(boundaries, start=1):
+            if hr >= low:
+                zone = z
+        if zone is not None:
+            secs[zone] += held
+
+    return [
+        {"zone": z, "secs": round(secs[z], 3), "low_bpm": boundaries[z - 1]}
+        for z in sorted(secs)
+    ]
+
+
 def classify_run(
     avg_hr: Optional[float],
     avg_speed: Optional[float],

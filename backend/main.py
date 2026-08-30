@@ -233,6 +233,19 @@ async def _upsert_activity_summary(session: AsyncSession, data: dict[str, Any]) 
     return act
 
 
+async def _observed_max_hr(session: AsyncSession, candidate: float | None = None) -> int:
+    """The athlete's highest recorded max HR, including the run being imported."""
+    stored = (await session.execute(select(func.max(Activity.max_heartrate)))).scalar()
+    seen = [v for v in (stored, candidate) if v]
+    return int(max(seen)) if seen else fmodel.DEFAULT_MAX_HR
+
+
+def _zones_on_athlete_boundaries(streams: dict, max_hr: int):
+    return fmodel.time_in_zones(
+        streams.get("heartrate"), streams.get("time"), fmodel.zone_boundaries(max_hr)
+    )
+
+
 async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> None:
     """Fetch detail (splits) + streams for a single activity and persist."""
     # Detail (splits)
@@ -339,7 +352,13 @@ async def _persist_garmin_activity(session, summary, splits_payload, details, zo
 
     if streams.get("latlng"):
         act.map_summary_polyline = encode_polyline(streams["latlng"])
-    act.hr_zones = gt.hr_zones(zones)
+    # Garmin's own zone payload is filed against whatever max HR it believed at
+    # the time, and that estimate drifts — so recompute against the athlete's
+    # observed max to keep time-in-zone comparable run to run. Garmin's payload
+    # stays the fallback for runs whose HR stream didn't come through.
+    act.hr_zones = _zones_on_athlete_boundaries(
+        streams, await _observed_max_hr(session, act.max_heartrate)
+    ) or gt.hr_zones(zones)
     act.running_dynamics = gt.running_dynamics_summary(streams)
     act.has_detailed_data = True
 
@@ -3185,6 +3204,40 @@ async def backfill_training_effect(session: AsyncSession = Depends(get_session))
             break
         await _asyncio.sleep(0.5)
     return {"updated": updated}
+
+
+@app.post("/api/analysis/backfill-hr-zones")
+async def backfill_hr_zones(session: AsyncSession = Depends(get_session)):
+    """Restate every run's time-in-zone against one set of boundaries.
+
+    Garmin stores the boundaries it believed at import time, and it revises its
+    max-HR estimate as the athlete produces new maxima — so "Z5" means 171 bpm on
+    a run imported in early July and 186 bpm on one imported in August. Comparing
+    time-in-zone across that drift is meaningless, so we recompute from the raw HR
+    stream against the athlete's observed max. Runs without an HR stream keep
+    Garmin's payload. Idempotent, and safe to re-run when a new max appears.
+    """
+    acts = (await session.execute(select(Activity))).scalars().all()
+    max_hr = fmodel._athlete_max_hr([
+        {"max_heartrate": a.max_heartrate} for a in acts
+    ])
+    boundaries = fmodel.zone_boundaries(max_hr)
+
+    updated = 0
+    for act in acts:
+        streams = {s.stream_type: s.data for s in (await session.execute(
+            select(Stream).where(Stream.activity_id == act.id)
+        )).scalars().all()}
+        zones = fmodel.time_in_zones(
+            streams.get("heartrate"), streams.get("time"), boundaries
+        )
+        if zones is None:
+            continue
+        if act.hr_zones != zones:
+            act.hr_zones = zones
+            updated += 1
+    await session.commit()
+    return {"updated": updated, "max_hr": max_hr, "boundaries": boundaries}
 
 
 @app.post("/api/analysis/backfill-weather")
