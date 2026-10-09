@@ -270,3 +270,62 @@ async def test_sync_garmin_surfaces_an_error_readably(monkeypatch):
     out = await mcp_server.sync_garmin()
 
     assert "no garmin token" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_call_api_rejects_a_post_only_path(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "n")
+
+    out = await mcp_server.call_api(path="/api/import/garmin/sync")
+
+    assert "no get route" in out.lower()
+    assert "post" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_call_api_rejects_an_unknown_path_and_suggests_matches(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "o")
+
+    out = await mcp_server.call_api(path="/api/stats/nonsense")
+
+    assert "no get route" in out.lower()
+    assert "/api/stats" in out
+
+
+@pytest.mark.asyncio
+async def test_call_api_returns_data_for_a_valid_get(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "p")
+
+    out = await mcp_server.call_api(path="/api/stats/personal-records")
+
+    assert isinstance(out, str) and out
+    assert "could not" not in out.lower()
+    assert "no get route" not in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_call_api_strips_heavy_fields_by_default(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "q")
+
+    out = await mcp_server.call_api(path="/api/activities")
+
+    assert "map_summary_polyline" not in out
+
+
+@pytest.mark.asyncio
+async def test_call_api_accepts_a_path_without_a_leading_slash(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "r")
+
+    out = await mcp_server.call_api(path="api/stats/personal-records")
+
+    assert "no get route" not in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_route_index_lists_only_get_paths(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "s")
+
+    paths = mcp_server._get_route_index()
+
+    assert "/api/activities" in paths
+    assert "/api/import/garmin/sync" not in paths

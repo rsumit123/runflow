@@ -431,3 +431,91 @@ async def sync_garmin() -> str:
     return f"Imported {imported} new run(s) from Garmin." + (
         f" Warning: {err}" if err else ""
     )
+
+
+def _get_route_index() -> list[str]:
+    """Every registered GET path under /api, read from the app's own route table.
+
+    Generated rather than hand-listed so it can never drift from the real API.
+    """
+    import main as _main
+    paths = set()
+    for r in _main.app.routes:
+        methods = getattr(r, "methods", None) or set()
+        path = getattr(r, "path", "")
+        if "GET" in methods and path.startswith("/api"):
+            paths.add(path)
+    return sorted(paths)
+
+
+def _thin_streams(value):
+    """Downsample stream-shaped lists rather than dropping them."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if k == "data" and isinstance(v, list) and len(v) > mv.MAX_STREAM_POINTS:
+                out[k] = mv.downsample(v)
+            else:
+                out[k] = _thin_streams(v)
+        return out
+    if isinstance(value, list):
+        return [_thin_streams(v) for v in value]
+    return value
+
+
+@mcp.tool()
+async def call_api(
+    path: str,
+    params: Optional[dict] = None,
+    include_heavy: bool = False,
+) -> str:
+    """Last resort: call a RunFlow REST endpoint directly.
+
+    PREFER THE SPECIFIC TOOLS. list_recent_runs, get_run_detail, compare_runs,
+    get_recovery, get_records and get_training_context return analysed summaries
+    — splits on moving time, cardiac drift, zone shares, pauses,
+    weather-normalized pace — that this tool does not compute. Use call_api only
+    when none of them covers the question, for example a route-level breakdown
+    or monthly stats.
+
+    GET routes only, so nothing here can change data. Encoded GPS polylines and
+    raw sample streams are removed unless include_heavy is true, and streams are
+    then thinned to at most 200 points (the true sample count is reported).
+    Output is capped at 25,000 characters.
+
+    Args:
+        path: the route path including the /api prefix, e.g. "/api/stats/monthly".
+            A leading slash is optional.
+        params: optional query parameters.
+        include_heavy: include polylines and downsampled streams.
+    """
+    try:
+        import httpx
+        import main as _main
+
+        if not path.startswith("/"):
+            path = "/" + path
+        index = _get_route_index()
+        if path not in index:
+            near = [p for p in index if p.split("/")[:3] == path.split("/")[:3]]
+            hint = ", ".join(near[:8]) if near else ", ".join(index[:12])
+            return (
+                f"No GET route '{path}'. Closest available: {hint}\n\n"
+                "Note: POST routes are not callable through this tool — it is "
+                "read-only by design. Use sync_garmin for the one action."
+            )
+
+        transport = httpx.ASGITransport(app=_main.app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://runflow.internal"
+        ) as client:
+            resp = await client.get(path, params=params or {}, timeout=30.0)
+        if resp.status_code != 200:
+            return f"{path} returned HTTP {resp.status_code}: {resp.text[:400]}"
+
+        data = resp.json()
+        data = _thin_streams(data) if include_heavy else mv.strip_heavy(data)
+        return mv.cap_text(json.dumps(data, default=str, indent=1))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("call_api failed for %s", path)
+        return f"Could not call {path}: {exc}"
