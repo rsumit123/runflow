@@ -84,3 +84,12 @@ GARMIN_RUNNING_TYPES = {"running", "track_running", "trail_running", "treadmill_
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-5")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+# ---------------------------------------------------------------------------
+# MCP connector
+# ---------------------------------------------------------------------------
+# The secret lives in the mount path, because Claude app custom connectors
+# accept only authless or OAuth servers — there is no field for a bearer token
+# or a custom header. Unset means the MCP server is not mounted at all, so a
+# missing secret fails closed rather than exposing an open endpoint.
+MCP_SECRET = os.getenv("MCP_SECRET", "").strip()
