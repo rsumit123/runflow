@@ -150,3 +150,45 @@ def zone_shares(zones: Optional[list[dict[str, Any]]]) -> dict[int, float]:
         for z in rows
         if z.get("zone") is not None
     }
+
+
+# Keys whose values are large and almost never what was being asked for.
+HEAVY_KEYS = ("map_summary_polyline", "streams", "polyline")
+MAX_STREAM_POINTS = 200
+MAX_RESPONSE_CHARS = 25_000
+
+
+def strip_heavy(value: Any) -> Any:
+    """Recursively drop encoded polylines and raw streams from an API payload."""
+    if isinstance(value, dict):
+        return {k: strip_heavy(v) for k, v in value.items() if k not in HEAVY_KEYS}
+    if isinstance(value, list):
+        return [strip_heavy(v) for v in value]
+    return value
+
+
+def downsample(data: list[Any], max_points: int = MAX_STREAM_POINTS) -> dict[str, Any]:
+    """Thin a stream to at most `max_points`, keeping the first and last sample.
+
+    `original_samples` is returned so a thinned series is never mistaken for the
+    whole thing.
+    """
+    n = len(data)
+    if n <= max_points:
+        return {"original_samples": n, "data": data}
+    step = max(1, n // (max_points - 1))
+    thinned = data[::step][: max_points - 1]
+    if thinned and thinned[-1] != data[-1]:
+        thinned.append(data[-1])
+    return {"original_samples": n, "data": thinned}
+
+
+def cap_text(text: str, limit: int = MAX_RESPONSE_CHARS) -> str:
+    """Hard cap on tool output, truncating visibly.
+
+    A silent truncation that reads as a complete answer is the failure being
+    prevented here.
+    """
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n\n[truncated at {limit} characters of {len(text)}]"

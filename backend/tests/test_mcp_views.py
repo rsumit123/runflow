@@ -102,3 +102,53 @@ def test_zone_shares_are_percentages_of_recorded_time():
 def test_zone_shares_handles_missing_zones():
     assert mv.zone_shares(None) == {}
     assert mv.zone_shares([]) == {}
+
+
+def test_strip_heavy_removes_polylines_and_streams():
+    payload = {
+        "activities": [
+            {"id": 1, "map_summary_polyline": "sm_jCajmmOVE", "distance": 3000.0},
+        ],
+        "streams": [{"stream_type": "heartrate", "data": [150.0] * 1200}],
+    }
+
+    pruned = mv.strip_heavy(payload)
+
+    assert "map_summary_polyline" not in pruned["activities"][0]
+    assert pruned["activities"][0]["distance"] == 3000.0
+    assert "streams" not in pruned
+
+
+def test_strip_heavy_leaves_light_payloads_alone():
+    payload = {"best_1km_split": {"time": 276}}
+
+    assert mv.strip_heavy(payload) == payload
+
+
+def test_downsample_keeps_first_and_last_and_reports_true_length():
+    data = list(range(1000))
+
+    out = mv.downsample(data, max_points=10)
+
+    assert out["original_samples"] == 1000
+    assert len(out["data"]) <= 10
+    assert out["data"][0] == 0
+    assert out["data"][-1] == 999
+
+
+def test_downsample_leaves_short_series_untouched():
+    out = mv.downsample([1, 2, 3], max_points=10)
+
+    assert out["data"] == [1, 2, 3]
+    assert out["original_samples"] == 3
+
+
+def test_cap_text_truncates_with_an_explicit_marker():
+    out = mv.cap_text("x" * 100, limit=50)
+
+    assert len(out) <= 120
+    assert "truncated" in out.lower()
+
+
+def test_cap_text_leaves_short_text_alone():
+    assert mv.cap_text("short", limit=50) == "short"
