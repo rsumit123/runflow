@@ -9,4 +9,8 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --proxy-headers / --forwarded-allow-ips: nginx terminates TLS, so without
+# these the MCP endpoint's /mcp -> /mcp/ redirect is emitted as http:// and MCP
+# clients refuse to follow it.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]
