@@ -110,10 +110,10 @@ async def list_recent_runs(limit: int = 10, since: Optional[str] = None) -> str:
                 notes = f"fragmented ({len(pauses)} pauses)" if pauses else ""
                 lines.append(
                     f"{a.id} | {a.start_date:%Y-%m-%d} | {km:.2f}km | "
-                    f"{_fmt_pace(pace)} | {a.average_heartrate or '—'} | "
-                    f"{a.max_heartrate or '—'} | {shares.get(5, '—')} | "
-                    f"{a.aerobic_te or '—'} {a.training_effect_label or ''} | "
-                    f"{a.heat_penalty_sec or '—'}s/km | {notes}"
+                    f"{_fmt_pace(pace)} | {mv.num(a.average_heartrate)} | "
+                    f"{mv.num(a.max_heartrate)} | {mv.num(shares.get(5))}% | "
+                    f"{mv.num(a.aerobic_te)} {a.training_effect_label or ''} | "
+                    f"{mv.num(a.heat_penalty_sec)} s/km | {notes}"
                 )
             return mv.cap_text("\n".join(lines))
     except Exception as exc:  # noqa: BLE001 — a raising tool gives Claude nothing
@@ -153,10 +153,11 @@ async def get_run_detail(run_id: int) -> str:
             out = [
                 f"{a.name or 'Run'} — {a.start_date:%Y-%m-%d %H:%M}",
                 f"{km:.2f} km in {_fmt_dur(a.moving_time)} at {_fmt_pace(pace)}",
-                f"HR avg {a.average_heartrate or '—'} / max {a.max_heartrate or '—'}"
-                f" · cadence {cad}",
-                f"Training Effect {a.aerobic_te or '—'} aerobic /"
-                f" {a.anaerobic_te or '—'} anaerobic {a.training_effect_label or ''}",
+                f"HR avg {mv.num(a.average_heartrate)} / max "
+                f"{mv.num(a.max_heartrate)} · cadence {cad}",
+                f"Training Effect {mv.num(a.aerobic_te)} aerobic /"
+                f" {mv.num(a.anaerobic_te)} anaerobic "
+                f"{a.training_effect_label or ''}",
             ]
 
             shares = mv.zone_shares(a.hr_zones)
@@ -182,7 +183,7 @@ async def get_run_detail(run_id: int) -> str:
                     out.append(
                         f"  {s['from_m']:>4}-{s['to_m']:<4}m  "
                         f"{_fmt_pace(s['pace_sec_per_km'])}  "
-                        f"HR {s['hr_avg'] or '—'} (peak {s['hr_peak'] or '—'})"
+                        f"HR {mv.num(s['hr_avg'])} (peak {mv.num(s['hr_peak'])})"
                     )
 
             pauses = mv.find_pauses(time, dist, hr)
@@ -192,21 +193,23 @@ async def get_run_detail(run_id: int) -> str:
                 for p in pauses:
                     out.append(
                         f"  at {p['at_km']:.2f} km — paused {_fmt_dur(p['seconds'])}"
-                        f" (HR {p['hr_in'] or '—'} in, {p['hr_out'] or '—'} out)"
+                        f" (HR {mv.num(p['hr_in'])} in, {mv.num(p['hr_out'])} out)"
                     )
 
             rd = a.running_dynamics or {}
             if rd:
                 out += ["", (
-                    f"Dynamics: stride {rd.get('stride_length')} cm · "
-                    f"ground contact {rd.get('ground_contact_time')} ms · "
-                    f"vertical oscillation {rd.get('vertical_oscillation')} cm"
+                    f"Dynamics: stride {mv.num(rd.get('stride_length'), 2)} cm"
+                    f" · ground contact "
+                    f"{mv.num(rd.get('ground_contact_time'), 1)} ms · vertical "
+                    f"oscillation {mv.num(rd.get('vertical_oscillation'), 2)} cm"
                 )]
 
             if a.dew_point_c is not None:
                 out += ["", (
-                    f"Conditions: {a.temp_c}°C, dew point {a.dew_point_c}°C"
-                    f" (index {a.heat_index}) — cost ~{a.heat_penalty_sec} s/km;"
+                    f"Conditions: {mv.num(a.temp_c)}°C, dew point "
+                    f"{mv.num(a.dew_point_c)}°C (index {mv.num(a.heat_index)})"
+                    f" — cost ~{mv.num(a.heat_penalty_sec)} s/km;"
                     f" cool-day equivalent {_fmt_pace(a.normalized_pace_sec)}"
                 )]
             return mv.cap_text("\n".join(out))
@@ -248,10 +251,10 @@ async def compare_runs(run_ids: list[int]) -> str:
                 pauses = mv.find_pauses(st.get("time"), st.get("distance"))
                 lines.append(
                     f"{a.id} | {a.start_date:%Y-%m-%d} | {km:.2f}km | "
-                    f"{_fmt_pace(pace)} | {a.average_heartrate or '—'} | "
-                    f"{shares.get(5, '—')} | "
+                    f"{_fmt_pace(pace)} | {mv.num(a.average_heartrate)} | "
+                    f"{mv.num(shares.get(5))}% | "
                     f"{f'{drift:+.1f}' if drift is not None else '—'} | "
-                    f"{a.aerobic_te or '—'} | {a.dew_point_c or '—'}°C | "
+                    f"{mv.num(a.aerobic_te)} | {mv.num(a.dew_point_c)}°C | "
                     f"{_fmt_pace(a.normalized_pace_sec)} | {len(pauses)}"
                 )
             return mv.cap_text("\n".join(lines))

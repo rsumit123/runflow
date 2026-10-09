@@ -152,3 +152,13 @@ def test_cap_text_truncates_with_an_explicit_marker():
 
 def test_cap_text_leaves_short_text_alone():
     assert mv.cap_text("short", limit=50) == "short"
+
+
+def test_num_rounds_float_noise_away():
+    assert mv.num(4.099999904632568) == "4.1"
+    assert mv.num(182.0) == "182"
+    assert mv.num(92.25, 2) == "92.25"
+
+
+def test_num_renders_missing_values_as_a_dash():
+    assert mv.num(None) == "—"
