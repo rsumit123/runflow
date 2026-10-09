@@ -36,6 +36,7 @@ import asyncio as _asyncio
 import garmin_transform as gt
 from garmin_client import GarminClient
 import fitness_model as fmodel
+import mcp_server
 import fitness_projection as fproj
 import plan_generator as pgen
 import plan_adherence as padh
@@ -92,7 +93,11 @@ async def _auto_sync_loop() -> None:
 async def lifespan(app: FastAPI):
     await init_db()
     task = _asyncio.create_task(_auto_sync_loop())
-    yield
+    # A mounted sub-application's lifespan never runs, so the MCP session
+    # manager has to be entered by the host app — without this the first MCP
+    # request raises "Task group is not initialized".
+    async with mcp_server.mcp.session_manager.run():
+        yield
     task.cancel()
     await strava.close()
 
@@ -110,6 +115,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# MCP connector for the Claude app. The secret is in the mount path because
+# custom connectors support only authless or OAuth — no bearer-token field.
+# No secret => no mount => 404, rather than an open endpoint.
+if mcp_server.MOUNT_PATH:
+    app.mount(mcp_server.MOUNT_PATH, mcp_server.asgi_app)
 
 # ---------------------------------------------------------------------------
 # Helpers
