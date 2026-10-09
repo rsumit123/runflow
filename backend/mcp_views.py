@@ -192,3 +192,15 @@ def cap_text(text: str, limit: int = MAX_RESPONSE_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n\n[truncated at {limit} characters of {len(text)}]"
+
+
+def num(value: Optional[float], places: int = 1) -> str:
+    """Render a number for display: no float noise, no trailing zeros, — if absent.
+
+    Garmin's Training Effect arrives as 4.099999904632568; printing that raw
+    wastes tokens and reads like a bug.
+    """
+    if value is None:
+        return "—"
+    s = f"{round(float(value), places):.{places}f}".rstrip("0").rstrip(".")
+    return s or "0"
