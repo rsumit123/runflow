@@ -329,3 +329,49 @@ async def test_get_route_index_lists_only_get_paths(monkeypatch):
 
     assert "/api/activities" in paths
     assert "/api/import/garmin/sync" not in paths
+
+
+@pytest.mark.asyncio
+async def test_get_run_detail_reports_terrain_and_location(monkeypatch):
+    """The athlete asks "track or road?" — the tool must answer it."""
+    tmp = tempfile.mktemp(suffix="t.db")
+    monkeypatch.setenv("DB_PATH", tmp)
+    monkeypatch.setenv("MCP_SECRET", "testsecret")
+    import importlib, config, database
+    importlib.reload(config); importlib.reload(database)
+    await database.init_db()
+    from models import Activity
+    import mcp_server, main
+    importlib.reload(mcp_server); importlib.reload(main)
+
+    async with database.async_session() as s:
+        # The flat track run, and a rolling road run the day before elsewhere.
+        s.add(Activity(id=10, name="Track", distance=2510.0, moving_time=1090,
+                       elapsed_time=1090, start_date=datetime(2026, 10, 9, 12, 7),
+                       average_speed=2.3, average_heartrate=176.0,
+                       max_heartrate=187.0, total_elevation_gain=0.0,
+                       elev_high=174.4, elev_low=172.6,
+                       start_latlng=[22.776184, 86.253266]))
+        s.add(Activity(id=9, name="Road", distance=3730.0, moving_time=1657,
+                       elapsed_time=1657, start_date=datetime(2026, 10, 8, 12, 6),
+                       average_speed=2.25, average_heartrate=181.0,
+                       max_heartrate=197.0, total_elevation_gain=27.0,
+                       elev_high=183.8, elev_low=163.2,
+                       start_latlng=[22.757716, 86.266081]))
+        await s.commit()
+
+    out = await mcp_server.get_run_detail(run_id=10)
+
+    assert "flat" in out.lower()
+    assert "0 m" in out or "0.0 m" in out
+    assert "22.776" in out                      # start coordinates
+    assert "different place" in out.lower()     # not where the previous run started
+
+
+@pytest.mark.asyncio
+async def test_list_recent_runs_includes_a_terrain_column(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "u")
+
+    out = await mcp_server.list_recent_runs(limit=5)
+
+    assert "terrain" in out.lower()

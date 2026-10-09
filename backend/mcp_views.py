@@ -204,3 +204,55 @@ def num(value: Optional[float], places: int = 1) -> str:
         return "—"
     s = f"{round(float(value), places):.{places}f}".rstrip("0").rstrip(".")
     return s or "0"
+
+
+# Elevation gain per km separating terrain types, plus a range ceiling so a long
+# gentle drag isn't called flat. A stadium track reads 0 m/km with a 1-2 m
+# spread; the surrounding roads read 7-8 m/km over a 20 m spread.
+FLAT_GAIN_PER_KM = 5.0
+FLAT_RANGE_M = 10.0
+ROLLING_GAIN_PER_KM = 15.0
+# Two starts within this distance are the same place (GPS scatter is tens of m).
+SAME_PLACE_M = 300.0
+
+
+def terrain(
+    gain_m: Optional[float],
+    elev_high: Optional[float],
+    elev_low: Optional[float],
+    distance_m: Optional[float],
+) -> Optional[dict[str, Any]]:
+    """Classify the ground a run was done on, from its elevation profile.
+
+    Answers a question the athlete actually asks — track or road? — which
+    changes how a rising HR should be read: on flat ground a climbing heart rate
+    is effort and drift, with no terrain to blame it on.
+    """
+    if gain_m is None or elev_high is None or elev_low is None or not distance_m:
+        return None
+    km = distance_m / 1000.0
+    gain_per_km = round(gain_m / km, 1)
+    range_m = round(elev_high - elev_low, 1)
+    if gain_per_km < FLAT_GAIN_PER_KM and range_m < FLAT_RANGE_M:
+        label = "flat"
+    elif gain_per_km < ROLLING_GAIN_PER_KM:
+        label = "rolling"
+    else:
+        label = "hilly"
+    return {
+        "label": label,
+        "gain_m": round(gain_m, 1),
+        "range_m": range_m,
+        "gain_per_km": gain_per_km,
+    }
+
+
+def same_place(
+    a: Optional[list[float]],
+    b: Optional[list[float]],
+) -> Optional[bool]:
+    """Whether two start points are the same place. None if either is missing."""
+    if not a or not b or len(a) < 2 or len(b) < 2:
+        return None
+    from route_matching import _haversine
+    return _haversine(a[0], a[1], b[0], b[1]) <= SAME_PLACE_M
