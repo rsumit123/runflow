@@ -197,3 +197,61 @@ def test_same_place_compares_start_points():
     # ~1.6 km apart — the Oct 7/8 location vs the track.
     assert mv.same_place([22.7762, 86.2533], [22.7579, 86.2661]) is False
     assert mv.same_place(None, [22.7762, 86.2533]) is None
+
+
+def test_metres_per_beat_measures_aerobic_efficiency():
+    # 3620 m in 24m58s at HR 180: 180 * 24.967 min = 4494 beats.
+    mpb = mv.metres_per_beat(3620.0, 1498, 180.0)
+
+    assert mpb == 0.81
+
+
+def test_metres_per_beat_is_none_without_hr_or_time():
+    assert mv.metres_per_beat(3000.0, 1200, None) is None
+    assert mv.metres_per_beat(3000.0, 0, 180.0) is None
+    assert mv.metres_per_beat(None, 1200, 180.0) is None
+
+
+def test_zone_legend_renders_boundaries_and_implied_max():
+    zones = [
+        {"zone": 1, "secs": 1.0, "low_bpm": 105},
+        {"zone": 2, "secs": 1.0, "low_bpm": 126},
+        {"zone": 3, "secs": 1.0, "low_bpm": 147},
+        {"zone": 4, "secs": 1.0, "low_bpm": 168},
+        {"zone": 5, "secs": 1.0, "low_bpm": 189},
+    ]
+
+    legend = mv.zone_legend(zones)
+
+    assert "Z4 168-188" in legend
+    assert "Z5 189+" in legend
+    assert "210" in legend  # implied max HR: 189 / 0.90
+
+
+def test_zone_legend_is_empty_without_zones():
+    assert mv.zone_legend(None) == ""
+
+
+def test_weekly_buckets_group_by_iso_week():
+    from datetime import datetime
+    rows = [
+        {"start_date": datetime(2026, 10, 5), "distance": 3000.0, "moving_time": 1200,
+         "z5": 10.0},
+        {"start_date": datetime(2026, 10, 7), "distance": 4000.0, "moving_time": 1700,
+         "z5": 30.0},
+        {"start_date": datetime(2026, 9, 28), "distance": 2000.0, "moving_time": 900,
+         "z5": 0.0},
+    ]
+
+    weeks = mv.weekly_buckets(rows)
+
+    assert len(weeks) == 2
+    latest = weeks[-1]
+    assert latest["runs"] == 2
+    assert latest["km"] == 7.0
+    # Time-weighted, not a flat mean: (10%*1200s + 30%*1700s) / 2900s.
+    assert latest["z5_pct"] == 21.7
+
+
+def test_weekly_buckets_handles_no_runs():
+    assert mv.weekly_buckets([]) == []

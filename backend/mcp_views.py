@@ -256,3 +256,82 @@ def same_place(
         return None
     from route_matching import _haversine
     return _haversine(a[0], a[1], b[0], b[1]) <= SAME_PLACE_M
+
+
+def metres_per_beat(
+    distance_m: Optional[float],
+    moving_time_s: Optional[int],
+    avg_hr: Optional[float],
+) -> Optional[float]:
+    """Metres covered per heartbeat — a single aerobic-efficiency number.
+
+    Rising over weeks means the same cardiac cost is buying more distance, which
+    is what base training is for. It is confounded by heat, so compare it within
+    a season or alongside the weather-normalized figure.
+    """
+    if not distance_m or not moving_time_s or not avg_hr:
+        return None
+    beats = avg_hr * (moving_time_s / 60.0)
+    if beats <= 0:
+        return None
+    return round(distance_m / beats, 2)
+
+
+def zone_legend(zones: Optional[list[dict[str, Any]]]) -> str:
+    """What the zone numbers mean in bpm, with the max HR they were derived from.
+
+    Without this a zone share is uninterpretable — "82% in Z4" says nothing
+    until you know Z4 starts at 168.
+    """
+    rows = [z for z in (zones or []) if z.get("low_bpm")]
+    if not rows:
+        return ""
+    rows.sort(key=lambda z: z["zone"])
+    parts = []
+    for i, z in enumerate(rows):
+        low = z["low_bpm"]
+        if i + 1 < len(rows):
+            parts.append(f"Z{z['zone']} {low}-{rows[i + 1]['low_bpm'] - 1}")
+        else:
+            parts.append(f"Z{z['zone']} {low}+")
+    # Boundaries are 50/60/70/80/90% of max HR, so the top floor implies the max.
+    implied_max = round(rows[-1]["low_bpm"] / 0.90)
+    return "  ".join(parts) + f"  (max HR {implied_max})"
+
+
+def weekly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group runs into ISO weeks, oldest first.
+
+    Each bucket: run count, kilometres, total moving minutes, mean pace and the
+    share of time spent in Zone 5 across the week.
+    """
+    if not rows:
+        return []
+    buckets: dict[tuple[int, int], dict[str, Any]] = {}
+    for r in rows:
+        d = r.get("start_date")
+        if d is None:
+            continue
+        year, week, _ = d.isocalendar()
+        b = buckets.setdefault((year, week), {
+            "year": year, "week": week, "runs": 0, "metres": 0.0,
+            "seconds": 0, "z5_weighted": 0.0,
+        })
+        b["runs"] += 1
+        b["metres"] += r.get("distance") or 0.0
+        b["seconds"] += r.get("moving_time") or 0
+        b["z5_weighted"] += (r.get("z5") or 0.0) * (r.get("moving_time") or 0)
+
+    out = []
+    for (year, week), b in sorted(buckets.items()):
+        km = b["metres"] / 1000.0
+        out.append({
+            "year": year,
+            "week": week,
+            "runs": b["runs"],
+            "km": round(km, 2),
+            "minutes": round(b["seconds"] / 60.0),
+            "pace_sec_per_km": round(b["seconds"] / km) if km else None,
+            "z5_pct": round(b["z5_weighted"] / b["seconds"], 1) if b["seconds"] else None,
+        })
+    return out

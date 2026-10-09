@@ -67,22 +67,40 @@ import_progress: dict[str, dict[str, Any]] = {}
 # the last import. Leaving that to a button meant a run could land on the watch and
 # never reach the plan.
 AUTO_SYNC_INTERVAL_SEC = 2 * 60 * 60
+# Past this age, a run with no archive row never will have one — stop retrying.
+WEATHER_GIVE_UP_DAYS = 30
+
 last_auto_sync: dict[str, Any] = {"at": None, "imported": 0, "error": None}
+
+
+async def _auto_sync_once() -> None:
+    """One pass: import new runs, refresh recovery, then catch up the weather.
+
+    The weather catch-up matters because the archive lags the run by a few days.
+    Without a scheduled retry a fresh run keeps null conditions forever, and
+    every pace comparison silently loses its heat normalisation.
+    """
+    async with async_session() as session:
+        res = await import_garmin_sync(session)
+    # Today's recovery numbers keep settling through the morning, so refresh
+    # them on the same beat rather than pinning whatever we saw first.
+    async with async_session() as session:
+        await _wellness(session, datetime.utcnow().date().isoformat(), refresh=True)
+    async with async_session() as session:
+        wx = await _backfill_weather(session)
+    last_auto_sync.update({"at": datetime.utcnow().isoformat(),
+                           "imported": res.get("imported", 0),
+                           "weather_updated": wx.get("updated", 0), "error": None})
+    if res.get("imported"):
+        logger.info("Auto-sync imported %s new run(s)", res["imported"])
+    if wx.get("updated"):
+        logger.info("Auto-sync backfilled weather on %s run(s)", wx["updated"])
 
 
 async def _auto_sync_loop() -> None:
     while True:
         try:
-            async with async_session() as session:
-                res = await import_garmin_sync(session)
-            # Today's recovery numbers keep settling through the morning, so refresh
-            # them on the same beat rather than pinning whatever we saw first.
-            async with async_session() as session:
-                await _wellness(session, datetime.utcnow().date().isoformat(), refresh=True)
-            last_auto_sync.update({"at": datetime.utcnow().isoformat(),
-                                   "imported": res.get("imported", 0), "error": None})
-            if res.get("imported"):
-                logger.info("Auto-sync imported %s new run(s)", res["imported"])
+            await _auto_sync_once()
         except Exception as exc:  # noqa: BLE001 — a failed sync must never kill the loop
             logger.warning("Auto-sync failed: %s", exc)
             last_auto_sync.update({"at": datetime.utcnow().isoformat(), "error": str(exc)[:200]})
@@ -3150,10 +3168,17 @@ async def _backfill_weather(session: AsyncSession, force: bool = False) -> dict[
             local = a.start_date + timedelta(hours=offset_h)
             key = local.strftime("%Y-%m-%dT%H:00")
             cond = hourly.get(key)
-            a.weather_checked = True
             if not cond:
+                # The archive lags a few days, so a recent run legitimately has
+                # no row yet — leave it retryable. Only give up once the archive
+                # is never going to cover it, or every backfill would re-fetch
+                # the whole history forever.
+                age_days = (datetime.utcnow() - a.start_date).days
+                if age_days > WEATHER_GIVE_UP_DAYS:
+                    a.weather_checked = True
                 skipped += 1
                 continue
+            a.weather_checked = True
             temp_c, dew_c = cond
             pace = 1000.0 / a.average_speed
             adj = heat.adjust(temp_c, dew_c, round(pace), round(pace))

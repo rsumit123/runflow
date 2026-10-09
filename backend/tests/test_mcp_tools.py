@@ -375,3 +375,50 @@ async def test_list_recent_runs_includes_a_terrain_column(monkeypatch):
     out = await mcp_server.list_recent_runs(limit=5)
 
     assert "terrain" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_run_detail_states_the_zone_boundaries(monkeypatch):
+    """A zone share is uninterpretable without knowing Z4 starts at 168."""
+    mcp_server = await _seed(monkeypatch, "v")
+
+    out = await mcp_server.get_run_detail(run_id=1)
+
+    assert "168" in out and "189+" in out
+    assert "max HR" in out
+
+
+@pytest.mark.asyncio
+async def test_get_aerobic_trend_reports_metres_per_beat(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "w")
+
+    out = await mcp_server.get_aerobic_trend(days=90)
+
+    assert "m/beat" in out.lower()
+    assert "0." in out
+
+
+@pytest.mark.asyncio
+async def test_get_aerobic_trend_says_so_when_empty(monkeypatch):
+    tmp = tempfile.mktemp(suffix="w2.db")
+    monkeypatch.setenv("DB_PATH", tmp)
+    monkeypatch.setenv("MCP_SECRET", "testsecret")
+    import importlib, config, database
+    importlib.reload(config); importlib.reload(database)
+    await database.init_db()
+    import mcp_server, main
+    importlib.reload(mcp_server); importlib.reload(main)
+
+    out = await mcp_server.get_aerobic_trend(days=30)
+
+    assert "no runs" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_weekly_volume_groups_by_week(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "x")
+
+    out = await mcp_server.get_weekly_volume(weeks=8)
+
+    assert "week" in out.lower()
+    assert "km" in out.lower()
