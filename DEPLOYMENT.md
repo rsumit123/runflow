@@ -194,3 +194,71 @@ sudo nginx -t && sudo systemctl reload nginx
 # Renew SSL
 sudo certbot renew
 ```
+
+---
+
+## MCP Connector (Claude app)
+
+RunFlow is exposed to the Claude app as a remote MCP server mounted inside the
+same FastAPI container — no second service.
+
+**Connector URL** (Claude app → Settings → Connectors → Add custom connector,
+leave the OAuth fields empty):
+
+```
+https://runflow-api.skdev.one/mcp/$MCP_SECRET/mcp
+```
+
+The secret is in the path because Claude app custom connectors support only
+authless or OAuth servers — there is no field for a bearer token. **Treat the
+whole URL as a credential.** Requires a Pro/Max/Team/Enterprise plan.
+
+**Where the secret lives:** `MCP_SECRET` in `/opt/runflow/.env` on the
+`socialflow` VM. If it is unset the server is not mounted at all, so the
+endpoint returns 404 rather than being open.
+
+**Rotating it:**
+```bash
+NEW=$(openssl rand -hex 20)
+gcloud compute ssh socialflow --project=polar-pillar-450607-b7 --zone=us-east1-d \
+  --tunnel-through-iap --command="sudo sed -i 's|^MCP_SECRET=.*|MCP_SECRET=$NEW|' /opt/runflow/.env && sudo docker restart runflow-backend"
+```
+Then re-paste the new URL in the Claude app.
+
+**Tools exposed** (read-only except `sync_garmin`): `list_recent_runs`,
+`get_run_detail`, `compare_runs`, `get_recovery`, `get_records`,
+`get_training_context`, `sync_garmin`, `call_api` (GET routes only).
+
+**Verifying after a deploy:**
+```bash
+# wrong secret must 404
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://runflow-api.skdev.one/mcp/wrong/mcp
+# correct secret must return a session id, not 421 and not 404
+curl -si -X POST "https://runflow-api.skdev.one/mcp/$MCP_SECRET/mcp" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}' \
+  | grep -i mcp-session-id
+```
+A `421 Misdirected Request` means the hostname is missing from
+`_ALLOWED_HOSTS` in `backend/mcp_server.py`. The container log should say
+`StreamableHTTP session manager started` on boot.
+
+The uvicorn `CMD` carries `--proxy-headers --forwarded-allow-ips=*`: nginx
+terminates TLS, and without them the `/mcp` → `/mcp/` redirect is emitted as
+`http://` and MCP clients refuse to follow it.
+
+### Optional hardening — restrict to Anthropic's egress range
+
+Requests reach the connector from Anthropic's cloud, not from your phone. Off by
+default because the range is third-party-documented, may change, and would also
+block local testing. To enable, add to the nginx server block:
+
+```nginx
+# location /mcp/ {
+#     allow 160.79.104.0/21;
+#     deny all;
+#     proxy_pass http://127.0.0.1:8020;
+#     proxy_set_header Host $host;
+#     proxy_set_header X-Forwarded-Proto $scheme;
+# }
+```
