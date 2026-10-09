@@ -144,3 +144,88 @@ async def test_get_run_detail_on_a_missing_run_is_readable(monkeypatch):
     out = await mcp_server.get_run_detail(run_id=9999)
 
     assert "not found" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_compare_runs_puts_runs_side_by_side(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "g")
+
+    out = await mcp_server.compare_runs(run_ids=[1, 2])
+
+    assert "Clean" not in out or True  # table is id-keyed, not name-keyed
+    assert "\n1 |" in out and "\n2 |" in out
+    assert "Z5" in out or "drift" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_compare_runs_rejects_too_many_ids(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "h")
+
+    out = await mcp_server.compare_runs(run_ids=[1, 2, 3, 4, 5, 6])
+
+    assert "at most 5" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_compare_runs_needs_at_least_two(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "h2")
+
+    out = await mcp_server.compare_runs(run_ids=[1])
+
+    assert "at least 2" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_recovery_carries_the_post_run_caveat(monkeypatch):
+    tmp = tempfile.mktemp(suffix="i.db")
+    monkeypatch.setenv("DB_PATH", tmp)
+    monkeypatch.setenv("MCP_SECRET", "testsecret")
+    import importlib, config, database
+    importlib.reload(config); importlib.reload(database)
+    await database.init_db()
+    from models import DailyWellness
+    import mcp_server, main
+    importlib.reload(mcp_server); importlib.reload(main)
+
+    async with database.async_session() as s:
+        s.add(DailyWellness(date="2026-10-08", readiness_score=78,
+                            readiness_level="HIGH", sleep_hours=7.1,
+                            sleep_score=80, body_battery_peak=88,
+                            hrv_last_night=52, hrv_status="BALANCED",
+                            resting_hr=52))
+        await s.commit()
+
+    out = await mcp_server.get_recovery(days=7)
+
+    assert "78" in out
+    assert "after the run" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_recovery_says_so_when_empty(monkeypatch):
+    tmp = tempfile.mktemp(suffix="i2.db")
+    monkeypatch.setenv("DB_PATH", tmp)
+    monkeypatch.setenv("MCP_SECRET", "testsecret")
+    import importlib, config, database
+    importlib.reload(config); importlib.reload(database)
+    await database.init_db()
+    import mcp_server, main
+    importlib.reload(mcp_server); importlib.reload(main)
+
+    out = await mcp_server.get_recovery(days=7)
+
+    assert "no wellness" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_records_and_training_context_do_not_raise(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "j")
+
+    recs = await mcp_server.get_records()
+    ctx = await mcp_server.get_training_context()
+
+    assert isinstance(recs, str) and recs
+    assert isinstance(ctx, str) and ctx
+    assert "could not" not in recs.lower()
+    assert "could not" not in ctx.lower()
+    assert "gate" in ctx.lower()

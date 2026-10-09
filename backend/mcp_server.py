@@ -213,3 +213,164 @@ async def get_run_detail(run_id: int) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_run_detail failed")
         return f"Could not analyse run {run_id}: {exc}"
+
+
+@mcp.tool()
+async def compare_runs(run_ids: list[int]) -> str:
+    """Two to five runs side by side on the metrics that matter.
+
+    Distance, pace, average HR, Zone 5 share, cardiac drift, Training Effect,
+    dew point and weather-normalized pace. Use this to answer "am I improving?".
+    The pause count is shown too, because comparing a fragmented run against a
+    continuous one is misleading — pauses deflate both average HR and pace.
+
+    Args:
+        run_ids: 2-5 activity ids from list_recent_runs.
+    """
+    try:
+        if len(run_ids) > 5:
+            return "Compare at most 5 runs at a time."
+        if len(run_ids) < 2:
+            return "Give at least 2 run ids to compare."
+        async with async_session() as session:
+            lines = ["id | date | dist | pace | avgHR | Z5% | drift | TE | dew | "
+                     "norm pace | pauses"]
+            for rid in run_ids:
+                a = await session.get(Activity, rid)
+                if a is None:
+                    lines.append(f"{rid} | not found")
+                    continue
+                st = await _streams_for(session, rid)
+                km = (a.distance or 0) / 1000.0
+                pace = (a.moving_time / km) if (km and a.moving_time) else None
+                shares = mv.zone_shares(a.hr_zones)
+                drift = mv.cardiac_drift(st.get("heartrate"))
+                pauses = mv.find_pauses(st.get("time"), st.get("distance"))
+                lines.append(
+                    f"{a.id} | {a.start_date:%Y-%m-%d} | {km:.2f}km | "
+                    f"{_fmt_pace(pace)} | {a.average_heartrate or '—'} | "
+                    f"{shares.get(5, '—')} | "
+                    f"{f'{drift:+.1f}' if drift is not None else '—'} | "
+                    f"{a.aerobic_te or '—'} | {a.dew_point_c or '—'}°C | "
+                    f"{_fmt_pace(a.normalized_pace_sec)} | {len(pauses)}"
+                )
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("compare_runs failed")
+        return f"Could not compare those runs: {exc}"
+
+
+@mcp.tool()
+async def get_recovery(days: int = 14) -> str:
+    """Recovery markers per day: readiness, sleep, body battery, HRV, resting HR.
+
+    The resting-HR trend is the most reliable single signal of whether training
+    is being absorbed; HRV status and body-battery peak corroborate it.
+
+    Important caveat, repeated in the output: on days with a run the stored
+    readiness score was captured AFTER the run. The auto-sync refreshes the row
+    every two hours, so the value kept is the last one before UTC midnight,
+    roughly 22 hours after a morning run. A score of 1-5 on a run day is
+    therefore an artifact of the session just completed, not a verdict on how
+    ready the athlete was that morning.
+
+    Args:
+        days: how many days back to return (1-90).
+    """
+    try:
+        days = max(1, min(90, days))
+        from models import DailyWellness
+        async with async_session() as session:
+            rows = (await session.execute(
+                select(DailyWellness).order_by(DailyWellness.date.desc()).limit(days)
+            )).scalars().all()
+            if not rows:
+                return "No wellness data recorded."
+            lines = ["date | readiness | sleep | battery | HRV | restingHR"]
+            for w in reversed(rows):
+                lines.append(
+                    f"{w.date} | {w.readiness_score} {w.readiness_level or ''} | "
+                    f"{w.sleep_hours}h (score {w.sleep_score}) | "
+                    f"{w.body_battery_peak} | {w.hrv_last_night} "
+                    f"{w.hrv_status or ''} | {w.resting_hr}"
+                )
+            lines += ["", (
+                "Caveat: on run days the readiness score was captured after the "
+                "run, so a very low value there reflects the session just "
+                "completed rather than the athlete's state that morning."
+            )]
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_recovery failed")
+        return f"Could not read recovery data: {exc}"
+
+
+@mcp.tool()
+async def get_records() -> str:
+    """Personal records by distance, plus the sprint baseline.
+
+    PRs for 1k/2k/3k/5k/10k with the date and pace, the best single 1 km split,
+    and the sprint profile (best 100 m and 200 m, top speed, fade percentage and
+    the resulting diagnosis).
+    """
+    try:
+        import main as _main
+        async with async_session() as session:
+            prs = await _main.personal_records(session)
+            base = await _main.sprint_baseline_endpoint(session)
+            return mv.cap_text(
+                "Personal records:\n" + _json_block(prs)
+                + "\n\nSprint baseline:\n" + _json_block(base)
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_records failed")
+        return f"Could not read records: {exc}"
+
+
+@mcp.tool()
+async def get_training_context() -> str:
+    """Where the athlete is in their training right now.
+
+    The current phases, the active plan and its week number, today's planned
+    workout with the readiness-based recommendation, and progress toward the
+    sub-6:00/km gate — reported both as the raw best pace and as the
+    weather-normalized equivalent, because dew point has been costing 20+ s/km.
+    """
+    try:
+        import main as _main
+        async with async_session() as session:
+            # gap_days must be passed explicitly: its endpoint default is a
+            # FastAPI Query object, which is only resolved by the HTTP layer.
+            phases = await _main.get_phases(gap_days=14, session=session)
+            plan = await _main.get_active_plan(session)
+            try:
+                guidance = await _main.today_guidance(session=session)
+            except Exception as exc:  # noqa: BLE001 — needs the watch, may be absent
+                guidance = {"note": f"today's guidance unavailable: {exc}"}
+
+            acts = (await session.execute(
+                select(Activity)
+                .where(Activity.moving_time.isnot(None), Activity.distance > 1000)
+                .order_by(Activity.start_date.desc()).limit(15)
+            )).scalars().all()
+            best_raw = min(
+                (a.moving_time / (a.distance / 1000.0) for a in acts), default=None
+            )
+            best_norm = min(
+                (a.normalized_pace_sec for a in acts if a.normalized_pace_sec),
+                default=None,
+            )
+            gate = (
+                f"Gate (sub-6:00/km): best of last {len(acts)} runs is "
+                f"{_fmt_pace(best_raw)} raw, {_fmt_pace(best_norm)} "
+                "weather-normalized."
+            )
+            return mv.cap_text(
+                "Phases:\n" + _json_block(phases)
+                + "\n\nActive plan:\n" + _json_block(plan)
+                + "\n\nToday:\n" + _json_block(guidance)
+                + "\n\n" + gate
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_training_context failed")
+        return f"Could not read training context: {exc}"
