@@ -36,7 +36,7 @@ MOUNT_PATH = f"/mcp/{config.MCP_SECRET}" if config.MCP_SECRET else None
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select
@@ -169,6 +169,12 @@ async def get_run_detail(run_id: int) -> str:
                 out.append("Zones: " + "  ".join(
                     f"Z{z} {shares[z]}%" for z in sorted(shares)
                 ))
+                legend = mv.zone_legend(a.hr_zones)
+                if legend:
+                    out.append(f"  Boundaries (bpm): {legend}")
+            mpb = mv.metres_per_beat(a.distance, a.moving_time, a.average_heartrate)
+            if mpb:
+                out.append(f"Aerobic efficiency: {mpb} m/beat")
 
             drift = mv.cardiac_drift(hr)
             if drift is not None:
@@ -555,3 +561,107 @@ async def call_api(
     except Exception as exc:  # noqa: BLE001
         logger.exception("call_api failed for %s", path)
         return f"Could not call {path}: {exc}"
+
+
+@mcp.tool()
+async def get_aerobic_trend(days: int = 90) -> str:
+    """Aerobic efficiency over time — is the same heart rate buying more distance?
+
+    Reports metres covered per heartbeat for each run, alongside pace and
+    average HR. Rising metres-per-beat across weeks is what base training is
+    supposed to produce, and it is a better progress signal than raw pace
+    because it is not fooled by a hard effort.
+
+    The figure is confounded by heat, so the weather-normalized pace is shown
+    beside it: in a 24-26 C dew point raw pace understates fitness by 20+ s/km.
+
+    Args:
+        days: how far back to look (1-365).
+    """
+    try:
+        days = max(1, min(365, days))
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        async with async_session() as session:
+            acts = (await session.execute(
+                select(Activity)
+                .where(Activity.start_date >= cutoff,
+                       Activity.average_heartrate.isnot(None),
+                       Activity.moving_time.isnot(None),
+                       Activity.distance > 500)
+                .order_by(Activity.start_date)
+            )).scalars().all()
+            if not acts:
+                return f"No runs with heart-rate data in the last {days} days."
+
+            lines = ["date | dist | pace | avgHR | m/beat | norm pace | terrain"]
+            for a in acts:
+                km = (a.distance or 0) / 1000.0
+                pace = (a.moving_time / km) if km else None
+                mpb = mv.metres_per_beat(a.distance, a.moving_time,
+                                         a.average_heartrate)
+                ter = mv.terrain(a.total_elevation_gain, a.elev_high,
+                                 a.elev_low, a.distance)
+                lines.append(
+                    f"{a.start_date:%Y-%m-%d} | {km:.2f}km | {_fmt_pace(pace)} | "
+                    f"{mv.num(a.average_heartrate)} | {mv.num(mpb, 2)} | "
+                    f"{_fmt_pace(a.normalized_pace_sec)} | "
+                    f"{(ter or {}).get('label', '—')}"
+                )
+            vals = [mv.metres_per_beat(a.distance, a.moving_time,
+                                       a.average_heartrate) for a in acts]
+            vals = [v for v in vals if v]
+            if len(vals) >= 4:
+                half = len(vals) // 2
+                first = sum(vals[:half]) / half
+                second = sum(vals[half:]) / len(vals[half:])
+                lines += ["", (
+                    f"Trend: {round(first, 2)} -> {round(second, 2)} m/beat "
+                    f"(older half vs newer half) — "
+                    f"{'improving' if second > first else 'flat or declining'}."
+                )]
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_aerobic_trend failed")
+        return f"Could not read the aerobic trend: {exc}"
+
+
+@mcp.tool()
+async def get_weekly_volume(weeks: int = 8) -> str:
+    """Training volume per ISO week — runs, distance, time, pace and Zone 5 share.
+
+    Answers "am I training consistently?" directly, which the phase summary in
+    get_training_context buries. The Zone 5 share is time-weighted across the
+    week, so a long hard run counts more than a short one.
+
+    Args:
+        weeks: how many recent weeks to return (1-52).
+    """
+    try:
+        weeks = max(1, min(52, weeks))
+        cutoff = datetime.utcnow() - timedelta(weeks=weeks)
+        async with async_session() as session:
+            acts = (await session.execute(
+                select(Activity)
+                .where(Activity.start_date >= cutoff,
+                       Activity.moving_time.isnot(None), Activity.distance > 0)
+                .order_by(Activity.start_date)
+            )).scalars().all()
+            if not acts:
+                return f"No runs in the last {weeks} weeks."
+            rows = [{
+                "start_date": a.start_date,
+                "distance": a.distance,
+                "moving_time": a.moving_time,
+                "z5": mv.zone_shares(a.hr_zones).get(5),
+            } for a in acts]
+            lines = ["week | runs | km | minutes | mean pace | Z5%"]
+            for b in mv.weekly_buckets(rows):
+                lines.append(
+                    f"{b['year']}-W{b['week']:02d} | {b['runs']} | {b['km']} | "
+                    f"{b['minutes']} | {_fmt_pace(b['pace_sec_per_km'])} | "
+                    f"{mv.num(b['z5_pct'])}%"
+                )
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_weekly_volume failed")
+        return f"Could not read weekly volume: {exc}"
