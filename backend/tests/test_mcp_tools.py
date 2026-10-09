@@ -229,3 +229,44 @@ async def test_get_records_and_training_context_do_not_raise(monkeypatch):
     assert "could not" not in recs.lower()
     assert "could not" not in ctx.lower()
     assert "gate" in ctx.lower()
+
+
+@pytest.mark.asyncio
+async def test_sync_garmin_reports_the_imported_count(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "k")
+
+    async def fake_sync(session):
+        return {"imported": 2, "error": None}
+    monkeypatch.setattr(mcp_server, "_garmin_sync", fake_sync)
+
+    out = await mcp_server.sync_garmin()
+
+    assert "2" in out
+
+
+@pytest.mark.asyncio
+async def test_sync_garmin_times_out_without_hanging(monkeypatch):
+    import asyncio
+    mcp_server = await _seed(monkeypatch, "l")
+
+    async def slow_sync(session):
+        await asyncio.sleep(5)
+    monkeypatch.setattr(mcp_server, "_garmin_sync", slow_sync)
+    monkeypatch.setattr(mcp_server, "SYNC_TIMEOUT_SEC", 0.1)
+
+    out = await mcp_server.sync_garmin()
+
+    assert "still running" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_sync_garmin_surfaces_an_error_readably(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "m")
+
+    async def broken_sync(session):
+        raise RuntimeError("no garmin token")
+    monkeypatch.setattr(mcp_server, "_garmin_sync", broken_sync)
+
+    out = await mcp_server.sync_garmin()
+
+    assert "no garmin token" in out.lower()

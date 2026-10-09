@@ -374,3 +374,60 @@ async def get_training_context() -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_training_context failed")
         return f"Could not read training context: {exc}"
+
+
+import asyncio
+
+# Garmin's import pages through the activity list, so it can outlast a tool
+# call. Bounded, but the work is shielded so it genuinely continues server-side
+# past the timeout rather than being cancelled half-done.
+SYNC_TIMEOUT_SEC = 60.0
+
+
+async def _garmin_sync(session):
+    """Indirection so tests can substitute the import without touching Garmin."""
+    import main as _main
+    return await _main.import_garmin_sync(session)
+
+
+@mcp.tool()
+async def sync_garmin() -> str:
+    """Pull any new runs from Garmin into RunFlow.
+
+    The only action in this connector — everything else is read-only. Safe to
+    call repeatedly: the import is deduplicated by Garmin activity id and stops
+    once it reaches runs already stored.
+
+    Returns the number of runs imported. If the import outlasts the timeout it
+    keeps running on the server and the result says so — call list_recent_runs a
+    minute later to see what landed.
+    """
+    async def _run():
+        async with async_session() as session:
+            return await _garmin_sync(session)
+
+    task = asyncio.create_task(_run())
+    try:
+        # shield so a timeout leaves the import running instead of cancelling a
+        # half-finished pass over the Garmin activity list.
+        res = await asyncio.wait_for(asyncio.shield(task), timeout=SYNC_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        task.add_done_callback(
+            lambda t: logger.info("background garmin sync finished: %s",
+                                  t.exception() or t.result())
+        )
+        return (
+            "Sync still running on the server — it outlasted the "
+            f"{int(SYNC_TIMEOUT_SEC)}s tool timeout but was not cancelled. "
+            "Call list_recent_runs shortly to see what was imported."
+        )
+    except Exception as exc:  # noqa: BLE001 — a raising tool gives Claude nothing
+        logger.exception("sync_garmin failed")
+        return f"Garmin sync failed: {exc}"
+
+    res = res or {}
+    imported = res.get("imported", 0)
+    err = res.get("error")
+    return f"Imported {imported} new run(s) from Garmin." + (
+        f" Warning: {err}" if err else ""
+    )
