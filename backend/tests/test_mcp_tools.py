@@ -30,3 +30,117 @@ async def test_mcp_mounts_under_the_secret_path(monkeypatch):
     importlib.reload(mcp_server); importlib.reload(main)
 
     assert any(getattr(r, "path", "") == "/mcp/testsecret" for r in main.app.routes)
+
+
+from datetime import datetime, timedelta
+
+
+async def _seed(monkeypatch, tag="a"):
+    """Temp DB with one clean run and one fragmented run, both with HR streams."""
+    tmp = tempfile.mktemp(suffix=f"{tag}.db")
+    monkeypatch.setenv("DB_PATH", tmp)
+    monkeypatch.setenv("MCP_SECRET", "testsecret")
+    import importlib, config, database
+    importlib.reload(config); importlib.reload(database)
+    await database.init_db()
+    from models import Activity, Stream
+    import mcp_server, main
+    importlib.reload(mcp_server); importlib.reload(main)
+
+    now = datetime(2026, 10, 9, 6, 0, 0)
+    async with database.async_session() as s:
+        s.add(Activity(
+            id=1, name="Clean run", distance=3500.0, moving_time=1450,
+            elapsed_time=1450, start_date=now - timedelta(days=1),
+            average_speed=3500.0 / 1450, average_heartrate=182.0,
+            max_heartrate=195.0, average_cadence=156.0, source="garmin",
+            aerobic_te=4.2, anaerobic_te=0.0, training_effect_label="VO2MAX",
+            temp_c=26.0, dew_point_c=24.0, heat_index=155.0,
+            heat_penalty_sec=22.0, normalized_pace_sec=392.0,
+            running_dynamics={"stride_length": 92.2, "ground_contact_time": 301.3,
+                              "vertical_oscillation": 8.8},
+            hr_zones=[{"zone": z, "secs": 290.0, "low_bpm": b}
+                      for z, b in [(1, 105), (2, 126), (3, 147), (4, 168), (5, 189)]],
+        ))
+        s.add(Stream(activity_id=1, stream_type="time", data=list(range(1451))))
+        s.add(Stream(activity_id=1, stream_type="distance",
+                     data=[i * (3500.0 / 1450) for i in range(1451)]))
+        s.add(Stream(activity_id=1, stream_type="heartrate",
+                     data=[150.0] * 725 + [195.0] * 726))
+
+        # A fragmented run: 600 s standing still at the 1 km mark.
+        t, time_s, dist_s = 0, [], []
+        for metre in range(0, 2001):
+            if metre == 1000:
+                t += 600
+            time_s.append(t); dist_s.append(float(metre)); t += 1
+        s.add(Activity(
+            id=2, name="Paused run", distance=2000.0, moving_time=2000,
+            elapsed_time=2002, start_date=now - timedelta(days=3),
+            average_speed=1.0, average_heartrate=175.0, max_heartrate=202.0,
+            source="garmin",
+        ))
+        s.add(Stream(activity_id=2, stream_type="time", data=time_s))
+        s.add(Stream(activity_id=2, stream_type="distance", data=dist_s))
+        s.add(Stream(activity_id=2, stream_type="heartrate", data=[180.0] * 2001))
+        await s.commit()
+    return mcp_server
+
+
+@pytest.mark.asyncio
+async def test_list_recent_runs_reports_pace_hr_and_fragmentation(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "b")
+
+    out = await mcp_server.list_recent_runs(limit=5)
+
+    assert "3.50" in out
+    assert "182" in out
+    assert "fragmented" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_list_recent_runs_says_so_when_there_are_no_runs(monkeypatch):
+    tmp = tempfile.mktemp(suffix="c.db")
+    monkeypatch.setenv("DB_PATH", tmp)
+    monkeypatch.setenv("MCP_SECRET", "testsecret")
+    import importlib, config, database
+    importlib.reload(config); importlib.reload(database)
+    await database.init_db()
+    import mcp_server, main
+    importlib.reload(mcp_server); importlib.reload(main)
+
+    out = await mcp_server.list_recent_runs(limit=5)
+
+    assert "no runs" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_run_detail_includes_splits_drift_and_zones(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "d")
+
+    out = await mcp_server.get_run_detail(run_id=1)
+
+    assert "split" in out.lower()
+    assert "drift" in out.lower()
+    assert "+45" in out
+    assert "Z5" in out
+
+
+@pytest.mark.asyncio
+async def test_get_run_detail_lists_the_pauses(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "e")
+
+    out = await mcp_server.get_run_detail(run_id=2)
+
+    assert "pause" in out.lower()
+    # The gap spans metre 999 (t=999) to metre 1000 (t=1600): 601 s.
+    assert "10m01s" in out
+
+
+@pytest.mark.asyncio
+async def test_get_run_detail_on_a_missing_run_is_readable(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "f")
+
+    out = await mcp_server.get_run_detail(run_id=9999)
+
+    assert "not found" in out.lower()
