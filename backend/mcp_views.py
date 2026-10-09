@@ -107,3 +107,46 @@ def split_table(
         })
         prev_t, prev_i = t, i
     return rows
+
+
+def cardiac_drift(hr: Optional[list[Optional[float]]]) -> Optional[float]:
+    """Second-half mean HR minus first-half mean HR.
+
+    Read this alongside the zone shares, never alone: a run that finally starts
+    easy pushes the first-half mean down and so reports *higher* drift than a
+    run that was hard from the gun. The metric punishes good pacing, so high
+    drift with a falling Zone 5 share is improvement, not regression.
+    """
+    vals = [h for h in (hr or []) if h]
+    if len(vals) < 2:
+        return None
+    mid = len(vals) // 2
+    first, second = vals[:mid], vals[mid:]
+    return round(sum(second) / len(second) - sum(first) / len(first), 1)
+
+
+def seconds_to_cross(
+    hr: Optional[list[Optional[float]]],
+    time: Optional[list[Optional[int]]],
+    bpm: int,
+) -> Optional[int]:
+    """When HR first reached `bpm` — how long the aerobic part of the run lasted."""
+    if not hr or not time:
+        return None
+    for i, h in enumerate(hr):
+        if h and h >= bpm and i < len(time) and time[i] is not None:
+            return time[i]
+    return None
+
+
+def zone_shares(zones: Optional[list[dict[str, Any]]]) -> dict[int, float]:
+    """Percentage of recorded time in each HR zone."""
+    rows = zones or []
+    total = sum((z.get("secs") or 0.0) for z in rows)
+    if not total:
+        return {}
+    return {
+        int(z["zone"]): round(100.0 * (z.get("secs") or 0.0) / total, 1)
+        for z in rows
+        if z.get("zone") is not None
+    }

@@ -58,3 +58,47 @@ def test_splits_use_moving_time_not_wall_clock():
     # 500 m at 1 m/s = 1000 s/km, and the pause must not leak into split 2.
     assert splits[0]["pace_sec_per_km"] == 1000
     assert splits[1]["pace_sec_per_km"] == 1000
+
+
+def test_cardiac_drift_is_second_half_mean_minus_first_half_mean():
+    hr = [150.0] * 10 + [170.0] * 10
+
+    assert mv.cardiac_drift(hr) == 20.0
+
+
+def test_cardiac_drift_is_none_without_enough_samples():
+    assert mv.cardiac_drift([150.0]) is None
+    assert mv.cardiac_drift(None) is None
+
+
+def test_seconds_to_cross_returns_first_crossing():
+    hr = [140.0, 150.0, 170.0, 195.0]
+    time = [0, 10, 20, 30]
+
+    assert mv.seconds_to_cross(hr, time, 168) == 20
+    assert mv.seconds_to_cross(hr, time, 189) == 30
+
+
+def test_seconds_to_cross_returns_none_when_never_crossed():
+    assert mv.seconds_to_cross([140.0, 150.0], [0, 1], 189) is None
+
+
+def test_zone_shares_are_percentages_of_recorded_time():
+    zones = [
+        {"zone": 1, "secs": 0.0, "low_bpm": 105},
+        {"zone": 2, "secs": 25.0, "low_bpm": 126},
+        {"zone": 3, "secs": 25.0, "low_bpm": 147},
+        {"zone": 4, "secs": 25.0, "low_bpm": 168},
+        {"zone": 5, "secs": 25.0, "low_bpm": 189},
+    ]
+
+    shares = mv.zone_shares(zones)
+
+    assert shares[5] == 25.0
+    assert shares[1] == 0.0
+    assert sum(shares.values()) == 100.0
+
+
+def test_zone_shares_handles_missing_zones():
+    assert mv.zone_shares(None) == {}
+    assert mv.zone_shares([]) == {}
