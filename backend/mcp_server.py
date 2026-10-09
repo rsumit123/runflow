@@ -100,19 +100,23 @@ async def list_recent_runs(limit: int = 10, since: Optional[str] = None) -> str:
             if not acts:
                 return "No runs found for that range."
 
-            lines = ["id | date | dist | pace | avgHR | maxHR | Z5% | TE | heat | notes"]
+            lines = ["id | date | dist | pace | avgHR | maxHR | Z5% | TE | "
+                     "terrain | heat | notes"]
             for a in acts:
                 km = (a.distance or 0) / 1000.0
                 pace = (a.moving_time / km) if (km and a.moving_time) else None
                 shares = mv.zone_shares(a.hr_zones)
                 st = await _streams_for(session, a.id)
                 pauses = mv.find_pauses(st.get("time"), st.get("distance"))
+                ter = mv.terrain(a.total_elevation_gain, a.elev_high,
+                                 a.elev_low, a.distance)
                 notes = f"fragmented ({len(pauses)} pauses)" if pauses else ""
                 lines.append(
                     f"{a.id} | {a.start_date:%Y-%m-%d} | {km:.2f}km | "
                     f"{_fmt_pace(pace)} | {mv.num(a.average_heartrate)} | "
                     f"{mv.num(a.max_heartrate)} | {mv.num(shares.get(5))}% | "
                     f"{mv.num(a.aerobic_te)} {a.training_effect_label or ''} | "
+                    f"{(ter or {}).get('label', '—')} | "
                     f"{mv.num(a.heat_penalty_sec)} s/km | {notes}"
                 )
             return mv.cap_text("\n".join(lines))
@@ -204,6 +208,35 @@ async def get_run_detail(run_id: int) -> str:
                     f"{mv.num(rd.get('ground_contact_time'), 1)} ms · vertical "
                     f"oscillation {mv.num(rd.get('vertical_oscillation'), 2)} cm"
                 )]
+
+            ter = mv.terrain(a.total_elevation_gain, a.elev_high,
+                             a.elev_low, a.distance)
+            if ter:
+                out += ["", (
+                    f"Terrain: {ter['label']} — {mv.num(ter['gain_m'])} m gain"
+                    f" ({mv.num(ter['gain_per_km'])} m/km), elevation range "
+                    f"{mv.num(ter['range_m'])} m"
+                )]
+                if ter["label"] == "flat":
+                    out.append(
+                        "  Flat ground: a climbing heart rate here is effort and "
+                        "drift, with no terrain to attribute it to."
+                    )
+            if a.start_latlng:
+                line = f"Started at {a.start_latlng[0]:.5f}, {a.start_latlng[1]:.5f}"
+                prev = (await session.execute(
+                    select(Activity)
+                    .where(Activity.start_date < a.start_date,
+                           Activity.start_latlng.isnot(None))
+                    .order_by(Activity.start_date.desc()).limit(1)
+                )).scalars().first()
+                if prev is not None:
+                    same = mv.same_place(a.start_latlng, prev.start_latlng)
+                    if same is True:
+                        line += " — same place as the previous run"
+                    elif same is False:
+                        line += " — a different place from the previous run"
+                out.append(line)
 
             if a.dew_point_c is not None:
                 out += ["", (

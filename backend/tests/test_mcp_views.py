@@ -162,3 +162,38 @@ def test_num_rounds_float_noise_away():
 
 def test_num_renders_missing_values_as_a_dash():
     assert mv.num(None) == "—"
+
+
+def test_terrain_calls_a_track_run_flat():
+    # Real 2026-10-09 run: no gain, 1.8 m spread over 2.51 km — the stadium track.
+    t = mv.terrain(0.0, 174.4, 172.6, 2510.0)
+
+    assert t["label"] == "flat"
+    assert t["gain_m"] == 0.0
+    assert t["range_m"] == 1.8
+
+
+def test_terrain_calls_a_road_run_rolling():
+    # Real 2026-10-08 run: 27 m gain, 20.6 m spread over 3.73 km.
+    t = mv.terrain(27.0, 183.8, 163.2, 3730.0)
+
+    assert t["label"] == "rolling"
+    assert t["gain_per_km"] == 7.2
+
+
+def test_terrain_calls_a_steep_run_hilly():
+    t = mv.terrain(80.0, 200.0, 150.0, 3000.0)
+
+    assert t["label"] == "hilly"
+
+
+def test_terrain_is_none_without_elevation_data():
+    assert mv.terrain(None, None, None, 3000.0) is None
+    assert mv.terrain(0.0, 174.0, 172.0, None) is None
+
+
+def test_same_place_compares_start_points():
+    assert mv.same_place([22.7762, 86.2533], [22.7762, 86.2533]) is True
+    # ~1.6 km apart — the Oct 7/8 location vs the track.
+    assert mv.same_place([22.7762, 86.2533], [22.7579, 86.2661]) is False
+    assert mv.same_place(None, [22.7762, 86.2533]) is None
