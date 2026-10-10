@@ -1321,6 +1321,50 @@ async def set_activity_note(activity_id: int, req: NoteRequest,
     return {"activity_id": activity_id, "note": act.notes}
 
 
+class AdhocWorkoutRequest(BaseModel):
+    name: str
+    date: str                       # YYYY-MM-DD
+    steps: list[dict[str, Any]]     # garmin_workout step dicts
+
+
+@app.post("/api/workouts/adhoc")
+async def push_adhoc_workout(req: AdhocWorkoutRequest):
+    """Push a one-off structured workout to the watch, with no plan behind it.
+
+    Benchmark attempts and test runs are not plan sessions, but they are exactly
+    the runs that need the watch holding the pace — the usual failure is going
+    out too fast and falling apart late. Returns the Garmin workout id so it can
+    be removed again.
+    """
+    if not req.steps:
+        raise HTTPException(status_code=400, detail="A workout needs at least one step.")
+    try:
+        when = datetime.fromisoformat(req.date).date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    if when < datetime.utcnow().date():
+        # Garmin accepts a past date and then the watch never shows it.
+        raise HTTPException(status_code=400, detail="Cannot schedule a workout in the past.")
+    try:
+        res = await garmin.push_workout(req.name, req.steps, when.isoformat())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Ad-hoc Garmin push failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Garmin push failed: {exc}")
+    return {"workout_id": res["workout_id"], "date": when.isoformat(),
+            "name": req.name, "steps": len(req.steps)}
+
+
+@app.delete("/api/workouts/adhoc/{workout_id}")
+async def delete_adhoc_workout(workout_id: int):
+    """Remove a one-off workout from Garmin Connect and the watch calendar."""
+    try:
+        await garmin.remove_workout(workout_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Ad-hoc Garmin removal failed for %s: %s", workout_id, exc)
+        raise HTTPException(status_code=502, detail=f"Garmin removal failed: {exc}")
+    return {"removed": workout_id}
+
+
 @app.post("/api/best-efforts/compute-all")
 async def compute_all_efforts(session: AsyncSession = Depends(get_session)):
     """Compute best efforts for all activities with streams. Runs synchronously."""
