@@ -381,22 +381,84 @@ async def get_records() -> str:
 async def get_training_context() -> str:
     """Where the athlete is in their training right now.
 
-    The current phases, the active plan and its week number, today's planned
-    workout with the readiness-based recommendation, and progress toward the
-    sub-6:00/km gate — reported both as the raw best pace and as the
-    weather-normalized equivalent, because dew point has been costing 20+ s/km.
+    A summary, not a data dump: the current training phase and the one before
+    it, the active plan, today's session with the readiness-based
+    recommendation, and progress toward the sub-6:00/km gate — reported both
+    raw and weather-normalized, because dew point has been costing 20+ s/km.
+
+    Use get_weekly_volume for week-by-week detail and get_records for PRs.
     """
     try:
         import main as _main
+        out = []
         async with async_session() as session:
             # gap_days must be passed explicitly: its endpoint default is a
-            # FastAPI Query object, which is only resolved by the HTTP layer.
+            # FastAPI Query object, only resolved by the HTTP layer.
             phases = await _main.get_phases(gap_days=14, session=session)
+            rows = (phases or {}).get("phases") or []
+            if rows:
+                cur = rows[-1]
+                out.append(
+                    f"Current phase {cur.get('phase_number')}: started "
+                    f"{str(cur.get('start_date'))[:10]}, "
+                    f"{cur.get('duration_days')} days, {cur.get('total_runs')} runs, "
+                    f"{cur.get('total_distance_km')} km, "
+                    f"{cur.get('runs_per_week')} runs/week, avg pace "
+                    f"{_fmt_pace(cur.get('avg_pace_sec_per_km'))}"
+                )
+                if cur.get("break_before_days"):
+                    out.append(
+                        f"  Preceded by a {cur['break_before_days']}-day break."
+                    )
+                if len(rows) > 1:
+                    prev = rows[-2]
+                    out.append(
+                        f"Previous phase {prev.get('phase_number')}: "
+                        f"{prev.get('total_runs')} runs, "
+                        f"{prev.get('total_distance_km')} km, "
+                        f"{prev.get('runs_per_week')} runs/week, avg pace "
+                        f"{_fmt_pace(prev.get('avg_pace_sec_per_km'))}"
+                    )
+                out.append(f"({len(rows)} phases on record since 2019.)")
+
             plan = await _main.get_active_plan(session)
+            p = (plan or {}).get("plan")
+            if p:
+                target = p.get("sprint_target_sec") or p.get("target_time_sec")
+                out += ["", (
+                    f"Active plan #{p.get('id')}: {p.get('goal_type')}, target "
+                    f"{target}, started {str(p.get('start_date'))[:10]}, goal date "
+                    f"{str(p.get('goal_date'))[:10]}, {p.get('weeks')} weeks, "
+                    f"status {p.get('status')}"
+                )]
+                prof = p.get("profile") or {}
+                if prof.get("diagnosis"):
+                    out.append(f"  Diagnosis: {prof['diagnosis']}")
+            else:
+                out += ["", "No active plan."]
+
             try:
-                guidance = await _main.today_guidance(session=session)
+                g = await _main.today_guidance(session=session)
             except Exception as exc:  # noqa: BLE001 — needs the watch, may be absent
-                guidance = {"note": f"today's guidance unavailable: {exc}"}
+                g = None
+                out += ["", f"Today's guidance unavailable: {exc}"]
+            if g:
+                w = (g.get("workout") or {}).get("workout") or g.get("workout") or {}
+                rec = g.get("recommendation") or {}
+                rd = g.get("readiness") or {}
+                out += ["", (
+                    f"Today: planned \"{w.get('title', '—')}\" "
+                    f"({w.get('day_type', '—')})"
+                )]
+                out.append(
+                    f"  Recommendation: {rec.get('action', '—')} — "
+                    f"{rec.get('reason', '')}"
+                )
+                out.append(
+                    f"  Readiness {rd.get('score')} ({rd.get('level')}). Note: on a "
+                    "day the athlete has already run, this score was captured "
+                    "after the run and understates their morning state."
+                )
 
             acts = (await session.execute(
                 select(Activity)
@@ -410,17 +472,12 @@ async def get_training_context() -> str:
                 (a.normalized_pace_sec for a in acts if a.normalized_pace_sec),
                 default=None,
             )
-            gate = (
-                f"Gate (sub-6:00/km): best of last {len(acts)} runs is "
+            out += ["", (
+                f"Gate (sub-6:00/km): best of the last {len(acts)} runs is "
                 f"{_fmt_pace(best_raw)} raw, {_fmt_pace(best_norm)} "
                 "weather-normalized."
-            )
-            return mv.cap_text(
-                "Phases:\n" + _json_block(phases)
-                + "\n\nActive plan:\n" + _json_block(plan)
-                + "\n\nToday:\n" + _json_block(guidance)
-                + "\n\n" + gate
-            )
+            )]
+        return mv.cap_text("\n".join(out))
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_training_context failed")
         return f"Could not read training context: {exc}"

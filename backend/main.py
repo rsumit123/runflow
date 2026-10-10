@@ -67,9 +67,6 @@ import_progress: dict[str, dict[str, Any]] = {}
 # the last import. Leaving that to a button meant a run could land on the watch and
 # never reach the plan.
 AUTO_SYNC_INTERVAL_SEC = 2 * 60 * 60
-# Past this age, a run with no archive row never will have one — stop retrying.
-WEATHER_GIVE_UP_DAYS = 30
-
 last_auto_sync: dict[str, Any] = {"at": None, "imported": 0, "error": None}
 
 
@@ -3162,14 +3159,25 @@ async def _backfill_weather(session: AsyncSession, force: bool = False) -> dict[
     q = select(Activity).where(Activity.average_speed.isnot(None),
                                Activity.start_date.isnot(None))
     if not force:
-        q = q.where(Activity.weather_checked.is_(False) | Activity.weather_checked.is_(None))
+        # Also pick back up anything still missing conditions inside the
+        # give-up window. An earlier version of this function marked a run
+        # checked before testing whether the hour was actually found, so rows
+        # exist that were never going to be retried; this heals them without a
+        # manual repair, and bounds the work to the recent window.
+        retry_after = datetime.utcnow() - timedelta(days=config.WEATHER_GIVE_UP_DAYS)
+        q = q.where(
+            Activity.weather_checked.is_(False)
+            | Activity.weather_checked.is_(None)
+            | (Activity.temp_c.is_(None) & (Activity.start_date >= retry_after))
+        )
     acts = (await session.execute(q)).scalars().all()
     if not acts:
-        return {"updated": 0, "skipped": 0}
+        return {"updated": 0, "skipped": 0, "total": 0}
 
     loc = await _run_location(session)
     if not loc:
-        return {"updated": 0, "skipped": len(acts), "error": "no GPS location on any run"}
+        return {"updated": 0, "skipped": len(acts), "total": len(acts),
+                "error": "no GPS location on any run"}
     lat, lon = loc
 
     by_year: dict[int, list[Activity]] = {}
@@ -3201,7 +3209,7 @@ async def _backfill_weather(session: AsyncSession, force: bool = False) -> dict[
                 # is never going to cover it, or every backfill would re-fetch
                 # the whole history forever.
                 age_days = (datetime.utcnow() - a.start_date).days
-                if age_days > WEATHER_GIVE_UP_DAYS:
+                if age_days > config.WEATHER_GIVE_UP_DAYS:
                     a.weather_checked = True
                 skipped += 1
                 continue
