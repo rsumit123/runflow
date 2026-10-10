@@ -15,8 +15,17 @@ async def _app(monkeypatch, tag):
     tmp = tempfile.mktemp(suffix=f"{tag}.db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     import mcp_server, main
     importlib.reload(mcp_server); importlib.reload(main)
