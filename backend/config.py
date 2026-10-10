@@ -97,3 +97,7 @@ MCP_SECRET = os.getenv("MCP_SECRET", "").strip()
 # A run note is context, not a journal — capped so rows stay small and the MCP
 # tool output stays readable. Enforced by both the REST endpoint and the tool.
 NOTE_MAX_CHARS = 2000
+
+# Past this age, a run with no weather-archive row never will have one — stop
+# retrying it. Also bounds how far back the self-healing retry sweeps.
+WEATHER_GIVE_UP_DAYS = 30

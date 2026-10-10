@@ -96,3 +96,62 @@ async def test_auto_sync_backfills_weather(monkeypatch):
     await main._auto_sync_once()
 
     assert "weather" in calls
+
+
+@pytest.mark.asyncio
+async def test_a_run_already_poisoned_by_the_old_bug_is_retried(monkeypatch):
+    """Rows marked checked with no conditions must heal themselves.
+
+    The pre-fix backfill set weather_checked before testing whether the hour
+    was found, so recent runs it could not cover were marked done forever.
+    Those rows exist in production; the backfill has to pick them back up
+    rather than needing a manual repair.
+    """
+    main, database = await _app(monkeypatch, "wd")
+    from models import Activity
+
+    async with database.async_session() as s:
+        s.add(Activity(id=3, name="Poisoned", distance=3000.0, moving_time=1200,
+                       start_date=datetime.utcnow() - timedelta(days=1),
+                       average_speed=2.5, start_latlng=[22.77, 86.25],
+                       weather_checked=True, temp_c=None))
+        await s.commit()
+
+    async def archive_now_has_it(lat, lon, lo, hi):
+        day = (datetime.utcnow() - timedelta(days=1)) + timedelta(hours=5.5)
+        return {"_utc_offset_h": 5.5, day.strftime("%Y-%m-%dT%H:00"): (27.0, 24.0)}
+    monkeypatch.setattr(main.weather, "archive_hourly", archive_now_has_it)
+
+    async with database.async_session() as s:
+        await main._backfill_weather(s)
+
+    async with database.async_session() as s:
+        a = await s.get(Activity, 3)
+        assert a.temp_c == 27.0, "a poisoned recent run must be retried and filled"
+
+
+@pytest.mark.asyncio
+async def test_an_old_filled_run_is_not_refetched(monkeypatch):
+    """Healing must not mean re-fetching the whole history every pass."""
+    main, database = await _app(monkeypatch, "we")
+    from models import Activity
+
+    async with database.async_session() as s:
+        s.add(Activity(id=4, name="Done", distance=3000.0, moving_time=1200,
+                       start_date=datetime.utcnow() - timedelta(days=5),
+                       average_speed=2.5, start_latlng=[22.77, 86.25],
+                       weather_checked=True, temp_c=25.0))
+        await s.commit()
+
+    fetched = []
+
+    async def spy(lat, lon, lo, hi):
+        fetched.append((lo, hi))
+        return {"_utc_offset_h": 5.5}
+    monkeypatch.setattr(main.weather, "archive_hourly", spy)
+
+    async with database.async_session() as s:
+        res = await main._backfill_weather(s)
+
+    assert res["total"] == 0
+    assert fetched == []

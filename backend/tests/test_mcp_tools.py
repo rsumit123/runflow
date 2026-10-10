@@ -422,3 +422,16 @@ async def test_get_weekly_volume_groups_by_week(monkeypatch):
 
     assert "week" in out.lower()
     assert "km" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_training_context_summarises_rather_than_dumping_json(monkeypatch):
+    """The raw phase list is tens of objects; a summary is what's useful."""
+    mcp_server = await _seed(monkeypatch, "y")
+
+    out = await mcp_server.get_training_context()
+
+    assert '"phase_number"' not in out, "should not dump raw phase JSON"
+    assert out.count("{") < 5, "output should be prose/table, not a JSON blob"
+    assert "gate" in out.lower()
+    assert "current phase" in out.lower()
