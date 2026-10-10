@@ -262,3 +262,10 @@ block local testing. To enable, add to the nginx server block:
 #     proxy_set_header X-Forwarded-Proto $scheme;
 # }
 ```
+
+**Tools exposed.** Reads: \`list_recent_runs\`, \`get_run_detail\`,
+\`compare_runs\`, \`get_recovery\`, \`get_records\`, \`get_training_context\`,
+\`get_aerobic_trend\`, \`get_weekly_volume\`, and \`call_api\` (GET routes only).
+Writes: \`sync_garmin\` (triggers the Garmin import) and \`set_run_note\` (the
+athlete's own context on a run, max 2000 chars — the only field in the database
+this connector can change).

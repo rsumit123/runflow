@@ -93,3 +93,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # or a custom header. Unset means the MCP server is not mounted at all, so a
 # missing secret fails closed rather than exposing an open endpoint.
 MCP_SECRET = os.getenv("MCP_SECRET", "").strip()
+
+# A run note is context, not a journal — capped so rows stay small and the MCP
+# tool output stays readable. Enforced by both the REST endpoint and the tool.
+NOTE_MAX_CHARS = 2000

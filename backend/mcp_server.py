@@ -110,7 +110,12 @@ async def list_recent_runs(limit: int = 10, since: Optional[str] = None) -> str:
                 pauses = mv.find_pauses(st.get("time"), st.get("distance"))
                 ter = mv.terrain(a.total_elevation_gain, a.elev_high,
                                  a.elev_low, a.distance)
-                notes = f"fragmented ({len(pauses)} pauses)" if pauses else ""
+                flags = []
+                if pauses:
+                    flags.append(f"fragmented ({len(pauses)} pauses)")
+                if a.notes:
+                    flags.append("has note")
+                notes = "; ".join(flags)
                 lines.append(
                     f"{a.id} | {a.start_date:%Y-%m-%d} | {km:.2f}km | "
                     f"{_fmt_pace(pace)} | {mv.num(a.average_heartrate)} | "
@@ -163,6 +168,9 @@ async def get_run_detail(run_id: int) -> str:
                 f" {mv.num(a.anaerobic_te)} anaerobic "
                 f"{a.training_effect_label or ''}",
             ]
+
+            if a.notes:
+                out.append(f"Note: {a.notes}")
 
             shares = mv.zone_shares(a.hr_zones)
             if shares:
@@ -665,3 +673,43 @@ async def get_weekly_volume(weeks: int = 8) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_weekly_volume failed")
         return f"Could not read weekly volume: {exc}"
+
+
+@mcp.tool()
+async def set_run_note(run_id: int, note: str) -> str:
+    """Record the athlete's own context on a run.
+
+    THE ONLY WRITE in this connector. Use it for what the watch cannot know and
+    the athlete just told you: the surface ("flat stadium track"), how the body
+    felt ("hip tight afterwards"), what the session was for, why it was cut
+    short. That context is what makes a later read correct — a flat track run
+    and a hill route are indistinguishable from pace and HR alone.
+
+    Write a note when the athlete volunteers something a future reader would
+    need. Do not invent or infer one, and do not paraphrase your own analysis
+    into it: the note is their record, not yours. Replaces any existing note on
+    that run; an empty string clears it.
+
+    Args:
+        run_id: the activity id, from list_recent_runs.
+        note: the text to store (max 2000 characters). Empty clears it.
+    """
+    try:
+        text = (note or "").strip()
+        if len(text) > config.NOTE_MAX_CHARS:
+            return (
+                f"Note too long: {len(text)} characters, maximum "
+                f"{config.NOTE_MAX_CHARS}. Trim it and try again."
+            )
+        async with async_session() as session:
+            a = await session.get(Activity, run_id)
+            if a is None:
+                return f"Run {run_id} not found."
+            a.notes = text or None
+            await session.commit()
+            if not text:
+                return f"Note cleared on run {run_id}."
+            return f"Note saved on run {run_id} ({a.start_date:%Y-%m-%d}): {text}"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("set_run_note failed")
+        return f"Could not save the note on run {run_id}: {exc}"

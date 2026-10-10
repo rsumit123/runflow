@@ -32,6 +32,7 @@ _MIGRATIONS = {
         "anaerobic_te": "FLOAT",
         "training_effect_label": "TEXT",
         "training_load": "FLOAT",
+        "notes": "TEXT",
     },
     "splits": {
         "average_cadence": "FLOAT",
