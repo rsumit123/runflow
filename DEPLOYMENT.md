@@ -225,9 +225,11 @@ gcloud compute ssh socialflow --project=polar-pillar-450607-b7 --zone=us-east1-d
 ```
 Then re-paste the new URL in the Claude app.
 
-**Tools exposed** (read-only except `sync_garmin`): `list_recent_runs`,
-`get_run_detail`, `compare_runs`, `get_recovery`, `get_records`,
-`get_training_context`, `sync_garmin`, `call_api` (GET routes only).
+**Tools exposed.** Reads: `list_recent_runs`, `get_run_detail`, `compare_runs`,
+`get_recovery`, `get_records`, `get_training_context`, `get_aerobic_trend`,
+`get_weekly_volume`, and `call_api` (GET routes only). Writes: `sync_garmin`
+(triggers the Garmin import) and `set_run_note` (the athlete's own context on a
+run, max 2000 chars — the only field in the database this connector can change).
 
 **Verifying after a deploy:**
 ```bash
@@ -262,10 +264,3 @@ block local testing. To enable, add to the nginx server block:
 #     proxy_set_header X-Forwarded-Proto $scheme;
 # }
 ```
-
-**Tools exposed.** Reads: \`list_recent_runs\`, \`get_run_detail\`,
-\`compare_runs\`, \`get_recovery\`, \`get_records\`, \`get_training_context\`,
-\`get_aerobic_trend\`, \`get_weekly_volume\`, and \`call_api\` (GET routes only).
-Writes: \`sync_garmin\` (triggers the Garmin import) and \`set_run_note\` (the
-athlete's own context on a run, max 2000 chars — the only field in the database
-this connector can change).
