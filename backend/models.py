@@ -33,6 +33,11 @@ class Activity(Base):
     hr_zones = Column(JSON, nullable=True)            # [{zone, secs}, ...]
     running_dynamics = Column(JSON, nullable=True)    # {stride_length, gct, vertical_oscillation}
 
+    # Context the sensors cannot capture — surface, how the body felt, what the
+    # session was for. Without it a later read has to guess: a flat track run
+    # and a hill route look the same in pace and HR alone.
+    notes = Column(Text, nullable=True)
+
     # Conditions this run was actually run in. Without these, a 14 C February run
     # and a 31 C monsoon run get compared as if they were the same effort — which
     # is the flaw in every pace trend this app (and Garmin, and Strava) draws.

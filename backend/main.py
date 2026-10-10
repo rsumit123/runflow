@@ -201,6 +201,7 @@ def _activity_to_dict(act: Activity) -> dict[str, Any]:
         "max_heartrate": act.max_heartrate,
         "average_cadence": act.average_cadence,
         "hr_zones": act.hr_zones,
+        "notes": act.notes,
         "running_dynamics": act.running_dynamics,
     }
 
@@ -1296,6 +1297,32 @@ async def get_activity(activity_id: int, session: AsyncSession = Depends(get_ses
 # ---------------------------------------------------------------------------
 # Best Efforts endpoints
 # ---------------------------------------------------------------------------
+
+class NoteRequest(BaseModel):
+    note: str = ""
+
+
+@app.put("/api/activities/{activity_id}/notes")
+async def set_activity_note(activity_id: int, req: NoteRequest,
+                            session: AsyncSession = Depends(get_session)):
+    """Attach the athlete's own context to a run.
+
+    The one writable field on an activity: everything else comes from the watch.
+    An empty string clears it.
+    """
+    act = await session.get(Activity, activity_id)
+    if act is None:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    text = (req.note or "").strip()
+    if len(text) > config.NOTE_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Note too long ({len(text)} chars, max {config.NOTE_MAX_CHARS})",
+        )
+    act.notes = text or None
+    await session.commit()
+    return {"activity_id": activity_id, "note": act.notes}
+
 
 @app.post("/api/best-efforts/compute-all")
 async def compute_all_efforts(session: AsyncSession = Depends(get_session)):

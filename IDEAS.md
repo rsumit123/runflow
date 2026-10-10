@@ -13,7 +13,8 @@
 - [x] Interval Analysis - User-defined rep count + distance analysis
 - [x] Run Analysis - Percentiles, PR detection, phase comparison
 - [x] Run Insights - Route-aware narrative with segment-by-segment comparison to recent runs
-- [x] MCP Connector - RunFlow as a Claude app custom connector (8 tools, read + Garmin sync)
+- [x] MCP Connector - RunFlow as a Claude app custom connector (11 tools; reads + Garmin sync + run notes)
+- [x] Run Notes - athlete's own context per run (surface, how it felt), writable from the connector
 
 ## To Explore
 - [ ] Insight Improvements - Compare to phase-specific history, detect training load trends, more specific tips based on goal progress
