@@ -9,8 +9,17 @@ async def test_mcp_mounts_only_when_a_secret_is_set(monkeypatch):
     tmp = tempfile.mktemp(suffix=".db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     import mcp_server, main
     importlib.reload(mcp_server); importlib.reload(main)
@@ -23,8 +32,17 @@ async def test_mcp_mounts_under_the_secret_path(monkeypatch):
     tmp = tempfile.mktemp(suffix=".db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     import mcp_server, main
     importlib.reload(mcp_server); importlib.reload(main)
@@ -40,8 +58,17 @@ async def _seed(monkeypatch, tag="a"):
     tmp = tempfile.mktemp(suffix=f"{tag}.db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     from models import Activity, Stream
     import mcp_server, main
@@ -103,8 +130,17 @@ async def test_list_recent_runs_says_so_when_there_are_no_runs(monkeypatch):
     tmp = tempfile.mktemp(suffix="c.db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     import mcp_server, main
     importlib.reload(mcp_server); importlib.reload(main)
@@ -180,8 +216,17 @@ async def test_get_recovery_carries_the_post_run_caveat(monkeypatch):
     tmp = tempfile.mktemp(suffix="i.db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     from models import DailyWellness
     import mcp_server, main
@@ -206,8 +251,17 @@ async def test_get_recovery_says_so_when_empty(monkeypatch):
     tmp = tempfile.mktemp(suffix="i2.db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     import mcp_server, main
     importlib.reload(mcp_server); importlib.reload(main)
@@ -337,8 +391,17 @@ async def test_get_run_detail_reports_terrain_and_location(monkeypatch):
     tmp = tempfile.mktemp(suffix="t.db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     from models import Activity
     import mcp_server, main
@@ -403,8 +466,17 @@ async def test_get_aerobic_trend_says_so_when_empty(monkeypatch):
     tmp = tempfile.mktemp(suffix="w2.db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, config, database
+    import importlib, sys, config, database
+    # Start from clean module state: `database` reloads build a new Base, and a
+    # `models`/`main` left over from an earlier test is still bound to the old
+    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
+    # against a table that already has the columns. The conftest clears these
+    # after each test; whether that has happened depends on ordering, so clear
+    # them here too.
+    for _m in ("main", "mcp_server", "models"):
+        sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
+    import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
     import mcp_server, main
     importlib.reload(mcp_server); importlib.reload(main)
