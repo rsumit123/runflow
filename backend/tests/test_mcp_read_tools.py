@@ -664,3 +664,137 @@ async def test_get_plan_status_reports_a_guidance_failure_as_one(monkeypatch):
 
     assert "Could not read today's guidance: ValueError" in out
     assert "Easy run" in out, "the rest of the plan must survive the failure"
+
+
+async def _fm_out(monkeypatch, tag, model):
+    """The tool's verdict for a hand-written model, via the _fitness_model seam."""
+    main, mcp_server, database = await _app(monkeypatch, tag)
+
+    async def _fake(session):
+        return model
+
+    monkeypatch.setattr(mcp_server, "_fitness_model", _fake)
+    out = await mcp_server.get_fitness_model()
+    return next(l for l in out.split("\n") if "ACWR:" in l)
+
+
+def _model(**over):
+    m = {"athlete_max_hr": 190, "easy_hr_ceiling": 150, "easy_pace_sec": 420,
+         "easy_pace_method": "measured", "easy_pace_floored": False,
+         "measured_easy_pace_sec": 420, "threshold_pace_sec": 330,
+         "weekly_volume_28d_km": 20.0, "longest_run_28d_km": 8.0,
+         "longest_run_90d_km": 12.0, "acute_load_7d_km": 20.0,
+         "chronic_load_28d_km": 20.0, "acwr": 1.0, "hr_coverage": 10,
+         "total_runs": 10}
+    m.update(over)
+    return m
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_falling_ratio_on_a_thin_baseline_is_not_a_ramp(monkeypatch):
+    """3 km against a 4.5 km/week average is 0.67 — deflated, not inflated.
+    The thin-baseline reframing was tested without reference to the ratio, so
+    an athlete losing volume was told it was "a comeback ramp" and handed
+    advice to keep increases under 10%."""
+    line = await _fm_out(monkeypatch, "acwrlow",
+                         _model(acwr=0.67, chronic_load_28d_km=4.5,
+                                acute_load_7d_km=3.0))
+
+    assert "inflated by design" not in line, line
+    assert "comeback ramp" not in line, line
+    assert "10%" not in line and "10 per cent" not in line, line
+    assert "thin baseline" in line, line
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_thin_and_elevated_is_still_a_comeback_ramp(monkeypatch):
+    line = await _fm_out(monkeypatch, "acwrthinhigh",
+                         _model(acwr=4.0, chronic_load_28d_km=0.75))
+
+    assert "inflated by design" in line and "comeback ramp" in line, line
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_thin_baseline_between_1_3_and_1_5_is_a_ramp(monkeypatch):
+    """The boundary between the comeback branch and the spike branch: the
+    reframing is gated on the ratio being elevated, which starts at 1.3."""
+    ramp = await _fm_out(monkeypatch, "acwrthin14",
+                         _model(acwr=1.4, chronic_load_28d_km=4.0))
+    quiet = await _fm_out(monkeypatch, "acwrfat14",
+                          _model(acwr=1.4, chronic_load_28d_km=20.0))
+
+    assert "comeback ramp" in ramp, ramp
+    assert "within the 1.5 risk threshold" in quiet, quiet
+    assert "thin baseline" not in quiet, quiet
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_docstring_does_not_promise_the_unconditional_rule(monkeypatch):
+    """The model reads the docstring before it decides to call the tool, so a
+    docstring asserting the rule the body was fixed to stop asserting is the
+    only guidance it gets."""
+    main, mcp_server, database = await _app(monkeypatch, "fmdoc")
+    import fitness_model as fm
+
+    doc = mcp_server.get_fitness_model.__doc__
+    assert "1.5" in doc
+    assert "thin" in doc.lower(), doc
+    assert f"{fm.THIN_BASELINE_KM:g}" in doc, doc
+    assert "however motivated" not in doc, doc
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_names_the_detrained_pace_as_the_clamped_one(monkeypatch):
+    """The stale branch clamps measured * decay, not the measurement: saying a
+    6:30 measurement was clamped by a 7:30 floor is arithmetically impossible."""
+    main, mcp_server, database = await _app(monkeypatch, "fmfloor")
+
+    async def _fake(session):
+        return _model(easy_pace_sec=450, easy_pace_method="measured_stale",
+                      easy_pace_floored=True, measured_easy_pace_sec=390,
+                      detrained_easy_pace_sec=526, staleness_days=200)
+
+    monkeypatch.setattr(mcp_server, "_fitness_model", _fake)
+    out = await mcp_server.get_fitness_model()
+
+    line = next(l for l in out.split("\n") if "easy pace:" in l)
+    assert "measured at 6:30/km and clamped to the 7:30/km floor" not in line, line
+    assert "6:30/km" in line and "8:46/km" in line and "7:30/km" in line, line
+    assert "200 days" in line, line
+
+
+@pytest.mark.asyncio
+async def test_call_api_docstring_names_the_four_newer_tools(monkeypatch):
+    """Naming only six tools routed the model to raw JSON for questions the
+    newer tools answer — "monthly stats" is get_training_block's job."""
+    main, mcp_server, database = await _app(monkeypatch, "callapidoc")
+
+    doc = mcp_server.call_api.__doc__
+    for name in ("review_run", "get_fitness_model", "get_training_block",
+                 "get_plan_status"):
+        assert name in doc, name
+    assert "monthly stats" not in doc, doc
+
+
+def test_build_fitness_model_exports_the_detraining_adjusted_pace():
+    """The quantity the floor actually clamps on the stale path."""
+    import fitness_model as fm
+
+    now = datetime(2026, 10, 12)
+
+    def act(i, days, pace, hr):
+        return {"id": i, "distance": 5000.0, "moving_time": 5 * pace,
+                "average_speed": 1000.0 / pace, "average_heartrate": hr,
+                "max_heartrate": 190.0, "start_date": now - timedelta(days=days)}
+
+    # Easy runs 200 days old, a fast top end back then, a slow one now: the
+    # measurement is stale and the decay is real.
+    acts = [act(i, 200 + 3 * i, 390, 120.0) for i in range(6)]
+    acts.append(act(50, 205, 300, 180.0))
+    acts.append(act(51, 3, 405, 180.0))
+
+    m = fm.build_fitness_model(acts, now)
+
+    assert m["easy_pace_method"] == "measured_stale"
+    assert m["detrained_easy_pace_sec"] > m["measured_easy_pace_sec"]
+    assert m["staleness_days"] >= 200

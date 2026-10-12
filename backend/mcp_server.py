@@ -581,12 +581,13 @@ async def call_api(
 ) -> str:
     """Last resort: call a RunFlow REST endpoint directly.
 
-    PREFER THE SPECIFIC TOOLS. list_recent_runs, get_run_detail, compare_runs,
-    get_recovery, get_records and get_training_context return analysed summaries
-    — splits on moving time, cardiac drift, zone shares, pauses,
-    weather-normalized pace — that this tool does not compute. Use call_api only
-    when none of them covers the question, for example a route-level breakdown
-    or monthly stats.
+    PREFER THE SPECIFIC TOOLS. list_recent_runs, get_run_detail, review_run,
+    compare_runs, get_recovery, get_records, get_training_context,
+    get_fitness_model, get_training_block and get_plan_status return analysed
+    summaries — splits on moving time, cardiac drift, zone shares, pauses,
+    weather-normalized pace, volume per month — that this tool does not
+    compute. Use call_api only when none of them covers the question, for
+    example a route-level breakdown or the wellness history.
 
     GET routes only, so nothing here can change data. Encoded GPS polylines and
     raw sample streams are removed unless include_heavy is true, and streams are
@@ -594,7 +595,7 @@ async def call_api(
     Output is capped at 25,000 characters.
 
     Args:
-        path: the route path including the /api prefix, e.g. "/api/stats/monthly".
+        path: the route path including the /api prefix, e.g. "/api/routes".
             A leading slash is optional.
         params: optional query parameters.
         include_heavy: include polylines and downsampled streams.
@@ -850,6 +851,10 @@ async def review_run(run_id: int, window_sec: int = 60) -> str:
 
 
 ACWR_RISK_THRESHOLD = 1.5
+# Where a ratio starts being elevated at all. fitness_model.build_warnings
+# gates its comeback/spike split on this before it looks at the baseline; the
+# tool mirrors that order so the two cannot drift apart again.
+ACWR_ELEVATED = 1.3
 
 
 async def _fitness_model(session) -> dict:
@@ -870,9 +875,10 @@ async def get_fitness_model() -> str:
     pace band was measured from recent easy running or is a stale fallback — a
     stale band is not evidence about the athlete. And the acute:chronic load
     ratio compares the last 7 days against the 28-day average: above roughly
-    1.5 is the conventional injury-risk threshold, so a high ratio means the
-    honest recommendation is to hold volume flat however motivated the athlete
-    sounds.
+    1.5 is the conventional injury-risk threshold and the honest recommendation
+    is then to hold volume flat — but only once the baseline is real. On a thin
+    baseline, under 5 km/week of chronic load, a high ratio is inflated by
+    design and the 1.5 threshold does not apply.
     """
     try:
         async with async_session() as session:
@@ -882,13 +888,19 @@ async def get_fitness_model() -> str:
             thin = chronic is not None and chronic < fm.THIN_BASELINE_KM
             if acwr is None:
                 verdict = "not enough history to judge"
-            elif thin:
+            elif acwr > ACWR_ELEVATED and thin:
                 verdict = (f"thin baseline (chronic load under {fm.THIN_BASELINE_KM:g} "
                            f"km/week): the {ACWR_RISK_THRESHOLD} risk threshold does not apply yet; "
                            "the ratio is inflated by design, a comeback ramp and not a spike — keep weekly increases to 10% or less")
             elif acwr > ACWR_RISK_THRESHOLD:
                 verdict = (f"ABOVE the {ACWR_RISK_THRESHOLD} risk threshold — "
                            "hold volume flat, do not add")
+            elif thin:
+                # Not elevated and the baseline is too small to divide by: the
+                # ratio says nothing either way, so neither does this line.
+                verdict = (f"thin baseline (chronic load under {fm.THIN_BASELINE_KM:g} "
+                           "km/week): too little chronic load for the ratio to carry "
+                           "much meaning in either direction")
             else:
                 verdict = f"within the {ACWR_RISK_THRESHOLD} risk threshold"
             method = m.get("easy_pace_method")
@@ -904,9 +916,23 @@ async def get_fitness_model() -> str:
             else:
                 kind = f"{method} — no usable easy pace"
             if method in ("measured", "measured_stale") and m.get("easy_pace_floored"):
-                kind += (f"; measured at {_fmt_pace(m.get('measured_easy_pace_sec'))} "
-                         f"and clamped to the {_fmt_pace(fm.EASY_PACE_FLOOR_SEC)} floor "
-                         "— the real easy pace is slower than shown")
+                floor = _fmt_pace(fm.EASY_PACE_FLOOR_SEC)
+                detrained = m.get("detrained_easy_pace_sec")
+                if method == "measured_stale" and detrained is not None:
+                    # The stale branch clamps measured x decay, not the
+                    # measurement: a 6:30 measurement cannot have been clamped
+                    # by a 7:30 floor, and naming it as the clamped quantity
+                    # made the sentence impossible.
+                    days = m.get("staleness_days")
+                    span = f" for {days} days of detraining" if days is not None else ""
+                    kind += (f"; measured at {_fmt_pace(m.get('measured_easy_pace_sec'))}, "
+                             f"adjusted to {_fmt_pace(detrained)}{span}, "
+                             f"then clamped to the {floor} floor "
+                             "— the real easy pace is slower than shown")
+                else:
+                    kind += (f"; measured at {_fmt_pace(m.get('measured_easy_pace_sec'))} "
+                             f"and clamped to the {floor} floor "
+                             "— the real easy pace is slower than shown")
             lines = [
                 "Fitness model",
                 f"  max HR: {mv.num(m.get('athlete_max_hr'))}"

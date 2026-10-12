@@ -293,6 +293,11 @@ def build_fitness_model(acts: list[dict[str, Any]], now: datetime) -> dict[str, 
         "easy_pace_method": easy["method"],
         "easy_pace_floored": easy.get("pace_floored", False),
         "measured_easy_pace_sec": easy.get("measured_easy_pace_sec"),
+        # The quantity the floor actually clamps on the stale path: measured
+        # pace times the detraining factor. Without it a caller can only name
+        # the measurement, which the floor never touched.
+        "detrained_easy_pace_sec": easy.get("detrained_easy_pace_sec"),
+        "staleness_days": easy.get("staleness_days"),
         "threshold_pace_sec": round(threshold) if threshold else None,
         "weekly_volume_28d_km": round(_window_km(acts, now, 28) / 4.0, 1),
         "longest_run_28d_km": _longest_km(acts, now, 28),
