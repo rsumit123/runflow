@@ -274,9 +274,10 @@ def test_hr_profile_averages_hr_and_pace_per_window():
     assert rows[0]["metres"] == 60.0
     # 60 m in 60 s = 1 m/s = 1000 s/km.
     assert rows[0]["pace_sec_per_km"] == 1000
-    # Window 0 spans samples 0..60: sixty samples at 120 and one at 130.
-    assert rows[0]["hr_avg"] == 120.2
-    assert rows[0]["hr_max"] == 130.0
+    # Window 0 spans samples 0..59 — the boundary sample at 60 s belongs to the
+    # next window, as in split_table. Sixty samples, all at 120.
+    assert rows[0]["hr_avg"] == 120.0
+    assert rows[0]["hr_peak"] == 120.0
     assert rows[-1]["hr_avg"] > rows[0]["hr_avg"]
 
 
@@ -322,7 +323,9 @@ def test_hr_profile_handles_a_run_shorter_than_one_window():
 
 def test_hr_profile_returns_no_rows_without_usable_input():
     assert mv.hr_profile(None, None, None) == []
-    assert mv.hr_profile([150.0], [0], [0.0], window_sec=0) == []
+    # A stream long enough to yield rows if the guard were absent.
+    assert mv.hr_profile([150.0] * 121, list(range(121)),
+                         [float(s) for s in range(121)], window_sec=0) == []
     assert mv.hr_profile(None, [0, 1], [0.0, 1.0]) != []  # HR optional, pace still useful
 
 
@@ -333,8 +336,27 @@ def test_hr_profile_leaves_hr_none_when_the_watch_recorded_none():
     rows = mv.hr_profile(None, time, dist, window_sec=60)
 
     assert rows[0]["hr_avg"] is None
-    assert rows[0]["hr_max"] is None
+    assert rows[0]["hr_peak"] is None
     assert rows[0]["pace_sec_per_km"] == 1000
+
+
+def test_hr_profile_will_not_invent_a_distance_across_a_null_sample():
+    """A null endpoint makes a window unmeasurable, not zero-length.
+
+    Falling back to 0.0 produced a plausible, wrong pace: on a clean 1 m/s
+    stream a single null at the window edge reported 500 s/km where the truth
+    was 1000.
+    """
+    time = list(range(0, 121))
+    dist = [float(s) for s in time]
+    dist[60] = None
+
+    rows = mv.hr_profile([150.0] * 121, time, dist, window_sec=60)
+
+    assert rows[0]["metres"] is None
+    assert rows[0]["pace_sec_per_km"] is None
+    assert rows[1]["metres"] is None
+    assert rows[1]["pace_sec_per_km"] is None
 
 
 def test_hr_profile_matches_the_shape_of_a_real_warmup():

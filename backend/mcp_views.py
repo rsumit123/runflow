@@ -136,16 +136,17 @@ def hr_profile(
         secs = axis[i] - axis[start]
         if secs <= 0:
             continue
-        seg = [h for h in (hr or [])[start:i + 1] if h]
-        metres = (dist[i] or 0.0) - (dist[start] or 0.0)
+        seg = [h for h in (hr or [])[start:i] if h]
+        measurable = dist[i] is not None and dist[start] is not None
+        metres = dist[i] - dist[start] if measurable else None
         rows.append({
             "from_sec": axis[start],
             "to_sec": axis[i],
             "seconds": secs,
             "hr_avg": round(sum(seg) / len(seg), 1) if seg else None,
-            "hr_max": max(seg) if seg else None,
-            "metres": round(metres, 1),
-            "pace_sec_per_km": round(secs / (metres / 1000.0)) if metres > 0 else None,
+            "hr_peak": max(seg) if seg else None,
+            "metres": round(metres, 1) if measurable else None,
+            "pace_sec_per_km": round(secs / (metres / 1000.0)) if measurable and metres > 0 else None,
         })
         start = i
     return rows
