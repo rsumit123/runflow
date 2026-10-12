@@ -348,6 +348,10 @@ def weekly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     Each bucket: run count, kilometres, total moving minutes, mean pace and the
     share of time spent in Zone 5 across the week.
+
+    `z5_pct` is None when no run in the week carried HR zones. Buckets use the
+    stored UTC wall-clock, so for a +05:30 athlete a run started before 05:30
+    local can land in the previous ISO week.
     """
     if not rows:
         return []
@@ -359,12 +363,21 @@ def weekly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         year, week, _ = d.isocalendar()
         b = buckets.setdefault((year, week), {
             "year": year, "week": week, "runs": 0, "metres": 0.0,
-            "seconds": 0, "z5_weighted": 0.0,
+            "seconds": 0, "z5_weighted": 0.0, "z5_seconds": 0,
+            "pace_metres": 0.0, "pace_seconds": 0,
         })
         b["runs"] += 1
-        b["metres"] += r.get("distance") or 0.0
-        b["seconds"] += r.get("moving_time") or 0
-        b["z5_weighted"] += (r.get("z5") or 0.0) * (r.get("moving_time") or 0)
+        metres = r.get("distance") or 0.0
+        secs = r.get("moving_time") or 0
+        b["metres"] += metres
+        b["seconds"] += secs
+        z5 = r.get("z5")
+        if z5 is not None:
+            b["z5_weighted"] += z5 * secs
+            b["z5_seconds"] += secs
+        if metres > 0 and secs > 0:
+            b["pace_metres"] += metres
+            b["pace_seconds"] += secs
 
     out = []
     for (year, week), b in sorted(buckets.items()):
@@ -375,8 +388,9 @@ def weekly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "runs": b["runs"],
             "km": round(km, 2),
             "minutes": round(b["seconds"] / 60.0),
-            "pace_sec_per_km": round(b["seconds"] / km) if km else None,
-            "z5_pct": round(b["z5_weighted"] / b["seconds"], 1) if b["seconds"] else None,
+            "pace_sec_per_km": (round(b["pace_seconds"] / (b["pace_metres"] / 1000.0))
+                                if b["pace_metres"] > 0 else None),
+            "z5_pct": round(b["z5_weighted"] / b["z5_seconds"], 1) if b["z5_seconds"] else None,
         })
     return out
 

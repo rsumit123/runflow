@@ -521,3 +521,25 @@ def test_monthly_buckets_returns_every_documented_key():
     assert m == {"year": 2026, "month": 3, "runs": 1, "days_run": 1,
                  "km": 5.0, "minutes": 33, "pace_sec_per_km": 400,
                  "median_pace_sec_per_km": 400, "z5_pct": 12.0}
+
+
+def test_weekly_buckets_z5_is_none_when_no_run_has_hr_data():
+    """get_weekly_volume printed 0.0% for every pre-HR week of history."""
+    from datetime import datetime
+    rows = [{"start_date": datetime(2021, 4, d), "distance": 5000.0,
+             "moving_time": 2000, "z5": None} for d in (16, 17)]
+
+    assert mv.weekly_buckets(rows)[0]["z5_pct"] is None
+
+
+def test_weekly_buckets_mean_pace_skips_runs_it_cannot_measure():
+    from datetime import datetime
+    rows = [
+        {"start_date": datetime(2026, 10, 5), "distance": 10000.0, "moving_time": 4100, "z5": None},
+        {"start_date": datetime(2026, 10, 6), "distance": 10000.0, "moving_time": None, "z5": None},
+    ]
+
+    week = mv.weekly_buckets(rows)[0]
+
+    assert week["pace_sec_per_km"] == 410
+    assert week["km"] == 20.0
