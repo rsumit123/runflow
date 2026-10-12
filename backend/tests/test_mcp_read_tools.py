@@ -357,6 +357,15 @@ async def test_get_training_block_aggregates_by_month_over_a_long_range(monkeypa
     assert "29" in out, "days run in April 2021"
     assert len(out) <= 25_200
 
+    header = [c.strip() for c in out.splitlines()[0].split(" | ")]
+    rate = lambda p: float(_row(out, p)[header.index("km/wk")])
+    # A complete month must be unaffected by the partial-month fix:
+    # 146.45 km / (30/7) weeks = 34.2.
+    assert 33.0 <= rate("2021-04") <= 35.0
+    # October 2026 is in progress (today is inside it): 12 km over the days
+    # elapsed, not over a fixed 4.35 weeks.
+    assert rate("2026-10") > 4.0
+
 
 @pytest.mark.asyncio
 async def test_get_training_block_supports_weekly_granularity(monkeypatch):
@@ -430,7 +439,7 @@ async def test_get_training_block_monthly_cells_are_in_the_right_columns(monkeyp
     assert by_col["km"] == "110.0"
     assert by_col["median pace"] == "6:00/km"
     assert by_col["mean pace"] == "6:16/km"
-    assert by_col["km/wk"] == "25.3"
+    assert by_col["km/wk"] == "25.7"  # 110 km over April's 30 days
 
 
 @pytest.mark.asyncio
@@ -451,9 +460,9 @@ async def test_get_training_block_no_hr_data_reads_as_absent_not_zero(monkeypatc
         out = await mcp_server.get_training_block(start="2021-01-01", end="2026-12-31", by=by)
         header = [c.strip() for c in out.splitlines()[0].split(" | ")]
         z5 = header.index("Z5%")
-        assert _row(out, old)[z5] == "—%", out
-        assert _row(out, new)[z5] == "10%", out
-        assert "0.0%" not in out and "| 0%" not in out
+        assert _row(out, old)[z5] == "—", out
+        assert _row(out, new)[z5] == "10", out
+        assert "0.0%" not in out and "—%" not in out
 
 
 @pytest.mark.asyncio
@@ -472,6 +481,7 @@ async def test_get_training_block_weekly_row_has_no_monthly_columns(monkeypatch)
     by_col = dict(zip(header, _row(out, "2026-W41")))
 
     assert "median pace" not in header and "days run" not in header
+    assert "km/wk" not in header, "weekly km already is the rate"
     assert by_col["runs"] == "3"
     assert by_col["km"] == "9.0"
     assert by_col["mean pace"] == "7:15/km"
@@ -512,3 +522,58 @@ async def test_get_training_block_is_bounded_for_a_huge_weekly_range(monkeypatch
     assert "truncated at" not in out
     assert len(out) <= 25_000
     assert "narrower" in out.lower() or "by=\"month\"" in out
+
+
+@pytest.mark.asyncio
+async def test_training_block_rate_accounts_for_a_partial_month(monkeypatch):
+    """km / 4.35 understated an in-progress month by 2.5x.
+
+    That column is the "now" half of a historical comparison, so the error
+    pushed the current block to look lighter than it really was.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "tbrate")
+    from models import Activity
+
+    # Four 3 km runs in the first seven days of a month: 12 km in one week.
+    async with database.async_session() as s:
+        for i in range(4):
+            s.add(Activity(id=900 + i, name="Run", distance=3000.0,
+                           moving_time=1300,
+                           start_date=datetime(2026, 10, 2 + i),
+                           average_speed=3000.0 / 1300,
+                           average_heartrate=170.0, max_heartrate=200.0))
+        await s.commit()
+
+    out = await mcp_server.get_training_block(
+        start="2026-10-01", end="2026-10-07", by="month")
+
+    header = next(l for l in out.split("\n") if "period" in l)
+    cols = [c.strip() for c in header.split("|")]
+    row = next(l for l in out.split("\n") if l.startswith("2026-10"))
+    cells = [c.strip() for c in row.split("|")]
+    rate = float(cells[cols.index("km/wk")])
+    print("ACTUAL km/wk:", rate)
+
+    assert 11.0 <= rate <= 13.0, (
+        f"12 km over a seven-day range is about 12 km/wk, got {rate} — "
+        "dividing by a fixed 4.35 weeks understates a partial month"
+    )
+
+
+def test_weeks_covered_clips_to_range_and_today_and_floors_at_one_week(monkeypatch):
+    import sys
+    monkeypatch.setenv("MCP_SECRET", "testsecret")
+    import mcp_server
+    from datetime import date
+    wc = mcp_server._weeks_covered
+    far = date(2030, 1, 1)
+    # complete month: its own length
+    assert wc(2021, 4, date(2021, 1, 1), date(2021, 12, 31), far) == pytest.approx(30 / 7)
+    # in-progress month: clipped to today
+    assert wc(2026, 10, date(2021, 1, 1), date(2026, 12, 31), date(2026, 10, 12)) == pytest.approx(12 / 7)
+    # range clips both ends
+    assert wc(2026, 10, date(2026, 10, 8), date(2026, 10, 21), far) == pytest.approx(2.0)
+    # a month wholly after today (last < first): finite, floored at one week
+    assert wc(2026, 11, date(2026, 1, 1), date(2026, 12, 31), date(2026, 10, 12)) == 1.0
+    # a one-day span does not inflate the rate sevenfold
+    assert wc(2026, 10, date(2026, 10, 1), date(2026, 12, 31), date(2026, 10, 1)) == 1.0

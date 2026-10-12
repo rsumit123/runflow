@@ -36,7 +36,8 @@ MOUNT_PATH = f"/mcp/{config.MCP_SECRET}" if config.MCP_SECRET else None
 
 import json
 import logging
-from datetime import datetime, timedelta
+import calendar
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select
@@ -934,6 +935,26 @@ async def get_fitness_model() -> str:
 TRAINING_BLOCK_MAX_ROWS = 300
 
 
+def _weeks_covered(year: int, month: int, range_start: date,
+                   range_end: date, today: date) -> float:
+    """Weeks of calendar actually spanned by a month inside the query range.
+
+    km / 4.35 assumes a complete month, which understates an in-progress one
+    badly: October 2026 twelve days in showed 2.8 km/wk against a true 7.0.
+    That column is the "now" side of a historical comparison, so the error
+    makes a current block look lighter than it is.
+
+    Floored at one week, not one day: a run on the 1st of the month would
+    otherwise read as seven times its distance per week. The floor also keeps
+    the result finite when the span is empty or negative.
+    """
+    month_start = date(year, month, 1)
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
+    first = max(month_start, range_start)
+    last = min(month_end, range_end, today)
+    return max(7, (last - first).days + 1) / 7.0
+
+
 @mcp.tool()
 async def get_training_block(start: str, end: str, by: str = "month") -> str:
     """Volume, pace and intensity per month or week over any date range.
@@ -993,23 +1014,25 @@ async def get_training_block(start: str, end: str, by: str = "month") -> str:
                         + (' or by="month".' if by == "week" else "."))
 
             if by == "week":
-                lines = ["period | runs | km | km/wk | minutes | mean pace | Z5%"]
+                lines = ["period | runs | km | minutes | mean pace | Z5%"]
                 for b in buckets:
                     lines.append(
                         f"{b['year']}-W{b['week']:02d} | {b['runs']} | {b['km']} | "
-                        f"{b['km']} | {b['minutes']} | "
-                        f"{_fmt_pace(b['pace_sec_per_km'])} | {mv.num(b['z5_pct'])}%"
+                        f"{b['minutes']} | "
+                        f"{_fmt_pace(b['pace_sec_per_km'])} | {mv.num(b['z5_pct'])}"
                     )
             else:
                 lines = ["period | runs | days run | km | km/wk | "
                          "median pace | mean pace | Z5%"]
+                range_end = hi.date() - timedelta(days=1)
+                today = datetime.utcnow().date()
                 for b in buckets:
                     lines.append(
                         f"{b['year']}-{b['month']:02d} | {b['runs']} | "
                         f"{b['days_run']} | {b['km']} | "
-                        f"{mv.num(b['km'] / 4.35)} | "
+                        f"{mv.num(b['km'] / _weeks_covered(b['year'], b['month'], lo.date(), range_end, today))} | "
                         f"{_fmt_pace(b['median_pace_sec_per_km'])} | "
-                        f"{_fmt_pace(b['pace_sec_per_km'])} | {mv.num(b['z5_pct'])}%"
+                        f"{_fmt_pace(b['pace_sec_per_km'])} | {mv.num(b['z5_pct'])}"
                     )
             return mv.cap_text("\n".join(lines))
     except Exception as exc:  # noqa: BLE001
