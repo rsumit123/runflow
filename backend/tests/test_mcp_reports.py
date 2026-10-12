@@ -6,6 +6,7 @@ no database and no network — the same contract mcp_views.py holds.
 from datetime import datetime
 
 import mcp_reports as mr
+import mcp_views as mv
 
 
 def _steady_run(metres=3000, pace_sec_per_km=435, hr=180.0):
@@ -118,3 +119,68 @@ def test_run_review_never_exceeds_the_response_cap():
                         _steady_run(metres=42000), window_sec=10)
 
     assert len(out) <= mv.MAX_RESPONSE_CHARS + 120
+
+
+def test_run_review_keeps_every_section_on_a_very_long_run():
+    """The cap used to eat the judgment and keep the filler.
+
+    A 42 km run at 10 s windows generated 1,440 near-identical HR rows and
+    57,252 characters, so cardiac drift, the zone shares, the athlete's note
+    and the entire planned-vs-actual section fell past the 25,000-character
+    cap — and the output still read as a finished report.
+    """
+    n = 14400
+    run = {
+        "id": 1, "name": "Long", "distance": 42000.0, "moving_time": n,
+        "elapsed_time": n + 5, "average_heartrate": 150.0, "max_heartrate": 170.0,
+        "notes": "felt strong throughout", "temp_c": 25.0, "dew_point_c": 24.0,
+        "total_elevation_gain": 10.0, "elev_high": 100.0, "elev_low": 95.0,
+        "hr_zones": None, "start_latlng": None, "end_latlng": None,
+        "start_date": None,
+    }
+    streams = {
+        "time": list(range(n)),
+        "distance": [i * 42000 / n for i in range(n)],
+        "heartrate": [150] * n,
+        "altitude": [100.0] * n,
+    }
+    planned = {
+        "title": "Long run", "day_type": "long", "target_distance_m": 42000,
+        "pace_low_sec": 340, "pace_high_sec": 360, "hr_ceiling": 160,
+        "status": "done", "compliance": "on_target",
+    }
+
+    out = mr.run_review(run, streams, planned=planned, window_sec=10)
+
+    assert "truncated at" not in out, "the report must fit by construction"
+    assert len(out) < mv.MAX_RESPONSE_CHARS
+    assert "Cardiac drift" in out
+    assert "felt strong throughout" in out, "the athlete's note was being dropped"
+    assert "Long run" in out, "the planned-vs-actual section was being dropped"
+    assert "widened from 10 s" in out, "say so rather than silently coarsening"
+
+
+def test_run_review_does_not_widen_a_normal_run():
+    """46 minutes at 60 s windows must keep its minute-by-minute resolution.
+
+    The whole value of the HR profile for this athlete is seeing HR sit at 160
+    for the first five minutes and drift to 188 by the end, so the row budget
+    must not coarsen a run he actually does.
+    """
+    n = 2775
+    run = {
+        "id": 2, "name": "5K", "distance": 5968.0, "moving_time": n,
+        "elapsed_time": n + 2, "average_heartrate": 188.0, "max_heartrate": 194.0,
+        "hr_zones": None, "start_latlng": None, "end_latlng": None,
+        "start_date": None, "total_elevation_gain": 0.0,
+    }
+    streams = {
+        "time": list(range(n)),
+        "distance": [i * 5968 / n for i in range(n)],
+        "heartrate": [160 + (i * 28) // n for i in range(n)],
+    }
+
+    out = mr.run_review(run, streams, window_sec=60)
+
+    assert "widened" not in out, "a 46-minute run must keep 60 s windows"
+    assert "Splits (500 m" in out, "and 500 m splits"

@@ -8,9 +8,23 @@ mcp_server.py is left with nothing but tool declaration and row fetching.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Optional
 
 import mcp_views as mv
+
+# Row budget per table. The 25,000-character cap is a backstop against a
+# runaway, not the sizing mechanism: a 4-hour run at 60 s windows generated
+# 1,440 near-identical HR rows and pushed cardiac drift, the zone shares, the
+# athlete's note and the whole planned-vs-actual section past the cap, so the
+# report read as complete while having silently dropped every piece of
+# judgment in it. Tables widen their own interval instead.
+#
+# 180 is chosen so that nothing this athlete actually runs is ever widened: a
+# 46-minute run yields 46 rows at 60 s and a 3-hour run exactly 180. Only
+# past three hours does the window grow. Worst case measured: a 12-hour run
+# lands at roughly 12,600 characters.
+MAX_TABLE_ROWS = 180
 
 
 def _pace(sec_per_km: Optional[float]) -> str:
@@ -81,12 +95,19 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
                 lines.append(f"  at {mv.num(p['at_km'], 2)} km — {_dur(p['seconds'])}, "
                              f"HR {mv.num(p['hr_in'])} → {mv.num(p['hr_out'])}")
         else:
-            lines.append(f"CONTINUOUS — {elapsed - moving} s stopped across the whole run.")
+            # A watch can report elapsed below moving; a negative "stopped"
+            # figure would read as a data error in the middle of a verdict.
+            lines.append(f"CONTINUOUS — {max(0, elapsed - moving)} s stopped "
+                         f"across the whole run.")
 
-        splits = mv.split_table(dist, time, hr, metres=500)
+        total_m = run.get("distance") or 0.0
+        split_m = 500 * max(1, math.ceil(total_m / (500 * MAX_TABLE_ROWS)))
+        splits = mv.split_table(dist, time, hr, metres=split_m)
         if splits:
             lines.append("")
-            lines.append("Splits (500 m, moving time):")
+            widened = (f", widened from 500 m to keep the report whole"
+                       if split_m != 500 else "")
+            lines.append(f"Splits ({split_m} m, moving time{widened}):")
             lines.append("  from-to | pace | avg HR | peak HR")
             for s in splits:
                 lines.append(f"  {s['from_m']}-{s['to_m']} | {_pace(s['pace_sec_per_km'])} | "
@@ -95,12 +116,17 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
         # Keyword arguments deliberately: hr_profile takes (hr, time, dist)
         # while split_table above takes (dist, time, hr). All three are
         # Optional lists, so a positional transposition would fail silently.
+        asked_window = window_sec
+        window_sec = max(window_sec,
+                         window_sec * max(1, math.ceil(moving / (window_sec * MAX_TABLE_ROWS))))
         prof = mv.hr_profile(hr=hr, time=time, dist=dist, window_sec=window_sec)
         if prof:
             lines.append("")
             # "moving time" is not decoration: on a run with pauses the first
             # five minutes of moving time is not the first five on the watch.
-            lines.append(f"HR profile ({window_sec} s windows, moving time):")
+            widened = (f", widened from {asked_window} s to keep the report whole"
+                       if window_sec != asked_window else "")
+            lines.append(f"HR profile ({window_sec} s windows, moving time{widened}):")
             lines.append("  window | secs | pace | avg HR | peak HR")
             for p in prof:
                 lines.append(f"  {p['from_sec']}-{p['to_sec']}s | {p['seconds']} | "
