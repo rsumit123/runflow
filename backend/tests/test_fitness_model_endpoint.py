@@ -49,6 +49,15 @@ async def test_fitness_model_endpoint_returns_the_documented_keys(monkeypatch):
         assert key in model, f"{key} missing from the fitness model response"
     assert model["total_runs"] == 8
 
+    # Pure arithmetic from the fixture: 8 runs of 3.5 km at days 0, 3, 6 … 21,
+    # so three land in the 7-day window and all eight in the 28-day one.
+    # Asserted here because nothing else in the suite pins the ACWR arithmetic
+    # — tests/test_fitness_model.py:35 only checks it is not None.
+    assert model["acute_load_7d_km"] == 10.5
+    assert model["chronic_load_28d_km"] == 7.0
+    assert model["acwr"] == 1.5
+    assert model["easy_hr_ceiling"] == 152, "0.76 of the observed max HR of 200"
+
 
 @pytest.mark.asyncio
 async def test_fitness_model_endpoint_works_with_no_runs_at_all(monkeypatch):
