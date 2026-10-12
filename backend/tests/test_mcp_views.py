@@ -255,3 +255,108 @@ def test_weekly_buckets_group_by_iso_week():
 
 def test_weekly_buckets_handles_no_runs():
     assert mv.weekly_buckets([]) == []
+
+
+def test_hr_profile_averages_hr_and_pace_per_window():
+    # 300 s at exactly 1 m/s, HR rising 120 -> 170 in 10 bpm steps per minute.
+    time, dist, hr = [], [], []
+    for sec in range(0, 301):
+        time.append(sec)
+        dist.append(float(sec))
+        hr.append(120.0 + 10.0 * (sec // 60))
+
+    rows = mv.hr_profile(hr, time, dist, window_sec=60)
+
+    assert len(rows) == 5
+    assert rows[0]["from_sec"] == 0
+    assert rows[0]["to_sec"] == 60
+    assert rows[0]["seconds"] == 60
+    assert rows[0]["metres"] == 60.0
+    # 60 m in 60 s = 1 m/s = 1000 s/km.
+    assert rows[0]["pace_sec_per_km"] == 1000
+    # Window 0 spans samples 0..60: sixty samples at 120 and one at 130.
+    assert rows[0]["hr_avg"] == 120.2
+    assert rows[0]["hr_max"] == 130.0
+    assert rows[-1]["hr_avg"] > rows[0]["hr_avg"]
+
+
+def test_hr_profile_excludes_paused_time_from_its_windows():
+    # 1 m/s, with a 600 s standing pause at the 100 m mark.
+    time, dist, hr = [], [], []
+    t = 0
+    for metre in range(0, 201):
+        if metre == 100:
+            t += 600
+        time.append(t)
+        dist.append(float(metre))
+        hr.append(150.0)
+        t += 1
+
+    rows = mv.hr_profile(hr, time, dist, window_sec=60)
+
+    # 200 s of moving time, not 800 — the pause must not become its own window.
+    assert sum(r["seconds"] for r in rows) == 200
+    assert all(r["pace_sec_per_km"] == 1000 for r in rows)
+
+
+def test_hr_profile_reports_a_final_partial_window_with_its_true_length():
+    time = list(range(0, 91))
+    dist = [float(s) for s in time]
+    hr = [150.0] * 91
+
+    rows = mv.hr_profile(hr, time, dist, window_sec=60)
+
+    assert len(rows) == 2
+    assert rows[1]["seconds"] == 30, "a 30 s tail is 30 s, not a padded minute"
+
+
+def test_hr_profile_handles_a_run_shorter_than_one_window():
+    time = list(range(0, 21))
+    dist = [float(s) for s in time]
+
+    rows = mv.hr_profile([150.0] * 21, time, dist, window_sec=60)
+
+    assert len(rows) == 1
+    assert rows[0]["seconds"] == 20
+
+
+def test_hr_profile_returns_no_rows_without_usable_input():
+    assert mv.hr_profile(None, None, None) == []
+    assert mv.hr_profile([150.0], [0], [0.0], window_sec=0) == []
+    assert mv.hr_profile(None, [0, 1], [0.0, 1.0]) != []  # HR optional, pace still useful
+
+
+def test_hr_profile_leaves_hr_none_when_the_watch_recorded_none():
+    time = list(range(0, 61))
+    dist = [float(s) for s in time]
+
+    rows = mv.hr_profile(None, time, dist, window_sec=60)
+
+    assert rows[0]["hr_avg"] is None
+    assert rows[0]["hr_max"] is None
+    assert rows[0]["pace_sec_per_km"] == 1000
+
+
+def test_hr_profile_matches_the_shape_of_a_real_warmup():
+    """Built from the 2026-10-12 run's measured first five minutes.
+
+    Per-minute HR was 124, 149, 154, 157, 161 over 135, 135, 124, 128, 125 m.
+    Asserting those averages exactly would only assert the fixture's own
+    construction, so this checks what the measurement actually tells us: five
+    windows, HR rising every minute, pace in the 7:00-8:30/km band.
+    """
+    per_min_hr = [124.0, 149.0, 154.0, 157.0, 161.0]
+    per_min_m = [135.0, 135.0, 124.0, 128.0, 125.0]
+    time, dist, hr = [0], [0.0], [per_min_hr[0]]
+    for minute, (bpm, metres) in enumerate(zip(per_min_hr, per_min_m)):
+        for sec in range(1, 61):
+            time.append(minute * 60 + sec)
+            dist.append(dist[-1] + metres / 60.0)
+            hr.append(bpm)
+
+    rows = mv.hr_profile(hr, time, dist, window_sec=60)
+
+    assert len(rows) == 5
+    avgs = [r["hr_avg"] for r in rows]
+    assert avgs == sorted(avgs), "HR rose every minute of that warmup"
+    assert all(420 <= r["pace_sec_per_km"] <= 510 for r in rows)

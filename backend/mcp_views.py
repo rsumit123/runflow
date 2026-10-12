@@ -109,6 +109,48 @@ def split_table(
     return rows
 
 
+def hr_profile(
+    hr: Optional[list[Optional[float]]],
+    time: Optional[list[Optional[int]]],
+    dist: Optional[list[Optional[float]]],
+    window_sec: int = 60,
+) -> list[dict[str, Any]]:
+    """Mean and peak HR with pace over consecutive moving-time windows.
+
+    How HR behaves across a run is a different question from how fast the
+    splits were: an athlete can hold an easy pace and still drift thirty beats,
+    and only a per-window view shows where that happened. Windows run on the
+    moving-time axis, so a pause cannot become a window in which the athlete
+    was standing still, and the final window is reported with its true length
+    rather than padded — which is why `seconds` is returned and not assumed.
+    """
+    if not time or not dist or window_sec <= 0:
+        return []
+    axis = moving_time_axis(time, dist)
+    rows: list[dict[str, Any]] = []
+    start = 0
+    last_i = len(axis) - 1
+    for i in range(1, len(axis)):
+        if axis[i] - axis[start] < window_sec and i != last_i:
+            continue
+        secs = axis[i] - axis[start]
+        if secs <= 0:
+            continue
+        seg = [h for h in (hr or [])[start:i + 1] if h]
+        metres = (dist[i] or 0.0) - (dist[start] or 0.0)
+        rows.append({
+            "from_sec": axis[start],
+            "to_sec": axis[i],
+            "seconds": secs,
+            "hr_avg": round(sum(seg) / len(seg), 1) if seg else None,
+            "hr_max": max(seg) if seg else None,
+            "metres": round(metres, 1),
+            "pace_sec_per_km": round(secs / (metres / 1000.0)) if metres > 0 else None,
+        })
+        start = i
+    return rows
+
+
 def cardiac_drift(hr: Optional[list[Optional[float]]]) -> Optional[float]:
     """Second-half mean HR minus first-half mean HR.
 
