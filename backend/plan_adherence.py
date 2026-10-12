@@ -80,7 +80,7 @@ def match_and_grade(
     used: set[Any] = set()
     enriched: list[dict[str, Any]] = []
 
-    done = missed = planned_past = easy_run_hard = easy_graded = 0
+    done = done_past = missed = planned_past = easy_run_hard = easy_graded = 0
 
     for w in workouts:
         e = dict(w)
@@ -106,6 +106,7 @@ def match_and_grade(
             done += 1
             if is_past:
                 planned_past += 1
+                done_past += 1
             actual = {
                 "activity_id": best["id"],
                 "pace_sec": _pace_sec(best.get("average_speed")),
@@ -126,9 +127,13 @@ def match_and_grade(
             e.update(status="upcoming", actual=None, compliance=None)
         enriched.append(e)
 
-    adherence_pct = round(100 * done / planned_past) if planned_past else None
+    # done counts every completed session, including one run ahead of its date;
+    # the percentage must use the past-only numerator or it can exceed 100 and
+    # report full adherence alongside a missed session.
+    adherence_pct = round(100 * done_past / planned_past) if planned_past else None
     summary = {
         "done": done,
+        "done_past": done_past,
         "missed": missed,
         "planned_past": planned_past,
         "adherence_pct": adherence_pct,

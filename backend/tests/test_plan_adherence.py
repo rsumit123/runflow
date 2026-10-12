@@ -132,3 +132,42 @@ def test_week_number_math_ignores_the_creation_time_of_day():
     assert week_of(_date(2026, 7, 26)) == 2       # Sun, last day of week 2
     assert week_of(_date(2026, 8, 2)) == 3
     assert week_of(_date(2026, 7, 15)) == 1
+
+
+def test_adherence_pct_excludes_a_session_run_ahead_of_its_date():
+    """It reported "2 done, 1 missed of 2 due (100%)" — 100% with a miss.
+
+    done is incremented for any matched run but planned_past only for past
+    workouts, so a session run early inflated the numerator of a past-only
+    denominator.
+    """
+    import plan_adherence as padh
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 10, 12, 12, 0)
+    wos = [
+        {"id": 1, "date": now - timedelta(days=5), "day_type": "easy",
+         "target_distance_m": 3000, "pace_low_sec": 435, "pace_high_sec": 450,
+         "hr_ceiling": 160, "title": "Easy"},
+        {"id": 2, "date": now - timedelta(days=3), "day_type": "easy",
+         "target_distance_m": 3000, "pace_low_sec": 435, "pace_high_sec": 450,
+         "hr_ceiling": 160, "title": "Easy"},
+        {"id": 3, "date": now + timedelta(days=2), "day_type": "long",
+         "target_distance_m": 4000, "pace_low_sec": 435, "pace_high_sec": 450,
+         "hr_ceiling": 160, "title": "Long"},
+    ]
+    acts = [
+        {"id": 101, "distance": 3000.0, "start_date": now - timedelta(days=5),
+         "average_speed": 3000 / 1320, "average_heartrate": 150.0},
+        {"id": 103, "distance": 4000.0, "start_date": now + timedelta(days=1),
+         "average_speed": 4000 / 1760, "average_heartrate": 150.0},
+    ]
+
+    s = padh.match_and_grade(wos, acts, now)["summary"]
+
+    assert s["done"] == 2, "both matched runs still count as done"
+    assert s["done_past"] == 1, "only one of them was due in the past"
+    assert s["planned_past"] == 2
+    assert s["adherence_pct"] == 50, (
+        f"1 of 2 past sessions is 50%, got {s['adherence_pct']}%"
+    )

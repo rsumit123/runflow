@@ -797,7 +797,7 @@ function PlanSection() {
                 fontSize: '12px', fontWeight: 600, color: '#e8edf2', backgroundColor: '#111820',
                 borderRadius: '20px', padding: '5px 12px',
               }}>
-                {adh.done != null ? adh.done : 0}/{adh.planned_past} done
+                {adh.done_past != null ? adh.done_past : (adh.done != null ? adh.done : 0)}/{adh.planned_past} done
               </span>
               {adh.adherence_pct != null && (
                 <span style={{
