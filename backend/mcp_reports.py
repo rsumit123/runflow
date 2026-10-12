@@ -30,6 +30,11 @@ MAX_TABLE_ROWS = 180
 # the cap is not threatened — but 299 consecutive lines is a wall nobody reads.
 MAX_PAUSE_LINES = 20
 
+# A SQLAlchemy error can carry a whole statement and its parameters; none of
+# that belongs in a run report. The renderer owns the bound so no caller can
+# forget it.
+MAX_ERROR_CHARS = 200
+
 
 def _pace(sec_per_km: Optional[float]) -> str:
     if not sec_per_km:
@@ -176,8 +181,10 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
 
     lines.append("")
     if planned is None:
-        if planned_error:
-            lines.append(f"Could not check this run against the plan: {planned_error}")
+        if planned_error is not None:
+            # Guard on absence, not truthiness: an empty message is still a failure.
+            lines.append("Could not check this run against the plan: "
+                         f"{planned_error[:MAX_ERROR_CHARS] or 'unknown error'}")
         else:
             lines.append("No planned session matched this run.")
     else:

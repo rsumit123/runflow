@@ -836,7 +836,10 @@ async def review_run(run_id: int, window_sec: int = 60) -> str:
                 planned = await _planned_for(session, run_id)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("adherence lookup failed for run %s", run_id)
-                planned_error = str(exc)
+                # An exception with an empty str() must still read as a failed
+                # check, and a SQLAlchemy error can carry a whole statement
+                # with its parameters — neither belongs in a run report.
+                planned_error = (str(exc) or exc.__class__.__name__)[:200]
             return mr.run_review(run, streams, planned=planned,
                                  window_sec=window_sec, planned_error=planned_error)
     except Exception as exc:  # noqa: BLE001

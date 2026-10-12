@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
+import mcp_reports as mr
+
 
 async def _app(monkeypatch, tag):
     tmp = tempfile.mktemp(suffix=f"{tag}.db")
@@ -117,6 +119,10 @@ async def test_review_run_shows_the_planned_session_it_matched(monkeypatch):
     )
     assert "Long run" in out
     assert "Planned:" in out
+    assert "status:" in out, "the planned section should carry its status"
+    assert "compliance:" in out or "status: done" in out, (
+        "grading is the point of the planned section — print what it found"
+    )
 
 
 @pytest.mark.asyncio
@@ -151,3 +157,58 @@ async def test_review_run_says_so_when_it_cannot_check_the_plan(monkeypatch):
     )
     # The run's own data must still be there — a plan problem cannot deny it.
     assert "5.0 km" in out
+
+
+@pytest.mark.asyncio
+async def test_review_run_reports_a_failure_with_no_message(monkeypatch):
+    """`if planned_error:` could not tell an empty message from no error.
+
+    raise RuntimeError() gives an empty str(exc), which fell through to "No
+    planned session matched this run." — the exact false statement the
+    planned_error branch exists to prevent.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "rrempty")
+    from models import Activity
+    from datetime import datetime, timedelta
+
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        s.add(Activity(id=702, name="Run", distance=5000.0, moving_time=2200,
+                       elapsed_time=2202, start_date=now - timedelta(days=1),
+                       average_speed=5000.0 / 2200, average_heartrate=180.0,
+                       max_heartrate=190.0))
+        await s.commit()
+
+    async def broken(session, run_id):
+        raise RuntimeError()
+    monkeypatch.setattr(mcp_server, "_planned_for", broken)
+
+    out = await mcp_server.review_run(run_id=702)
+
+    assert "No planned session matched" not in out
+    assert "Could not check this run against the plan" in out
+    assert "RuntimeError" in out, "fall back to the class when there is no message"
+
+
+def test_run_review_caps_a_runaway_plan_error():
+    """A SQLAlchemy error can carry a whole statement and its parameters."""
+    run = {"id": 1, "name": "R", "distance": 5000.0, "moving_time": 2200,
+           "elapsed_time": 2202, "average_heartrate": 180.0,
+           "max_heartrate": 190.0, "hr_zones": None, "start_latlng": None,
+           "end_latlng": None, "start_date": None, "total_elevation_gain": 0.0}
+
+    out = mr.run_review(run, {}, planned=None, planned_error="x" * 500)
+
+    line = next(l for l in out.split("\n") if "Could not check" in l)
+    assert len(line) < 300, f"the error line ran to {len(line)} characters"
+
+
+def test_run_review_treats_an_empty_error_as_a_failure_not_an_absence():
+    """Pins the `is not None` guard itself; the server-side class-name fallback
+    would otherwise mask a regression to a truthiness check."""
+    run = {"id": 1, "name": "R", "distance": 5000.0, "moving_time": 2200}
+
+    out = mr.run_review(run, {}, planned=None, planned_error="")
+
+    assert "Could not check this run against the plan" in out
+    assert "No planned session matched" not in out
