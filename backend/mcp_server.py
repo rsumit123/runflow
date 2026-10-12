@@ -1186,3 +1186,94 @@ async def set_workout_note(workout_id: int, note: str) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("set_workout_note failed")
         return f"Could not save the note on workout {workout_id}: {exc}"
+
+
+def _watch_clause(garmin_workout_id, eligible: bool, reason: str = "",
+                  push_ok: Optional[bool] = None) -> str:
+    """One sentence on whether the watch holds this session. Pure; no session.
+
+    eligible: the session belongs on the watch (future, has steps, not rest).
+    push_ok:  the endpoint's own verdict on the re-push it just attempted
+              (True/False), or None when no push was attempted.
+
+    An eligible session whose push failed is a FAILURE even when a
+    garmin_workout_id is still set: the endpoint leaves the previous id in
+    place, and that id points at the old version on the old day.
+    """
+    if eligible and push_ok is False:
+        return ("The watch was NOT updated: the Garmin push failed, so the "
+                "watch still holds the old version of this session.")
+    if eligible and push_ok is True:
+        return "The watch has been updated and holds this session."
+    if garmin_workout_id:
+        return "This session is on the watch."
+    if eligible:
+        return ("The watch was NOT updated: this session belongs on the watch "
+                "but is not there, so the watch does not match the plan.")
+    why = f" ({reason})" if reason else ""
+    return f"It is not on the watch and does not need to be{why}."
+
+
+async def _move_workout(session, workout_id: int, date: str):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    result = await _main.move_workout(
+        workout_id, _main.WorkoutMoveRequest(date=date), session)
+    # The response is the whole plan; re-read the moved row for its true state.
+    from models import PlannedWorkout
+    session.expire_all()
+    w = await session.get(PlannedWorkout, workout_id)
+    return result, w
+
+
+@mcp.tool()
+async def move_workout(workout_id: int, date: str) -> str:
+    """Move one planned session to a different date.
+
+    The plan is the source of truth and the watch follows it: a move to a
+    future date re-pushes the session to the Garmin watch, and a move into the
+    past takes it off. The reply says whether the watch actually took the
+    change. If the re-push failed, the move is saved but the watch still holds
+    the old day, and the reply says so plainly; tell the athlete that, and
+    offer to retry with push_workout. Also warns (without blocking) when the
+    move puts two hard sessions within a day of each other.
+
+    Args:
+        workout_id: the planned workout id, from get_plan_status.
+        date: the new date, YYYY-MM-DD.
+    """
+    try:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return mv.cap_text(
+                f"Nothing changed: '{date}' is not a valid date. Use YYYY-MM-DD.")
+        async with async_session() as session:
+            try:
+                result, w = await _move_workout(session, workout_id, date)
+            except HTTPException as exc:
+                return mv.cap_text(
+                    f"Nothing changed on workout {workout_id}: {exc.detail}.")
+            new_date = w.date.date()
+            has_steps = bool((w.structure or {}).get("steps"))
+            is_future = new_date >= datetime.utcnow().date()
+            rest = w.day_type == "rest"
+            eligible = is_future and has_steps and not rest
+            if not is_future:
+                reason = "it is in the past"
+            elif rest:
+                reason = "it is a rest day"
+            else:
+                reason = "it has no structured steps"
+            clause = _watch_clause(w.garmin_workout_id, eligible, reason,
+                                   push_ok=(result or {}).get("garmin_synced")
+                                   if eligible else None)
+            lines = [f"Moved \"{w.title}\" (workout {workout_id}) to "
+                     f"{new_date.isoformat()}.", clause]
+            warning = (result or {}).get("warning")
+            if warning:
+                lines.append(warning)
+            return mv.cap_text(" ".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("move_workout failed")
+        return f"Could not move workout {workout_id}: {exc}"
