@@ -866,3 +866,141 @@ async def test_apply_suggestion_reports_repushed_and_bounds_long_lists(monkeypat
     assert "re-sent to the watch" in out.lower() and "T1" in out
     assert out.count("(workout ") <= mcp_server.MAX_SYNC_FAILURES_LISTED + 1
     assert "7 more" in out, out
+
+
+# ---------------------------------------------------------------------------
+# apply_calibration
+# ---------------------------------------------------------------------------
+
+# The real shape of padapt.calibrate()["changes"], not a guess: field is
+# "easy_pace", from/to are band strings, delta_sec is an int.
+_CAL_CHANGE = {
+    "field": "easy_pace", "from": "7:15-7:50/km", "to": "6:55-7:30/km",
+    "delta_sec": 20,
+    "reason": "Your last 4 easy-HR run(s) averaged 7:10/km at or below 155 bpm.",
+}
+
+
+def _cal_response(updated=7, repushed=5, failed=()):
+    return {"plan": {"id": 14}, "workouts": [],
+            "calibration": {"workouts_updated": updated,
+                            "repushed_to_watch": repushed,
+                            "changes": [_CAL_CHANGE], "failed": list(failed)}}
+
+
+@pytest.mark.asyncio
+async def test_apply_calibration_with_no_active_plan_is_a_sentence(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cal")
+
+    out = await mcp_server.apply_calibration()
+
+    assert "no active plan" in out.lower()
+    assert "nothing was changed" in out.lower()
+    assert _no_raw_http(out) and "Traceback" not in out
+
+
+@pytest.mark.asyncio
+async def test_apply_calibration_says_so_when_there_is_nothing_to_change(monkeypatch):
+    """A fresh plan with no easy runs behind it cannot be calibrated yet.
+
+    The endpoint raises 400 with that reason; it must read as 'nothing to do',
+    not as a failure and not as a success.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "cal2")
+    await _seed_plan(database)
+
+    out = await mcp_server.apply_calibration()
+
+    low = out.lower()
+    assert "nothing to calibrate" in low, out
+    assert "nothing was changed" in low, out
+    assert "applied" not in low.replace("not applied", ""), out
+    assert _no_raw_http(out) and "Traceback" not in out
+
+
+@pytest.mark.asyncio
+async def test_apply_calibration_clean_run_reports_counts_and_no_watch_alarm(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cal3")
+    await _seed_plan(database)
+
+    async def fake(session):
+        return _cal_response(updated=7, repushed=7)
+    monkeypatch.setattr(mcp_server, "_apply_calibration", fake)
+
+    out = await mcp_server.apply_calibration()
+
+    assert "7:15-7:50/km -> 6:55-7:30/km" in out
+    assert "7 upcoming session" in out
+    assert "7 of them" in out and "re-sent" in out
+    low = out.lower()
+    assert "old" not in low and "did not reach" not in low and "not been sent" not in low, out
+
+
+@pytest.mark.asyncio
+async def test_apply_calibration_names_sessions_the_watch_did_not_take(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cal4")
+    await _seed_plan(database)
+
+    async def fake(session):
+        return _cal_response(updated=7, repushed=5, failed=[
+            {"id": 3, "title": "Long run"}, {"id": 9, "title": "Easy 5k"}])
+    monkeypatch.setattr(mcp_server, "_apply_calibration", fake)
+
+    out = await mcp_server.apply_calibration()
+
+    low = out.lower()
+    assert "saved" in low, "the plan did change"
+    assert "2 session" in low and "did not reach the watch" in low, out
+    assert "Long run" in out and "workout 3" in out
+    assert "Easy 5k" in out and "workout 9" in out
+    assert "old" in low, "must say the watch still holds the old targets"
+    assert "5 of them" in out, "5 were re-sent, not 7"
+    assert "push_workout" in out, "name the retry"
+
+
+@pytest.mark.asyncio
+async def test_apply_calibration_bounds_a_long_failed_list(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cal5")
+    await _seed_plan(database)
+    n = mcp_server.MAX_SYNC_FAILURES_LISTED + 6
+    failed = [{"id": i, "title": f"T{i}"} for i in range(1, n + 1)]
+
+    async def fake(session):
+        return _cal_response(updated=n, repushed=0, failed=failed)
+    monkeypatch.setattr(mcp_server, "_apply_calibration", fake)
+
+    out = await mcp_server.apply_calibration()
+
+    assert out.count("(workout ") == mcp_server.MAX_SYNC_FAILURES_LISTED
+    assert "6 more" in out, out
+    assert f"{n} session" in out, "the headline count is the true total"
+
+
+@pytest.mark.asyncio
+async def test_apply_calibration_end_to_end_with_a_garmin_failure(monkeypatch):
+    """Through the real endpoint: one re-push is rejected by Garmin.
+
+    Only the calibration maths (_calibration) and the Garmin call are stubbed.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "cal6")
+    await _seed_plan(database, n_sessions=3, on_watch=True)
+    pushed = []
+
+    async def fake_calibration(session, plan):
+        return {"has_changes": True, "proposed": {"easy_low_sec": 400},
+                "changes": [_CAL_CHANGE], "insights": []}
+
+    async def fake_push(w):
+        if w.id == 2:
+            raise RuntimeError("garmin said no")
+        pushed.append(w.id)
+    monkeypatch.setattr(main, "_calibration", fake_calibration)
+    monkeypatch.setattr(main, "_garmin_push", fake_push)
+
+    out = await mcp_server.apply_calibration()
+
+    assert sorted(pushed) == [1, 3], "all three were attempted; 2 raised"
+    assert "Session 2" in out and "workout 2" in out, out
+    assert "did not reach the watch" in out
+    assert "2 of them" in out, "3 re-aimed, 1 failed, 2 re-sent"
+    assert _no_raw_http(out) and "Traceback" not in out

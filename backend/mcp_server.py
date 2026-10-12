@@ -1687,3 +1687,72 @@ async def apply_suggestion(suggestion_id: str) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("apply_suggestion failed")
         return f"Could not apply the suggestion: {exc}"
+
+
+async def _apply_calibration(session):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    return await _main.apply_plan_calibration(session)
+
+
+@mcp.tool()
+async def apply_calibration() -> str:
+    """Accept the pace calibration previewed in get_plan_status: re-aim the
+    plan's remaining easy, long and strides sessions at the easy pace measured
+    from recent runs, and re-send the affected sessions to the watch so the
+    plan and the watch agree.
+
+    Takes no arguments; look at the preview in get_plan_status first. It only
+    touches sessions from today onward (the past is history and is never
+    rewritten). Quality and race sessions sit on goal pace and are not moved.
+    Sessions that are not on the watch are updated in the plan only. If some
+    re-sends fail, the plan keeps the new targets and the reply names the
+    sessions whose watch copy still holds the OLD targets.
+    """
+    try:
+        async with async_session() as session:
+            try:
+                resp = await _apply_calibration(session)
+            except HTTPException as exc:
+                return mv.cap_text(
+                    f"Calibration was not applied: {str(exc.detail).rstrip('.')}. "
+                    f"Nothing was changed.")
+            cal = (resp or {}).get("calibration") or {}
+            updated = int(cal.get("workouts_updated") or 0)
+            repushed = int(cal.get("repushed_to_watch") or 0)
+            failed = cal.get("failed") or []
+            changes = cal.get("changes") or []
+
+            lines = [("Calibration saved, but "
+                      f"{len(failed)} session{'s' if len(failed) != 1 else ''} "
+                      "did not reach the watch." if failed
+                      else "Calibration applied.")]
+            for c in changes[:MAX_SYNC_FAILURES_LISTED]:
+                lines.append(f"  {c.get('field')}: {c.get('from')} -> {c.get('to')}")
+                if c.get("reason"):
+                    lines.append(f"    {c['reason']}")
+            lines.append(
+                f"Re-aimed {updated} upcoming session{'s' if updated != 1 else ''} "
+                f"at the new easy pace; {repushed} of them "
+                f"{'was' if repushed == 1 else 'were'} re-sent to the watch with "
+                "the new targets. Past sessions were left alone.")
+            unsent = updated - repushed - len(failed)
+            if unsent > 0:
+                one = unsent == 1
+                lines.append(
+                    f"{unsent} of the re-aimed session{'' if one else 's'} "
+                    f"{'was' if one else 'were'} not on the watch (or had no "
+                    f"steps), so only the plan changed for "
+                    f"{'it' if one else 'them'}.")
+            if failed:
+                lines.append(
+                    "The plan has the new targets for these, but they have not "
+                    "been sent to the watch, which still holds the OLD pace "
+                    "targets. Retry with push_workout:")
+                lines += _bulleted(failed, lambda f: (
+                    f"- {str(f.get('title') or 'Untitled')[:_SYNC_TITLE_CHARS]}"
+                    f" (workout {f.get('id')})"))
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("apply_calibration failed")
+        return f"Could not apply the calibration: {exc}"
