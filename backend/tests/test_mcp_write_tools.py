@@ -267,3 +267,174 @@ def test_watch_clause_three_branches():
     for reason in ("it is in the past", "it is a rest day", "it has no structured steps"):
         off = wc(garmin_workout_id=None, eligible=False, reason=reason).lower()
         assert reason in off and "need" in off and "failed" not in off
+
+
+@pytest.mark.asyncio
+async def test_push_workout_puts_one_session_on_the_watch(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "pw")
+    await _seed_plan(database)
+    pushed = []
+
+    async def fake_push(w):
+        pushed.append(w.id)
+        w.garmin_workout_id = 3001
+    monkeypatch.setattr(main, "_garmin_push", fake_push)
+
+    out = await mcp_server.push_workout(workout_id=1)
+
+    assert pushed == [1]
+    assert "Session 1" in out, "name which session, not just the id"
+    expected_date = (datetime.utcnow() + timedelta(days=1)).date().isoformat()
+    assert expected_date in out, f"name the date the session is scheduled: {out}"
+    assert "has been updated and holds this session" in out, (
+        f"success must come from the endpoint's verdict: {out}")
+    from models import PlannedWorkout
+    async with database.async_session() as s:
+        assert (await s.get(PlannedWorkout, 1)).garmin_workout_id == 3001
+
+
+@pytest.mark.asyncio
+async def test_push_workout_with_no_steps_says_never_and_does_not_call_garmin(monkeypatch):
+    """400 is permanent: the athlete should stop asking, not retry."""
+    main, mcp_server, database = await _app(monkeypatch, "pw2")
+    await _seed_plan(database, with_steps=False)
+    called = []
+
+    async def fake_push(w):
+        called.append(w.id)
+    monkeypatch.setattr(main, "_garmin_push", fake_push)
+
+    out = await mcp_server.push_workout(workout_id=1)
+
+    assert called == [], "no steps means Garmin is never asked"
+    assert "step" in out.lower(), f"say it has no steps: {out}"
+    assert "try again" not in out.lower() and "retry" not in out.lower(), (
+        f"a permanent condition must not invite a retry: {out}")
+    assert "Traceback" not in out and _no_raw_http(out)
+
+
+@pytest.mark.asyncio
+async def test_push_workout_when_garmin_is_down_says_retry_and_name_garmin(monkeypatch):
+    """502 is transient: name Garmin, say nothing reached the watch, invite a retry."""
+    main, mcp_server, database = await _app(monkeypatch, "pw3")
+    await _seed_plan(database, with_steps=True)
+
+    async def broken(w):
+        raise RuntimeError("garmin 503")
+    monkeypatch.setattr(main, "_garmin_push", broken)
+
+    out = await mcp_server.push_workout(workout_id=1)
+
+    assert "garmin" in out.lower(), f"name Garmin: {out}"
+    assert "garmin 503" in out, f"carry the underlying cause: {out}"
+    assert "not on the watch" in out.lower() or "not been sent" in out.lower(), (
+        f"say the session did not reach the watch: {out}")
+    assert "try again" in out.lower(), f"a transient failure invites a retry: {out}"
+    assert "step" not in out.lower(), f"must not read like the no-steps case: {out}"
+    assert "Traceback" not in out and _no_raw_http(out)
+
+
+@pytest.mark.asyncio
+async def test_push_workout_unknown_id_says_so(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "pw4")
+    await _seed_plan(database)
+
+    out = await mcp_server.push_workout(workout_id=999)
+
+    assert "not found" in out.lower()
+    assert "Traceback" not in out and _no_raw_http(out)
+
+
+@pytest.mark.asyncio
+async def test_unpush_workout_takes_it_off_the_watch(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "up")
+    await _seed_plan(database, on_watch=True)
+    removed = []
+
+    async def fake_remove(gid):
+        removed.append(gid)
+    monkeypatch.setattr(main.garmin, "remove_workout", fake_remove)
+
+    out = await mcp_server.unpush_workout(workout_id=1)
+
+    assert removed == [1001], "the stored garmin id must be the one removed"
+    from models import PlannedWorkout
+    async with database.async_session() as s:
+        w = await s.get(PlannedWorkout, 1)
+        assert w.garmin_workout_id is None
+    assert "Session 1" in out
+    assert "taken off the watch" in out.lower(), f"say it was removed: {out}"
+    assert "still in the plan" in out.lower(), f"say the plan is untouched: {out}"
+
+
+@pytest.mark.asyncio
+async def test_unpush_a_workout_that_was_never_on_the_watch_says_so(monkeypatch):
+    """Not an error, and not a removal either — the state was already correct."""
+    main, mcp_server, database = await _app(monkeypatch, "up2")
+    await _seed_plan(database, on_watch=False)
+    removed = []
+
+    async def fake_remove(gid):
+        removed.append(gid)
+    monkeypatch.setattr(main.garmin, "remove_workout", fake_remove)
+
+    out = await mcp_server.unpush_workout(workout_id=1)
+
+    assert removed == [], "nothing to remove, so Garmin must not be called"
+    low = out.lower()
+    assert "was not on the watch" in low, (
+        f"say it was already not on the watch: {out}")
+    assert "taken off" not in low and "removed" not in low, (
+        f"must not claim a removal that did not happen: {out}")
+    assert "Session 1" in out
+
+
+@pytest.mark.asyncio
+async def test_unpush_when_garmin_fails_says_it_is_still_on_the_watch(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "up4")
+    await _seed_plan(database, on_watch=True)
+
+    async def broken(gid):
+        raise RuntimeError("garmin 503")
+    monkeypatch.setattr(main.garmin, "remove_workout", broken)
+
+    out = await mcp_server.unpush_workout(workout_id=1)
+
+    low = out.lower()
+    assert "still on the watch" in low, f"nothing was removed: {out}"
+    assert "taken off" not in low
+    assert "garmin 503" in out
+    assert "Traceback" not in out and _no_raw_http(out)
+    from models import PlannedWorkout
+    async with database.async_session() as s:
+        assert (await s.get(PlannedWorkout, 1)).garmin_workout_id == 1001
+
+
+@pytest.mark.asyncio
+async def test_unpush_unknown_id_says_so(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "up5")
+    await _seed_plan(database)
+
+    out = await mcp_server.unpush_workout(workout_id=999)
+
+    assert "not found" in out.lower()
+    assert "Traceback" not in out and _no_raw_http(out)
+
+
+@pytest.mark.asyncio
+async def test_unpush_keeps_the_session_in_the_plan(monkeypatch):
+    """Removing from the watch must never delete the planned session."""
+    main, mcp_server, database = await _app(monkeypatch, "up3")
+    await _seed_plan(database, on_watch=True)
+
+    async def fake_remove(gid):
+        pass
+    monkeypatch.setattr(main.garmin, "remove_workout", fake_remove)
+
+    await mcp_server.unpush_workout(workout_id=1)
+
+    from models import PlannedWorkout
+    async with database.async_session() as s:
+        w = await s.get(PlannedWorkout, 1)
+        assert w is not None, "the session must still exist in the plan"
+        assert w.title == "Session 1"

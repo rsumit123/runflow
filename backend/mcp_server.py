@@ -1277,3 +1277,102 @@ async def move_workout(workout_id: int, date: str) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("move_workout failed")
         return f"Could not move workout {workout_id}: {exc}"
+
+
+async def _push_workout(session, workout_id: int):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    return await _main.push_workout_to_garmin(workout_id, session)
+
+
+@mcp.tool()
+async def push_workout(workout_id: int) -> str:
+    """Schedule one planned session on the Garmin watch, so it guides the run
+    step by step.
+
+    Two failures read differently on purpose. A session with no structured
+    steps can never be sent, so asking again will not help. A Garmin outage is
+    temporary, so trying again later is worthwhile.
+
+    Args:
+        workout_id: the planned workout id, from get_plan_status.
+    """
+    try:
+        async with async_session() as session:
+            try:
+                result = await _push_workout(session, workout_id)
+            except HTTPException as exc:
+                if exc.status_code == 404:
+                    return mv.cap_text(
+                        f"Nothing sent: workout {workout_id} was not found.")
+                if exc.status_code == 400:
+                    return mv.cap_text(
+                        f"Nothing was sent to the watch for workout {workout_id}: "
+                        f"{exc.detail} Asking again will not help; the session "
+                        f"would need steps added before it could go on the watch.")
+                return mv.cap_text(
+                    f"The session has not been sent to the watch (workout "
+                    f"{workout_id}): {exc.detail}. Garmin may be unavailable "
+                    f"right now; try again shortly.")
+            result = result or {}
+            clause = _watch_clause(result.get("garmin_workout_id"), True,
+                                   push_ok=True)
+            return mv.cap_text(
+                f"Pushed \"{result.get('title')}\" (workout {workout_id}) for "
+                f"{result.get('date')}. {clause}")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("push_workout failed")
+        return f"Could not push workout {workout_id}: {exc}"
+
+
+async def _unpush_workout(session, workout_id: int):
+    """Indirection so tests can substitute the import. See _garmin_sync.
+
+    The endpoint returns {"garmin_workout_id": None} both after removing a
+    session and when there was nothing to remove, so the only way to tell
+    which happened is to read the id BEFORE calling. Returns
+    (title, was_on_watch, result); title is None for an unknown workout, and
+    the endpoint then raises its own 404.
+    """
+    import main as _main
+    from models import PlannedWorkout
+    w = await session.get(PlannedWorkout, workout_id)
+    title = w.title if w is not None else None
+    was_on_watch = bool(w is not None and w.garmin_workout_id)
+    result = await _main.remove_workout_from_garmin(workout_id, session)
+    return title, was_on_watch, result
+
+
+@mcp.tool()
+async def unpush_workout(workout_id: int) -> str:
+    """Take one planned session off the Garmin watch. The plan is untouched:
+    the session stays in the plan and can be pushed again later with
+    push_workout. This connector does not delete planned sessions.
+
+    The reply says whether the session was actually taken off the watch or was
+    never on it, and if Garmin refused, that it is still on the watch.
+
+    Args:
+        workout_id: the planned workout id, from get_plan_status.
+    """
+    try:
+        async with async_session() as session:
+            try:
+                title, was_on_watch, _ = await _unpush_workout(session, workout_id)
+            except HTTPException as exc:
+                if exc.status_code == 404:
+                    return mv.cap_text(
+                        f"Nothing changed: workout {workout_id} was not found.")
+                return mv.cap_text(
+                    f"Nothing changed on workout {workout_id}: {exc.detail}. "
+                    f"The session is still on the watch; try again shortly.")
+            if was_on_watch:
+                return mv.cap_text(
+                    f"\"{title}\" (workout {workout_id}) has been taken off the "
+                    f"watch. It is still in the plan.")
+            return mv.cap_text(
+                f"\"{title}\" (workout {workout_id}) was not on the watch, so "
+                f"there was nothing to take off. It is still in the plan.")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("unpush_workout failed")
+        return f"Could not take workout {workout_id} off the watch: {exc}"
