@@ -40,6 +40,7 @@ import calendar
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+from fastapi import HTTPException
 from sqlalchemy import select
 
 import fitness_model as fm
@@ -1144,3 +1145,44 @@ async def get_plan_status() -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_plan_status failed")
         return f"Could not read the plan: {exc}"
+
+
+async def _set_workout_note(session, workout_id: int, note: str):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    return await _main.set_planned_workout_note(
+        workout_id, _main.NoteRequest(note=note), session)
+
+
+@mcp.tool()
+async def set_workout_note(workout_id: int, note: str) -> str:
+    """Replace a planned session's description with the athlete's own text.
+
+    The description is the athlete's own instruction to himself for that
+    session. The generator's default easy-run text recommends walk breaks, and
+    this athlete must not take them (start-stop running causes next-day pain),
+    so correcting that text is the main use. Write only what the athlete has
+    told you; do not invent one. Replaces any existing description; an empty
+    string clears it.
+
+    This changes the text only. It does NOT change paces, distances, dates or
+    anything on the watch.
+
+    Args:
+        workout_id: the planned workout id, from get_plan_status.
+        note: the new description (max 2000 characters). Empty clears it.
+    """
+    try:
+        async with async_session() as session:
+            try:
+                result = await _set_workout_note(session, workout_id, note)
+            except HTTPException as exc:
+                return mv.cap_text(
+                    f"Nothing changed on workout {workout_id}: {exc.detail}.")
+        saved = (result or {}).get("description")
+        if not saved:
+            return mv.cap_text(f"Description cleared on workout {workout_id}.")
+        return mv.cap_text(f"Description saved on workout {workout_id}: {saved}")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("set_workout_note failed")
+        return f"Could not save the note on workout {workout_id}: {exc}"
