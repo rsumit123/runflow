@@ -1437,3 +1437,128 @@ async def sync_plan_to_watch() -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("sync_plan_to_watch failed")
         return f"Could not sync the plan to the watch: {exc}"
+
+
+async def _push_adhoc(name: str, date: str, steps: list):
+    """Indirection so tests can substitute the import. See _garmin_sync.
+
+    The endpoint takes no database session (main.py: push_adhoc_workout(req)).
+    """
+    import main as _main
+    return await _main.push_adhoc_workout(
+        _main.AdhocWorkoutRequest(name=name, date=date, steps=steps))
+
+
+def _pace_step_problem(steps: list, where: str = "step") -> Optional[str]:
+    """First problem with a pace target that garmin_workout would silently
+    mangle: a missing bound drops the target entirely, and swapped bounds give
+    the watch an inverted range. Returns a sentence, or None when fine."""
+    for i, s in enumerate(steps, 1):
+        label = f"{where} {i}"
+        if not isinstance(s, dict):
+            return f"{label} is not an object."
+        if s.get("type") == "repeat":
+            found = _pace_step_problem(s.get("steps") or [], f"{label}, inner step")
+            if found:
+                return found
+            continue
+        if s.get("target_kind") == "pace":
+            low, high = s.get("pace_low_sec"), s.get("pace_high_sec")
+            if not low or not high:
+                return (f"{label} has target_kind \"pace\" but needs both "
+                        f"pace_low_sec and pace_high_sec, otherwise the watch "
+                        f"would get no pace target at all.")
+            if low > high:
+                return (f"{label} has pace_low_sec ({low}) slower than "
+                        f"pace_high_sec ({high}). pace_low_sec is the FASTER "
+                        f"bound, so it must be the smaller number.")
+    return None
+
+
+@mcp.tool()
+async def push_adhoc_workout(name: str, date: str, steps: list[dict]) -> str:
+    """Send a one-off structured session to the Garmin watch with no plan behind
+    it: a benchmark attempt, a test run. The watch then guides it step by step
+    and can hold the athlete to a pace. It cannot be a past date.
+
+    UNITS: every pace is SECONDS PER KILOMETRE (8:00/km = 480). end_value is
+    SECONDS when end_kind is "time" and METRES when it is "distance".
+
+    `steps` is an ordered list of step objects. A normal step has these keys:
+      type         "warmup" | "run" | "recovery" | "cooldown"  ("run" is the
+                   hard/working step; an unrecognised type is treated as "run")
+      end_kind     "time" | "distance"  (anything else is treated as "time")
+      end_value    number: seconds for "time", metres for "distance"
+      target_kind  "pace" | "none"  (use "none" for no pace guard)
+      pace_low_sec   the FASTER bound, the smaller number (e.g. 470)
+      pace_high_sec  the SLOWER bound, the larger number (e.g. 490)
+      note         optional text shown on the watch for that step (512 chars)
+    With target_kind "pace" BOTH pace bounds are required, and pace_low_sec must
+    be smaller than pace_high_sec; this tool refuses a step that breaks that,
+    because the watch would otherwise get no target or an inverted one. For
+    target_kind "none" the pace keys are ignored.
+
+    To repeat a block, use one repeat step holding the steps to loop:
+      {"type": "repeat", "iterations": N, "steps": [ ...normal steps... ]}
+    Repeats cannot be nested; a repeat inside a repeat is not supported.
+
+    Worked example: 10 min easy warmup, 3 x (800 m hard at 4:30-4:40/km, then
+    90 s easy jog), 10 min cooldown:
+    [
+      {"type": "warmup", "end_kind": "time", "end_value": 600,
+       "target_kind": "none"},
+      {"type": "repeat", "iterations": 3, "steps": [
+        {"type": "run", "end_kind": "distance", "end_value": 800,
+         "target_kind": "pace", "pace_low_sec": 270, "pace_high_sec": 280,
+         "note": "Controlled, not a sprint."},
+        {"type": "recovery", "end_kind": "time", "end_value": 90,
+         "target_kind": "none"}
+      ]},
+      {"type": "cooldown", "end_kind": "time", "end_value": 600,
+       "target_kind": "none"}
+    ]
+
+    Returns the Garmin workout id. The session lives only on Garmin, not in the
+    training plan; a failed push means nothing has been sent to the watch.
+
+    Args:
+        name: what the watch shows for the session, e.g. "5K benchmark".
+        date: YYYY-MM-DD, today or later.
+        steps: the step list described above.
+    """
+    try:
+        try:
+            when = datetime.fromisoformat(str(date)).date()
+        except ValueError:
+            return mv.cap_text(
+                f"The session has not been sent to the watch: date must be "
+                f"YYYY-MM-DD, got {date!r}.")
+        if when < datetime.utcnow().date():
+            return mv.cap_text(
+                f"The session has not been sent to the watch: {when.isoformat()} "
+                f"is in the past, and Garmin would accept it but the watch "
+                f"would never show it. Pick today or a later date.")
+        if not steps:
+            return mv.cap_text(
+                "The session has not been sent to the watch: it needs at least "
+                "one step. See this tool's description for the step format.")
+        problem = _pace_step_problem(steps)
+        if problem:
+            return mv.cap_text(
+                f"The session has not been sent to the watch: {problem}")
+        try:
+            res = await _push_adhoc(name, when.isoformat(), steps)
+        except HTTPException as exc:
+            return mv.cap_text(
+                f"The session has not been sent to the watch: {exc.detail}"
+                + (" Garmin may be unavailable; try again shortly."
+                   if exc.status_code >= 500 else ""))
+        res = res or {}
+        return mv.cap_text(
+            f"Sent \"{res.get('name', name)}\" to the watch for "
+            f"{res.get('date', when.isoformat())} "
+            f"({res.get('steps', len(steps))} steps). Garmin workout id: "
+            f"{res.get('workout_id')}. This is a one-off, not part of the plan.")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("push_adhoc_workout failed")
+        return f"Could not push the workout: {exc}"

@@ -532,3 +532,177 @@ async def test_sync_plan_to_watch_bounds_a_long_failure_list(monkeypatch):
     assert f"and {60 - cap} more" in out
     # Bounded without cap_text's help: far below the cap, not just under it.
     assert len(out) < mv.MAX_RESPONSE_CHARS // 4, len(out)
+
+
+# --- push_adhoc_workout ------------------------------------------------------
+
+def _adhoc_steps():
+    return [
+        {"type": "run", "end_kind": "distance", "end_value": 1000,
+         "target_kind": "pace", "pace_low_sec": 470, "pace_high_sec": 490,
+         "note": "Do not go faster."},
+    ]
+
+
+def _tomorrow():
+    return (datetime.utcnow() + timedelta(days=1)).date().isoformat()
+
+
+def _spy_adhoc_helper(monkeypatch, mcp_server):
+    """Spy on the tool's own helper. The endpoint re-validates date and steps,
+    so asserting only on Garmin would pass even with no guard in the tool."""
+    calls = []
+
+    async def spy(name, date, steps):
+        calls.append((name, date, steps))
+        return {"workout_id": 1, "date": date, "name": name, "steps": len(steps)}
+    monkeypatch.setattr(mcp_server, "_push_adhoc", spy)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_returns_the_garmin_id(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "ah")
+    sent = {}
+
+    async def fake_push(name, steps, date_str):
+        sent.update(name=name, steps=steps, date=date_str)
+        return {"workout_id": 987}
+    monkeypatch.setattr(main.garmin, "push_workout", fake_push)
+
+    tomorrow = _tomorrow()
+    out = await mcp_server.push_adhoc_workout(
+        name="5K benchmark", date=tomorrow, steps=_adhoc_steps())
+
+    assert "987" in out
+    assert tomorrow in out
+    assert "5K benchmark" in out
+    assert sent["name"] == "5K benchmark"
+    assert sent["date"] == tomorrow
+    assert sent["steps"] == _adhoc_steps(), "steps must reach Garmin untouched"
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_refuses_a_past_date(monkeypatch):
+    """Scheduling into the past silently does nothing on the watch."""
+    main, mcp_server, database = await _app(monkeypatch, "ah2")
+    calls = _spy_adhoc_helper(monkeypatch, mcp_server)
+
+    yesterday = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
+    out = await mcp_server.push_adhoc_workout(
+        name="Too late", date=yesterday, steps=_adhoc_steps())
+
+    assert calls == [], "the tool must refuse before calling the endpoint"
+    assert "past" in out.lower()
+    assert "not been sent" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_accepts_today(monkeypatch):
+    """The guard is for days that have gone, not for today."""
+    main, mcp_server, database = await _app(monkeypatch, "ah2b")
+    calls = _spy_adhoc_helper(monkeypatch, mcp_server)
+
+    today = datetime.utcnow().date().isoformat()
+    out = await mcp_server.push_adhoc_workout(
+        name="Today", date=today, steps=_adhoc_steps())
+
+    assert len(calls) == 1
+    assert "past" not in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_refuses_an_empty_step_list(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "ah3")
+    calls = _spy_adhoc_helper(monkeypatch, mcp_server)
+
+    out = await mcp_server.push_adhoc_workout(
+        name="Empty", date=_tomorrow(), steps=[])
+
+    assert calls == []
+    assert "step" in out.lower()
+    assert "not been sent" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_surfaces_a_garmin_failure(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "ah4")
+
+    async def broken(name, steps, date_str):
+        raise RuntimeError("no garmin token")
+    monkeypatch.setattr(main.garmin, "push_workout", broken)
+
+    out = await mcp_server.push_adhoc_workout(
+        name="5K benchmark", date=_tomorrow(), steps=_adhoc_steps())
+
+    assert "no garmin token" in out, "the underlying reason must be shown"
+    assert "not been sent" in out.lower(), "the athlete must know the watch has nothing"
+    assert "Traceback" not in out and _no_raw_http(out)
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_rejects_a_malformed_date(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "ah5")
+    calls = _spy_adhoc_helper(monkeypatch, mcp_server)
+
+    out = await mcp_server.push_adhoc_workout(
+        name="x", date="tomorrow", steps=_adhoc_steps())
+
+    assert calls == []
+    assert "yyyy-mm-dd" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_refuses_swapped_pace_bounds(monkeypatch):
+    """pace_low_sec is the FASTER bound (smaller number). Swapped, the watch
+    would be given an inverted range and alert on every step."""
+    main, mcp_server, database = await _app(monkeypatch, "ah6")
+    calls = _spy_adhoc_helper(monkeypatch, mcp_server)
+    steps = [{"type": "run", "end_kind": "distance", "end_value": 1000,
+              "target_kind": "pace", "pace_low_sec": 490, "pace_high_sec": 470}]
+
+    out = await mcp_server.push_adhoc_workout(
+        name="x", date=_tomorrow(), steps=steps)
+
+    assert calls == []
+    assert "pace_low_sec" in out and "faster" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_refuses_a_pace_target_without_bounds(monkeypatch):
+    """garmin_workout silently drops the target when a bound is missing, so a
+    benchmark would go out with no pace guard at all. Checked inside repeats."""
+    main, mcp_server, database = await _app(monkeypatch, "ah7")
+    calls = _spy_adhoc_helper(monkeypatch, mcp_server)
+    steps = [{"type": "repeat", "iterations": 3, "steps": [
+        {"type": "run", "end_kind": "time", "end_value": 60,
+         "target_kind": "pace", "pace_low_sec": 300}]}]
+
+    out = await mcp_server.push_adhoc_workout(
+        name="x", date=_tomorrow(), steps=steps)
+
+    assert calls == []
+    assert "pace_high_sec" in out
+
+
+@pytest.mark.asyncio
+async def test_push_adhoc_workout_accepts_the_documented_example(monkeypatch):
+    """The docstring's worked example must itself be a valid call."""
+    import json
+    main, mcp_server, database = await _app(monkeypatch, "ah8")
+    calls = _spy_adhoc_helper(monkeypatch, mcp_server)
+    doc = mcp_server.push_adhoc_workout.__doc__
+    start = doc.index("[\n")
+    end = doc.index("\n]\n", start) + len("\n]")
+    example = json.loads(doc[start:end])
+
+    out = await mcp_server.push_adhoc_workout(
+        name="Intervals", date=_tomorrow(), steps=example)
+
+    assert len(calls) == 1, out
+    assert any(s["type"] == "repeat" for s in example)
+    # And the real converter must accept it, repeat group included.
+    import garmin_workout as gw
+    built = gw.build_running_workout("Intervals", example)
+    top = built.workoutSegments[0].workoutSteps
+    assert len(top) == 3, "warmup, repeat group, cooldown"
