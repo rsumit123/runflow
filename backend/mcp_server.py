@@ -41,6 +41,7 @@ from typing import Optional
 
 from sqlalchemy import select
 
+import mcp_reports as mr
 import mcp_views as mv
 from database import async_session
 from models import Activity, Stream
@@ -770,3 +771,71 @@ async def set_run_note(run_id: int, note: str) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("set_run_note failed")
         return f"Could not save the note on run {run_id}: {exc}"
+
+
+async def _planned_for(session, run_id: int) -> Optional[dict]:
+    """The planned session this run fulfilled, graded — or None.
+
+    Indirection so tests can substitute the adherence machinery, and so the
+    lazy `main` import stays in one place.
+    """
+    import main as _main
+    plan = await _main._active_plan(session)
+    if plan is None:
+        return None
+    workouts = await _main._workout_dicts(session, plan)
+    acts = await _main._plan_activity_dicts(session)
+    graded = _main.padh.match_and_grade(workouts, acts, datetime.utcnow(), plan.start_date)
+    # match_and_grade puts the matched run under `actual`, keyed activity_id.
+    return next((w for w in graded["workouts"]
+                 if (w.get("actual") or {}).get("activity_id") == run_id), None)
+
+
+@mcp.tool()
+async def review_run(run_id: int, window_sec: int = 60) -> str:
+    """One run in full depth: splits, how HR behaved over time, and planned vs actual.
+
+    Use this when the athlete asks how a specific run went, or when a question
+    needs more than the summary row list_recent_runs gives — "did I fade?",
+    "what HR was I at for the first five minutes?", "was that continuous?".
+
+    Returns distance, pace and HR; whether the run was continuous or fragmented,
+    with each pause located and the HR either side of it; 500 m splits on moving
+    time; mean and peak HR per window across the run; cardiac drift; terrain;
+    time in zones with the boundaries; the athlete's own note; and, when the run
+    matched a session in the active plan, the targets beside the actuals.
+
+    Args:
+        run_id: the activity id, from list_recent_runs.
+        window_sec: HR profile window in seconds (10-600). 60 shows minute by
+            minute, which is the right grain for watching HR drift on an easy
+            run. Use 300 for a long run to keep the table short.
+    """
+    try:
+        window_sec = max(10, min(600, window_sec))
+        async with async_session() as session:
+            a = await session.get(Activity, run_id)
+            if a is None:
+                return f"Run {run_id} not found."
+            run = {
+                "id": a.id, "name": a.name, "start_date": a.start_date,
+                "distance": a.distance, "moving_time": a.moving_time,
+                "elapsed_time": a.elapsed_time,
+                "average_heartrate": a.average_heartrate,
+                "max_heartrate": a.max_heartrate,
+                "average_cadence": a.average_cadence,
+                "total_elevation_gain": a.total_elevation_gain,
+                "elev_high": a.elev_high, "elev_low": a.elev_low,
+                "hr_zones": a.hr_zones, "temp_c": a.temp_c,
+                "dew_point_c": a.dew_point_c, "notes": a.notes,
+            }
+            streams = await _streams_for(session, run_id)
+            try:
+                planned = await _planned_for(session, run_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("adherence lookup failed for run %s", run_id)
+                planned = None
+            return mr.run_review(run, streams, planned=planned, window_sec=window_sec)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("review_run failed")
+        return f"Could not review run {run_id}: {exc}"
