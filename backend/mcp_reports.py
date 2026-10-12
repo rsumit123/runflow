@@ -22,9 +22,13 @@ import mcp_views as mv
 #
 # 180 is chosen so that nothing this athlete actually runs is ever widened: a
 # 46-minute run yields 46 rows at 60 s and a 3-hour run exactly 180. Only
-# past three hours does the window grow. Worst case measured: a 12-hour run
-# lands at roughly 12,600 characters.
+# past three hours does the window grow. Measured worst case: a 12-hour,
+# 100 km run at 60 s windows is 11,029 characters, untruncated.
 MAX_TABLE_ROWS = 180
+
+# Pause detail lines. 299 detected pauses render in about 12,000 characters, so
+# the cap is not threatened — but 299 consecutive lines is a wall nobody reads.
+MAX_PAUSE_LINES = 20
 
 
 def _pace(sec_per_km: Optional[float]) -> str:
@@ -91,9 +95,11 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
         if pauses:
             lines.append(f"FRAGMENTED — {len(pauses)} pause(s), "
                          f"{_dur(elapsed - moving)} stopped in total:")
-            for p in pauses:
+            for p in pauses[:MAX_PAUSE_LINES]:
                 lines.append(f"  at {mv.num(p['at_km'], 2)} km — {_dur(p['seconds'])}, "
                              f"HR {mv.num(p['hr_in'])} → {mv.num(p['hr_out'])}")
+            if len(pauses) > MAX_PAUSE_LINES:
+                lines.append(f"  … and {len(pauses) - MAX_PAUSE_LINES} more")
         else:
             # A watch can report elapsed below moving; a negative "stopped"
             # figure would read as a data error in the middle of a verdict.
@@ -117,8 +123,18 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
         # while split_table above takes (dist, time, hr). All three are
         # Optional lists, so a positional transposition would fail silently.
         asked_window = window_sec
+        # moving_time is nullable, and a row that lacks it would skip the
+        # widening entirely and truncate the report again. The stream's own
+        # span is the fallback: it is what the profile is actually built from.
+        span = 0
+        if time:
+            first = next((t for t in time if t is not None), None)
+            last = next((t for t in reversed(time) if t is not None), None)
+            if first is not None and last is not None:
+                span = max(0, last - first)
+        budget_sec = max(moving, span)
         window_sec = max(window_sec,
-                         window_sec * max(1, math.ceil(moving / (window_sec * MAX_TABLE_ROWS))))
+                         window_sec * max(1, math.ceil(budget_sec / (window_sec * MAX_TABLE_ROWS))))
         prof = mv.hr_profile(hr=hr, time=time, dist=dist, window_sec=window_sec)
         if prof:
             lines.append("")

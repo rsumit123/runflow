@@ -194,3 +194,64 @@ def test_run_review_does_not_widen_a_normal_run():
 
     assert "widened" not in out, "a 46-minute run must keep 60 s windows"
     assert "Splits (500 m" in out, "and 500 m splits"
+
+
+def test_run_review_fits_when_the_row_has_no_moving_time():
+    """moving_time is nullable, and keying the row budget off it alone truncated.
+
+    A 42 km stream with moving_time=0 produced 25,042 characters and dropped
+    cardiac drift, the note and the planned section — the same failure the row
+    budget was added to prevent.
+    """
+    n = 14400
+    run = {
+        "id": 1, "name": "Long", "distance": 42000.0, "moving_time": 0,
+        "elapsed_time": 0, "average_heartrate": 150.0, "max_heartrate": 170.0,
+        "notes": "no moving time on this row", "hr_zones": None,
+        "start_latlng": None, "end_latlng": None, "start_date": None,
+        "total_elevation_gain": 10.0, "elev_high": 100.0, "elev_low": 95.0,
+    }
+    streams = {
+        "time": list(range(n)),
+        "distance": [i * 42000 / n for i in range(n)],
+        "heartrate": [150] * n,
+        "altitude": [100.0] * n,
+    }
+    planned = {
+        "title": "Long run", "day_type": "long", "target_distance_m": 42000,
+        "pace_low_sec": 340, "pace_high_sec": 360, "hr_ceiling": 160,
+        "status": "done", "compliance": "on_target",
+    }
+
+    out = mr.run_review(run, streams, planned=planned, window_sec=10)
+
+    assert "truncated at" not in out
+    assert "Cardiac drift" in out
+    assert "no moving time on this row" in out
+    assert "Long run" in out
+
+
+def test_run_review_caps_the_pause_list():
+    """299 pause lines is a wall nobody reads, even though it fits."""
+    time, dist, t, d = [], [], 0, 0.0
+    for _ in range(300):
+        for _ in range(5):
+            time.append(t); dist.append(d); t += 1; d += 2.5
+        time.append(t); dist.append(d); t += 30
+
+    run = {
+        "id": 1, "name": "Stop-start", "distance": d, "moving_time": 1500,
+        "elapsed_time": t, "average_heartrate": 150.0, "max_heartrate": 170.0,
+        "hr_zones": None, "start_latlng": None, "end_latlng": None,
+        "start_date": None, "total_elevation_gain": 0.0,
+    }
+
+    out = mr.run_review(run, {"time": time, "distance": dist,
+                              "heartrate": [150] * len(time)}, window_sec=60)
+
+    assert "FRAGMENTED" in out
+    detail = [l for l in out.split("\n") if l.strip().startswith("at ")]
+    assert len(detail) == mr.MAX_PAUSE_LINES, (
+        f"expected {mr.MAX_PAUSE_LINES} detail lines, got {len(detail)}"
+    )
+    assert "and 279 more" in out
