@@ -37,11 +37,15 @@ def _run_row(**over):
 
 
 def test_run_review_reports_distance_pace_and_hr():
-    out = mr.run_review(_run_row(), _steady_run())
+    # An average HR that differs from the stream's 180, so it can only come
+    # from the run row and only from the headline.
+    out = mr.run_review(_run_row(average_heartrate=173.0), _steady_run())
 
     assert "3.0 km" in out
     assert "7:15" in out, "1305 s over 3 km is 7:15/km"
-    assert "180" in out
+    headline = out.split("\n")[1]
+    assert "3.0 km" in headline and "7:15/km" in headline
+    assert "avg HR 173" in headline
 
 
 def test_run_review_includes_splits_and_an_hr_profile():
@@ -51,13 +55,18 @@ def test_run_review_includes_splits_and_an_hr_profile():
     assert "hr profile" in out.lower()
     # 500 m splits over 3 km is six rows.
     assert out.lower().count("0-500") == 1
+    lines = out.split("\n")
+    start = next(i for i, l in enumerate(lines) if l.startswith("Splits (")) + 2
+    end = next(i for i, l in enumerate(lines) if l.startswith("HR profile"))
+    rows = [l for l in lines[start:end] if l.strip()]
+    assert len(rows) == 6, f"expected six 500 m splits, got {len(rows)}: {rows}"
 
 
 def test_run_review_flags_a_continuous_run_as_continuous():
     out = mr.run_review(_run_row(), _steady_run())
 
     assert "continuous" in out.lower()
-    assert "pause" not in out.lower().split("continuous")[0]
+    assert "FRAGMENTED" not in out
 
 
 def test_run_review_reports_pauses_when_the_run_was_fragmented():
@@ -70,7 +79,8 @@ def test_run_review_reports_pauses_when_the_run_was_fragmented():
     out = mr.run_review(row, streams)
 
     assert "pause" in out.lower()
-    assert "1.5" in out
+    detail = [l for l in out.split("\n") if l.strip().startswith("at ")]
+    assert any("1.5 km" in l and "10m00s" in l for l in detail), detail
 
 
 def test_run_review_shows_the_terrain_and_the_athletes_note():
