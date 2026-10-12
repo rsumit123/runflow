@@ -849,7 +849,6 @@ async def review_run(run_id: int, window_sec: int = 60) -> str:
 
 
 ACWR_RISK_THRESHOLD = 1.5
-THIN_BASELINE_KM = 5.0  # mirrors build_warnings: below this the ratio is a comeback artefact
 
 
 async def _fitness_model(session) -> dict:
@@ -879,11 +878,11 @@ async def get_fitness_model() -> str:
             m = await _fitness_model(session)
             acwr = m.get("acwr")
             chronic = m.get("chronic_load_28d_km")
-            thin = chronic is not None and chronic < THIN_BASELINE_KM
+            thin = chronic is not None and chronic < fm.THIN_BASELINE_KM
             if acwr is None:
                 verdict = "not enough history to judge"
             elif thin:
-                verdict = (f"thin baseline (chronic load under {THIN_BASELINE_KM:g} "
+                verdict = (f"thin baseline (chronic load under {fm.THIN_BASELINE_KM:g} "
                            f"km/week): the {ACWR_RISK_THRESHOLD} risk threshold does not apply yet; "
                            "the ratio is inflated by design, a comeback ramp and not a spike — keep weekly increases to 10% or less")
             elif acwr > ACWR_RISK_THRESHOLD:
@@ -903,6 +902,10 @@ async def get_fitness_model() -> str:
                 kind = "measured from recent easy-HR runs"
             else:
                 kind = f"{method} — no usable easy pace"
+            if method in ("measured", "measured_stale") and m.get("easy_pace_floored"):
+                kind += (f"; measured at {_fmt_pace(m.get('measured_easy_pace_sec'))} "
+                         f"and clamped to the {_fmt_pace(fm.EASY_PACE_FLOOR_SEC)} floor "
+                         "— the real easy pace is slower than shown")
             lines = [
                 "Fitness model",
                 f"  max HR: {mv.num(m.get('athlete_max_hr'))}"

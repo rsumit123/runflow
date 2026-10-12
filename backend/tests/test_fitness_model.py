@@ -67,3 +67,31 @@ def test_training_report_shape():
     r = fm.training_report(acts, NOW)
     assert set(r) == {"fitness_model", "gray_zone", "warnings"}
     assert "pct_gray_14d" in r["gray_zone"]
+
+
+def test_fitness_model_exposes_whether_the_easy_pace_was_floored():
+    """A measured 8:15/km clamped to the 7:30 floor looked like a measured 7:30.
+
+    _estimate_easy_pace has always computed pace_floored; build_fitness_model
+    dropped it, so the one fact that makes the number honest never reached a
+    caller.
+    """
+    import fitness_model as fmod
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 10, 12)
+    # Easy-HR runs (below the 0.76 ceiling) run genuinely slower than the floor.
+    acts = [{"id": i, "distance": 5000.0, "moving_time": 2600,
+             "start_date": now - timedelta(days=i * 3),
+             "average_speed": 5000.0 / 2600, "average_heartrate": 120.0,
+             "max_heartrate": 200.0, "normalized_pace_sec": 520.0}
+            for i in range(1, 7)]
+
+    m = fmod.build_fitness_model(acts, now)
+    assert "easy_pace_floored" in m
+    assert m["easy_pace_method"] == "measured"
+    assert m["easy_pace_floored"] is True
+    assert m["easy_pace_sec"] == fmod.EASY_PACE_FLOOR_SEC
+    assert m["measured_easy_pace_sec"] > fmod.EASY_PACE_FLOOR_SEC, (
+        "if it was floored, the real measurement must be slower"
+    )

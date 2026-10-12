@@ -307,3 +307,21 @@ async def test_get_fitness_model_real_spike_says_hold_volume(monkeypatch):
     out = await mcp_server.get_fitness_model()
     assert "ABOVE the 1.5 risk threshold" in out and "do not add" in out
     assert "thin baseline" not in out
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_says_when_a_measured_pace_was_clamped(monkeypatch):
+    """A measured 8:40 shown as 7:30 hides that the athlete is slower than the number."""
+    main, mcp_server, database = await _app(monkeypatch, "fmt6")
+    from models import Activity
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        for i in range(6):
+            s.add(Activity(id=30 + i, name="Easy", distance=5000.0, moving_time=2600,
+                           start_date=now - timedelta(days=3 * (i + 1)),
+                           average_speed=5000.0 / 2600, average_heartrate=120.0,
+                           max_heartrate=200.0))
+        await s.commit()
+    out = await mcp_server.get_fitness_model()
+    assert "measured at 8:40/km and clamped to the 7:30/km floor" in out
+    assert "ESTIMATE" not in out

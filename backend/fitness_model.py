@@ -122,6 +122,11 @@ MAX_DETRAINING = 1.35     # cap: even a long layoff shouldn't slow easy pace by 
 # met at this pace, the answer is WALK BREAKS — not running slower still.
 EASY_PACE_FLOOR_SEC = 450  # 7:30 /km
 
+# Below this weekly chronic load, ACWR is inflated by design — a comeback ramp,
+# not a spike — so the 1.5 risk threshold does not apply yet. build_warnings
+# has always reframed this case; any report applying the threshold must too.
+THIN_BASELINE_KM = 5.0
+
 
 def _fitness_decay(acts: list[dict[str, Any]], now: datetime,
                    since: datetime) -> float:
@@ -210,6 +215,7 @@ def _estimate_easy_pace(
         return {
             "easy_pace_sec": round(min(measured, EASY_PACE_FLOOR_SEC)),
             "method": "measured",
+            "measured_easy_pace_sec": round(measured),
             "pace_floored": measured > EASY_PACE_FLOOR_SEC,
             "easy_runs_used": len(used),
             "easy_runs_available": len(easy),
@@ -285,6 +291,8 @@ def build_fitness_model(acts: list[dict[str, Any]], now: datetime) -> dict[str, 
         "easy_hr_ceiling": easy_hr_ceiling,
         "easy_pace_sec": easy["easy_pace_sec"],
         "easy_pace_method": easy["method"],
+        "easy_pace_floored": easy.get("pace_floored", False),
+        "measured_easy_pace_sec": easy.get("measured_easy_pace_sec"),
         "threshold_pace_sec": round(threshold) if threshold else None,
         "weekly_volume_28d_km": round(_window_km(acts, now, 28) / 4.0, 1),
         "longest_run_28d_km": _longest_km(acts, now, 28),
@@ -373,7 +381,7 @@ def build_warnings(acts: list[dict[str, Any]], now: datetime, model: dict[str, A
     acwr = model.get("acwr")
     chronic = model.get("chronic_load_28d_km") or 0
     if acwr is not None and acwr > 1.3:
-        if chronic < 5:
+        if chronic < THIN_BASELINE_KM:
             warnings.append({
                 "level": "info", "code": "comeback_ramp",
                 "title": "You're ramping up from a break",
