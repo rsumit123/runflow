@@ -927,3 +927,91 @@ async def get_fitness_model() -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_fitness_model failed")
         return f"Could not read the fitness model: {exc}"
+
+
+# Bounds the table by construction: ~65 chars/row x 300 stays well under the
+# 25,000-character cap, so the cap never silently drops the newest rows.
+TRAINING_BLOCK_MAX_ROWS = 300
+
+
+@mcp.tool()
+async def get_training_block(start: str, end: str, by: str = "month") -> str:
+    """Volume, pace and intensity per month or week over any date range.
+
+    Use this to compare training blocks that are years apart — which is the only
+    honest way to answer "have I got worse?". A single run says nothing; a month
+    of them against the same month in a previous block says a great deal, and
+    the usual answer is that the difference is volume rather than ability.
+
+    Aggregates server-side, so a multi-year range costs one small response
+    instead of hundreds of rows.
+
+    Monthly buckets carry both a mean and a median pace. Prefer the median: one
+    long slow run drags the mean, while the median is closer to what the block
+    felt like day to day. `days_run` beside `runs` matters too, because thirty
+    runs across twenty-five days is a different block from thirty across thirty.
+
+    Args:
+        start: ISO date (YYYY-MM-DD), inclusive.
+        end: ISO date (YYYY-MM-DD), inclusive.
+        by: "month" (default) or "week".
+    """
+    try:
+        try:
+            lo = datetime.fromisoformat(start)
+            hi = datetime.fromisoformat(end) + timedelta(days=1)
+        except ValueError:
+            return (f"'{start}' / '{end}' must be ISO dates in the form "
+                    "YYYY-MM-DD.")
+        if hi <= lo:
+            return (f"The end date {end} is before the start date {start} — "
+                    "swap them.")
+        if by not in ("month", "week"):
+            return f"'{by}' is not a granularity — use \"month\" or \"week\"."
+        async with async_session() as session:
+            acts = (await session.execute(
+                select(Activity)
+                .where(Activity.start_date >= lo, Activity.start_date < hi,
+                       Activity.moving_time.isnot(None), Activity.distance > 0)
+                .order_by(Activity.start_date)
+            )).scalars().all()
+            if not acts:
+                return f"No runs between {start} and {end}."
+            rows = [{
+                "start_date": a.start_date,
+                "distance": a.distance,
+                "moving_time": a.moving_time,
+                "z5": mv.zone_shares(a.hr_zones).get(5),
+            } for a in acts]
+
+            buckets = (mv.weekly_buckets(rows) if by == "week"
+                       else mv.monthly_buckets(rows))
+            if len(buckets) > TRAINING_BLOCK_MAX_ROWS:
+                return (f"{len(buckets)} {by}s with runs between {start} and {end} "
+                        f"is more than the {TRAINING_BLOCK_MAX_ROWS} this table "
+                        "shows. Use a narrower range"
+                        + (' or by="month".' if by == "week" else "."))
+
+            if by == "week":
+                lines = ["period | runs | km | km/wk | minutes | mean pace | Z5%"]
+                for b in buckets:
+                    lines.append(
+                        f"{b['year']}-W{b['week']:02d} | {b['runs']} | {b['km']} | "
+                        f"{b['km']} | {b['minutes']} | "
+                        f"{_fmt_pace(b['pace_sec_per_km'])} | {mv.num(b['z5_pct'])}%"
+                    )
+            else:
+                lines = ["period | runs | days run | km | km/wk | "
+                         "median pace | mean pace | Z5%"]
+                for b in buckets:
+                    lines.append(
+                        f"{b['year']}-{b['month']:02d} | {b['runs']} | "
+                        f"{b['days_run']} | {b['km']} | "
+                        f"{mv.num(b['km'] / 4.35)} | "
+                        f"{_fmt_pace(b['median_pace_sec_per_km'])} | "
+                        f"{_fmt_pace(b['pace_sec_per_km'])} | {mv.num(b['z5_pct'])}%"
+                    )
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_training_block failed")
+        return f"Could not read the training block: {exc}"

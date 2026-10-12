@@ -325,3 +325,190 @@ async def test_get_fitness_model_says_when_a_measured_pace_was_clamped(monkeypat
     out = await mcp_server.get_fitness_model()
     assert "measured at 8:40/km and clamped to the 7:30/km floor" in out
     assert "ESTIMATE" not in out
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_aggregates_by_month_over_a_long_range(monkeypatch):
+    """The comparison that answers 'have I declined' spans years.
+
+    Fetching the runs raw would exceed the response cap; aggregating
+    server-side is the point of the tool.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "tb")
+    from models import Activity
+
+    async with database.async_session() as s:
+        # 29 daily runs in April 2021 at 6:51/km, then 4 in October 2026 at 7:15.
+        for d in range(1, 30):
+            s.add(Activity(id=1000 + d, name="Run", distance=5050.0, moving_time=2077,
+                           start_date=datetime(2021, 4, d, 7, 0),
+                           average_speed=5050.0 / 2077))
+        for d in range(6, 10):
+            s.add(Activity(id=2000 + d, name="Run", distance=3000.0, moving_time=1305,
+                           start_date=datetime(2026, 10, d, 7, 0),
+                           average_speed=3000.0 / 1305))
+        await s.commit()
+
+    out = await mcp_server.get_training_block(start="2021-01-01", end="2026-12-31",
+                                             by="month")
+
+    assert "2021-04" in out
+    assert "2026-10" in out
+    assert "29" in out, "days run in April 2021"
+    assert len(out) <= 25_200
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_supports_weekly_granularity(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "tb2")
+    from models import Activity
+
+    async with database.async_session() as s:
+        for d in (6, 7, 8, 9):
+            s.add(Activity(id=3000 + d, name="Run", distance=3000.0, moving_time=1305,
+                           start_date=datetime(2026, 10, d, 7, 0),
+                           average_speed=3000.0 / 1305))
+        await s.commit()
+
+    out = await mcp_server.get_training_block(start="2026-10-01", end="2026-10-31",
+                                             by="week")
+
+    assert "W41" in out
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_rejects_a_bad_date(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "tb3")
+
+    out = await mcp_server.get_training_block(start="last April", end="2026-12-31")
+
+    assert "iso date" in out.lower() or "yyyy-mm-dd" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_says_so_when_the_range_is_empty(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "tb4")
+
+    out = await mcp_server.get_training_block(start="2019-01-01", end="2019-12-31")
+
+    assert "no runs" in out.lower()
+
+
+def _row(out, period):
+    """The cells of the table row starting with `period`, split on ' | '."""
+    rows = [ln for ln in out.splitlines() if ln.startswith(period + " |")]
+    assert len(rows) == 1, f"expected exactly one {period} row in:\n{out}"
+    return [c.strip() for c in rows[0].split(" | ")]
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_monthly_cells_are_in_the_right_columns(monkeypatch):
+    """Pin each number to its column — a bare `"29" in out` matches any 29."""
+    main, mcp_server, database = await _app(monkeypatch, "tb5")
+    from models import Activity
+
+    async with database.async_session() as s:
+        # 20 runs across 20 days, plus a second run on day 1 and a slow one on day 2.
+        for d in range(1, 21):
+            s.add(Activity(id=100 + d, name="Run", distance=5000.0, moving_time=1800,
+                           start_date=datetime(2021, 4, d, 7, 0)))
+        s.add(Activity(id=200, name="Run", distance=5000.0, moving_time=1800,
+                       start_date=datetime(2021, 4, 1, 18, 0)))
+        # One long slow run drags the mean (6:16) but not the median (6:00).
+        s.add(Activity(id=201, name="Run", distance=5000.0, moving_time=3600,
+                       start_date=datetime(2021, 4, 2, 18, 0)))
+        await s.commit()
+
+    out = await mcp_server.get_training_block(start="2021-04-01", end="2021-04-30")
+    header = [c.strip() for c in out.splitlines()[0].split(" | ")]
+    cells = _row(out, "2021-04")
+
+    assert len(cells) == len(header)
+    by_col = dict(zip(header, cells))
+    assert by_col["runs"] == "22"
+    assert by_col["days run"] == "20"
+    assert by_col["km"] == "110.0"
+    assert by_col["median pace"] == "6:00/km"
+    assert by_col["mean pace"] == "6:16/km"
+    assert by_col["km/wk"] == "25.3"
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_no_hr_data_reads_as_absent_not_zero(monkeypatch):
+    """The 2021 block has no HR at all; a measured 0.0% would be a lie."""
+    main, mcp_server, database = await _app(monkeypatch, "tb6")
+    from models import Activity
+
+    async with database.async_session() as s:
+        s.add(Activity(id=1, name="Run", distance=5000.0, moving_time=1800,
+                       start_date=datetime(2021, 4, 3, 7, 0), hr_zones=None))
+        s.add(Activity(id=2, name="Run", distance=3000.0, moving_time=1300,
+                       start_date=datetime(2026, 10, 6, 7, 0),
+                       hr_zones=[{"zone": 5, "secs": 130.0}, {"zone": 2, "secs": 1170.0}]))
+        await s.commit()
+
+    for by, old, new in (("month", "2021-04", "2026-10"), ("week", "2021-W13", "2026-W41")):
+        out = await mcp_server.get_training_block(start="2021-01-01", end="2026-12-31", by=by)
+        header = [c.strip() for c in out.splitlines()[0].split(" | ")]
+        z5 = header.index("Z5%")
+        assert _row(out, old)[z5] == "—%", out
+        assert _row(out, new)[z5] == "10%", out
+        assert "0.0%" not in out and "| 0%" not in out
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_weekly_row_has_no_monthly_columns(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "tb7")
+    from models import Activity
+
+    async with database.async_session() as s:
+        for d in (6, 7, 8):
+            s.add(Activity(id=300 + d, name="Run", distance=3000.0, moving_time=1305,
+                           start_date=datetime(2026, 10, d, 7, 0)))
+        await s.commit()
+
+    out = await mcp_server.get_training_block(start="2026-10-01", end="2026-10-31", by="week")
+    header = [c.strip() for c in out.splitlines()[0].split(" | ")]
+    by_col = dict(zip(header, _row(out, "2026-W41")))
+
+    assert "median pace" not in header and "days run" not in header
+    assert by_col["runs"] == "3"
+    assert by_col["km"] == "9.0"
+    assert by_col["mean pace"] == "7:15/km"
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_reversed_range_and_bad_granularity(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "tb8")
+    from models import Activity
+
+    async with database.async_session() as s:
+        s.add(Activity(id=1, name="Run", distance=3000.0, moving_time=1305,
+                       start_date=datetime(2026, 10, 6, 7, 0)))
+        await s.commit()
+
+    rev = await mcp_server.get_training_block(start="2026-12-31", end="2026-01-01")
+    assert "before" in rev.lower() and "no runs" not in rev.lower()
+
+    bad = await mcp_server.get_training_block(start="2026-01-01", end="2026-12-31", by="day")
+    assert "month" in bad and "week" in bad and "2026-" not in bad.split("—")[0]
+
+
+@pytest.mark.asyncio
+async def test_get_training_block_is_bounded_for_a_huge_weekly_range(monkeypatch):
+    """Output size must be bounded by construction, not left to the cap."""
+    main, mcp_server, database = await _app(monkeypatch, "tb9")
+    from models import Activity
+
+    async with database.async_session() as s:
+        d0 = datetime(2010, 1, 4, 7, 0)
+        for i in range(1000):
+            s.add(Activity(id=i + 1, name="Run", distance=5000.0, moving_time=1800,
+                           start_date=d0 + timedelta(weeks=i)))
+        await s.commit()
+
+    out = await mcp_server.get_training_block(start="2000-01-01", end="2030-12-31", by="week")
+
+    assert "truncated at" not in out
+    assert len(out) <= 25_000
+    assert "narrower" in out.lower() or "by=\"month\"" in out
