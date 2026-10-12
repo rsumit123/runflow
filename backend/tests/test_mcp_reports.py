@@ -400,3 +400,88 @@ def test_plan_status_suggestion_text_names_no_unbuilt_tool():
     for name in ("apply_suggestion", "move_workout", "push_workout",
                  "set_workout_note", "create_plan"):
         assert name not in out
+
+
+def test_run_review_omits_the_target_clause_when_the_session_has_no_distance():
+    """Every sprint workout and every rest day sets target_distance_m to None;
+    "target 0 km" read as a measured zero-kilometre session."""
+    planned = {"title": "Acceleration 6x32m", "day_type": "accel",
+               "target_distance_m": None, "pace_low_sec": None,
+               "pace_high_sec": None, "hr_ceiling": None}
+
+    out = mr.run_review(_run_row(), _steady_run(), planned=planned)
+
+    assert "Planned: Acceleration 6x32m (accel)" in out
+    assert "target 0 km" not in out
+    assert not any(l.strip().startswith("target") for l in out.split("\n")), out
+
+
+def test_run_review_keeps_the_target_clause_when_a_distance_exists():
+    planned = {"title": "Easy run", "day_type": "easy", "target_distance_m": 5000.0,
+               "pace_low_sec": 435, "pace_high_sec": 450, "hr_ceiling": 160}
+
+    out = mr.run_review(_run_row(), _steady_run(), planned=planned)
+
+    assert "target 5 km at 7:15-7:30/km, HR ceiling 160" in out
+
+
+def test_plan_status_omits_the_distance_clause_when_a_session_has_no_target():
+    wos = [_wk(7, datetime(2026, 10, 22), 1, title="Acceleration 6x32m",
+               day_type="accel", target_distance_m=None, pace_low_sec=None,
+               pace_high_sec=None, hr_ceiling=None)]
+
+    out = mr.plan_status(_plan14(), wos, {}, None, [], today=datetime(2026, 10, 21))
+
+    line = next(l for l in out.split("\n") if l.strip().startswith("[7]"))
+    assert "Acceleration 6x32m" in line
+    assert "km" not in line, line
+    assert "/km" not in line, line
+
+
+def test_plan_status_keeps_the_distance_clause_when_a_target_exists():
+    out = mr.plan_status(_plan14(), [_wk(7, datetime(2026, 10, 22), 1)], {}, None, [],
+                         today=datetime(2026, 10, 21))
+
+    line = next(l for l in out.split("\n") if l.strip().startswith("[7]"))
+    assert "3 km at 7:15-7:30/km" in line and "HR ≤160" in line
+
+
+def test_run_review_stopped_total_comes_from_the_pause_list():
+    """elapsed below moving made divmod on a negative print "-1h58m42s"."""
+    streams = _steady_run(metres=3000)
+    for i in range(1500, len(streams["time"])):
+        streams["time"][i] += 600
+    row = _run_row(elapsed_time=22, moving_time=100)
+
+    out = mr.run_review(row, streams)
+
+    head = next(l for l in out.split("\n") if l.startswith("FRAGMENTED"))
+    assert "-" not in head, head
+    assert "10m00s stopped in total" in head, head
+
+
+def test_run_review_stopped_total_is_known_even_when_elapsed_equals_moving():
+    streams = _steady_run(metres=3000)
+    for i in range(1500, len(streams["time"])):
+        streams["time"][i] += 600
+    row = _run_row(elapsed_time=1305, moving_time=1305)
+
+    out = mr.run_review(row, streams)
+
+    head = next(l for l in out.split("\n") if l.startswith("FRAGMENTED"))
+    assert "— stopped in total" not in head, head
+    assert "10m00s stopped in total" in head, head
+
+
+def test_run_review_headline_distance_is_absent_not_zero_when_unstored():
+    out = mr.run_review(_run_row(distance=None), {})
+
+    headline = out.split("\n")[1]
+    assert "0.0 km" not in headline, headline
+    assert headline.startswith("— in"), headline
+
+
+def test_run_review_headline_keeps_a_measured_zero_distance():
+    out = mr.run_review(_run_row(distance=0.0), {})
+
+    assert out.split("\n")[1].startswith("0.0 km in")

@@ -72,7 +72,11 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
     lookup failed": reporting a failed check as an absence of planned work
     tells the athlete something false on a day they did have a session.
     """
-    km = (run.get("distance") or 0.0) / 1000.0
+    distance_m = run.get("distance")
+    km = (distance_m or 0.0) / 1000.0
+    # A stored 0.0 is a measurement; a missing distance is not, and printing
+    # "0.0 km" for it was the one number on the headline claiming to be measured.
+    km_text = f"{km:.1f} km" if distance_m is not None else "—"
     moving = run.get("moving_time") or 0
     elapsed = run.get("elapsed_time") or moving
     lines: list[str] = []
@@ -81,7 +85,7 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
     lines.append(f"Run {run.get('id')} — {run.get('name') or 'Run'}"
                  + (f" — {date:%Y-%m-%d %H:%M}" if date else ""))
     lines.append(
-        f"{km:.1f} km in {_dur(moving)} at {_pace(moving / km if km else None)}/km"
+        f"{km_text} in {_dur(moving)} at {_pace(moving / km if km else None)}/km"
         f" · avg HR {mv.num(run.get('average_heartrate'))}"
         f" · max HR {mv.num(run.get('max_heartrate'))}"
         f" · cadence {mv.num(run.get('average_cadence'))}"
@@ -108,8 +112,11 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
         pauses = mv.find_pauses(time, dist, hr)
         lines.append("")
         if pauses:
+            # The pause list the line was built from: never negative, and
+            # exact where elapsed - moving is neither.
+            stopped = sum(p["seconds"] for p in pauses)
             lines.append(f"FRAGMENTED — {len(pauses)} pause(s), "
-                         f"{_dur(elapsed - moving)} stopped in total:")
+                         f"{_dur(stopped)} stopped in total:")
             for p in pauses[:MAX_PAUSE_LINES]:
                 lines.append(f"  at {mv.num(p['at_km'], 2)} km — {_dur(p['seconds'])}, "
                              f"HR {mv.num(p['hr_in'])} → {mv.num(p['hr_out'])}")
@@ -195,12 +202,18 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
     else:
         lines.append(f"Planned: {planned.get('title') or planned.get('day_type')} "
                      f"({planned.get('day_type')})")
-        tgt_km = (planned.get("target_distance_m") or 0) / 1000.0
-        lines.append(f"  target {mv.num(tgt_km)} km at "
-                     f"{_pace(planned.get('pace_low_sec'))}-"
-                     f"{_pace(planned.get('pace_high_sec'))}/km"
-                     + (f", HR ceiling {planned['hr_ceiling']}"
-                        if planned.get("hr_ceiling") else ""))
+        # target_distance_m is nullable and every sprint workout and rest day
+        # leaves it unset; "target 0 km" turned those into sessions of nothing.
+        # Their content is in the title, which is already on the line above.
+        tgt_m = planned.get("target_distance_m")
+        hr_ceiling = planned.get("hr_ceiling")
+        if tgt_m is not None:
+            lines.append(f"  target {mv.num(tgt_m / 1000.0)} km at "
+                         f"{_pace(planned.get('pace_low_sec'))}-"
+                         f"{_pace(planned.get('pace_high_sec'))}/km"
+                         + (f", HR ceiling {hr_ceiling}" if hr_ceiling else ""))
+        elif hr_ceiling:
+            lines.append(f"  HR ceiling {hr_ceiling}")
         if planned.get("status"):
             lines.append(f"  status: {planned['status']}")
         if planned.get("compliance"):
@@ -291,11 +304,16 @@ def plan_status(plan: Optional[dict[str, Any]], workouts: list[dict[str, Any]],
             if w.get("compliance"):
                 marks.append(w["compliance"])
             when = f"{w['date']:%a %d %b}" if w.get("date") else "—"
-            km = (w.get("target_distance_m") or 0) / 1000.0
+            # No target distance: the session is described by its title, not
+            # by a zero. See run_review for the same guard.
+            tgt_m = w.get("target_distance_m")
+            target = (f" · {mv.num(tgt_m / 1000.0)} km at "
+                      f"{_pace(w.get('pace_low_sec'))}-"
+                      f"{_pace(w.get('pace_high_sec'))}/km"
+                      if tgt_m is not None else "")
             lines.append(
                 f"  [{w.get('id')}] {when} · {w.get('title') or w.get('day_type')}"
-                f" · {mv.num(km)} km at {_pace(w.get('pace_low_sec'))}-"
-                f"{_pace(w.get('pace_high_sec'))}/km"
+                + target
                 + (f" · HR ≤{w['hr_ceiling']}" if w.get("hr_ceiling") else "")
                 + (f" · {', '.join(marks)}" if marks else "")
             )
