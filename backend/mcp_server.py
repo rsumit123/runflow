@@ -47,7 +47,7 @@ import fitness_model as fm
 import mcp_reports as mr
 import mcp_views as mv
 from database import async_session
-from models import Activity, Stream
+from models import Activity, PlannedWorkout, Stream
 
 logger = logging.getLogger(__name__)
 
@@ -1756,3 +1756,140 @@ async def apply_calibration() -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("apply_calibration failed")
         return f"Could not apply the calibration: {exc}"
+
+
+# ---------------------------------------------------------------- create_plan
+# POST /api/plan abandons the active plan and removes every one of its sessions
+# from the watch, unconditionally. PlanCreateRequest has no replace_active
+# field, so the consent guard below is the only thing standing between a
+# conversation and that loss.
+
+MIN_PLAN_WEEKS = 4   # mirrors the endpoint's range at main.py create_plan
+MAX_PLAN_WEEKS = 20
+
+
+async def _create_plan(session, **kw):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    return await _main.create_plan(_main.PlanCreateRequest(**kw), session)
+
+
+async def _active_plan_stakes(session) -> Optional[dict]:
+    """What replacing the active plan would cost, or None if none is active."""
+    import main as _main
+    from sqlalchemy import func
+    plan = await _main._active_plan(session)
+    if plan is None:
+        return None
+    on_watch = (await session.execute(
+        select(func.count()).select_from(PlannedWorkout).where(
+            PlannedWorkout.plan_id == plan.id,
+            PlannedWorkout.garmin_workout_id.isnot(None)))).scalar_one()
+    return {"id": plan.id, "target_time_sec": plan.target_time_sec,
+            "weeks": plan.weeks, "goal_date": plan.goal_date,
+            "on_watch": int(on_watch or 0)}
+
+
+def _fmt_target(sec: Optional[int]) -> str:
+    """5k target as m:ss, e.g. 1800 -> '30:00'."""
+    if not sec:
+        return "no target"
+    m, s = divmod(int(sec), 60)
+    return f"{m}:{s:02d}"
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _date_only(value) -> str:
+    """ISO string or datetime -> YYYY-MM-DD; '?' when absent."""
+    if value is None:
+        return "?"
+    return str(value)[:10]
+
+
+@mcp.tool()
+async def create_plan(weeks: int, target_time_sec: Optional[int] = None,
+                      start_date: Optional[str] = None,
+                      replace_active: bool = False) -> str:
+    """Create a new 5k training plan. DESTRUCTIVE and cannot be undone:
+    creating a plan abandons the active one and removes every one of its
+    sessions from the watch.
+
+    It refuses while a plan is active unless replace_active=True, and the
+    refusal says which plan and how many sessions are on the watch. Only pass
+    replace_active=True when the athlete has asked for a new plan in so many
+    words and understood that the current plan and its watch sessions go. Do
+    not create a plan off the back of a general conversation about training.
+
+    weeks must be 4 to 20. target_time_sec is the 5k goal in seconds (1800 is
+    30:00) and is required. start_date is YYYY-MM-DD and should normally be the
+    upcoming Monday: building mid-week back-dates week 1 to its own Monday and
+    strands the early sessions in the past.
+
+    Creating a plan does not put anything on the watch. Run sync_plan_to_watch
+    afterwards.
+    """
+    # 1. Validate everything before looking at the active plan or calling
+    #    anything: a malformed request must never cost the athlete his plan.
+    if not (MIN_PLAN_WEEKS <= weeks <= MAX_PLAN_WEEKS):
+        return (f"weeks must be between {MIN_PLAN_WEEKS} and {MAX_PLAN_WEEKS} "
+                f"(got {weeks}). Nothing was changed.")
+    if target_time_sec is None or target_time_sec <= 0:
+        return ("A target time is required: pass target_time_sec as the 5k "
+                "goal in seconds (1800 is 30:00). Nothing was changed.")
+    if start_date is not None:
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            return (f"start_date must be YYYY-MM-DD (got {start_date!r}). "
+                    "Nothing was changed.")
+    try:
+        async with async_session() as session:
+            # 2. Consent. Test for the flag being True, not for it being
+            #    absent: anything but an explicit True is a refusal.
+            stakes = await _active_plan_stakes(session)
+            if stakes is not None and replace_active is not True:
+                n = stakes["on_watch"]
+                on_watch = (f"{_plural(n, 'session')} currently on the watch"
+                            if n else "no sessions on the watch")
+                return mv.cap_text(
+                    f"Refused: plan {stakes['id']} is still active "
+                    f"({stakes['weeks']} weeks, {_fmt_target(stakes['target_time_sec'])} "
+                    f"5k target, ending {_date_only(stakes['goal_date'])}), with "
+                    f"{on_watch}. Creating a new plan abandons it and removes "
+                    "every one of its sessions from the watch. That cannot be "
+                    "undone. Nothing was changed. If the athlete has asked for "
+                    "a replacement, call create_plan again with "
+                    "replace_active=True.")
+
+            kw = {"weeks": weeks, "target_time_sec": target_time_sec}
+            if start_date is not None:
+                kw["start_date"] = start_date
+            try:
+                resp = await _create_plan(session, **kw)
+            except HTTPException as exc:
+                return mv.cap_text(
+                    f"The plan was not created: {str(exc.detail).rstrip('.')}.")
+            plan = (resp or {}).get("plan") or {}
+            n_workouts = len((resp or {}).get("workouts") or [])
+            replaced = ""
+            if stakes is not None:
+                replaced = (f" It replaced plan {stakes['id']}"
+                            + (f", whose {_plural(stakes['on_watch'], 'session')} "
+                               "came off the watch." if stakes["on_watch"]
+                               else " (nothing of it was on the watch)."))
+            return mv.cap_text(
+                f"Created plan {plan.get('id')}: {plan.get('weeks')} weeks, "
+                f"{_fmt_target(plan.get('target_time_sec'))} 5k target, "
+                f"starting {_date_only(plan.get('start_date'))}, goal date "
+                f"{_date_only(plan.get('goal_date'))}, "
+                f"{_plural(n_workouts, 'session')} generated.{replaced} "
+                "None of them are on the watch yet: creating a plan does not "
+                "send anything. Run sync_plan_to_watch to put the upcoming "
+                "sessions on it.")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("create_plan failed")
+        return f"Could not create the plan: {exc}"
+

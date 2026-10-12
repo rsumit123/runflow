@@ -327,7 +327,7 @@ async def test_push_workout_when_garmin_is_down_says_retry_and_name_garmin(monke
 
     assert "garmin" in out.lower(), f"name Garmin: {out}"
     assert "garmin 503" in out, f"carry the underlying cause: {out}"
-    assert "not on the watch" in out.lower() or "not been sent" in out.lower(), (
+    assert "none of them are on the watch yet" in out.lower() or "not been sent" in out.lower(), (
         f"say the session did not reach the watch: {out}")
     assert "try again" in out.lower(), f"a transient failure invites a retry: {out}"
     assert "step" not in out.lower(), f"must not read like the no-steps case: {out}"
@@ -1004,3 +1004,198 @@ async def test_apply_calibration_end_to_end_with_a_garmin_failure(monkeypatch):
     assert "did not reach the watch" in out
     assert "2 of them" in out, "3 re-aimed, 1 failed, 2 re-sent"
     assert _no_raw_http(out) and "Traceback" not in out
+
+
+# ---------------------------------------------------------------- Task 9
+# create_plan: POST /api/plan abandons the active plan and clears the watch
+# unconditionally, so the guard lives in the tool.
+
+
+def _spy_creator(mcp_server, monkeypatch, result=None):
+    created = []
+
+    async def spy(session, **kw):
+        created.append(kw)
+        return result or {"plan": {"id": 99}, "workouts": []}
+    monkeypatch.setattr(mcp_server, "_create_plan", spy)
+    return created
+
+
+@pytest.mark.asyncio
+async def test_create_plan_refuses_while_a_plan_is_active(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cp")
+    await _seed_plan(database, n_sessions=3, on_watch=True)
+    created = _spy_creator(mcp_server, monkeypatch)
+
+    out = await mcp_server.create_plan(
+        weeks=12, target_time_sec=1800, start_date="2026-11-02")
+
+    assert created == [], "nothing may be created while a plan is active"
+    assert "active" in out.lower()
+    assert "replace_active=True" in out, "name the argument that would allow it"
+    assert "nothing was changed" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_names_what_would_be_destroyed(monkeypatch):
+    """A refusal that does not say what is at stake is not informed consent.
+
+    Four sessions are seeded but only three are on the watch, so the count in
+    the message has to be the watch count, not the plan size.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "cp2")
+    plan_id = await _seed_plan(database, n_sessions=4, on_watch=True)
+    from models import PlannedWorkout
+    async with database.async_session() as s:
+        w = await s.get(PlannedWorkout, 4)
+        w.garmin_workout_id = None
+        await s.commit()
+
+    out = await mcp_server.create_plan(weeks=12, target_time_sec=1900)
+
+    assert f"plan {plan_id}" in out.lower(), "name the active plan"
+    assert "30:00" in out, "the active plan's target, readably (seed is 1800s)"
+    assert "1800" not in out
+    assert "3 sessions" in out, "the watch count"
+    assert "4 sessions" not in out, "not the plan size"
+    assert "watch" in out.lower()
+    assert "cannot be undone" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_is_correct_for_one_session_and_for_none(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cp2b")
+    await _seed_plan(database, n_sessions=1, on_watch=True)
+    out = await mcp_server.create_plan(weeks=12, target_time_sec=1900)
+    assert "1 session " in out or "1 session." in out
+    assert "1 sessions" not in out
+
+    main, mcp_server, database = await _app(monkeypatch, "cp2c")
+    await _seed_plan(database, n_sessions=2, on_watch=False)
+    out = await mcp_server.create_plan(weeks=12, target_time_sec=1900)
+    assert "replace_active=True" in out
+    assert "no sessions on the watch" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_create_plan_proceeds_with_replace_active(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cp3")
+    await _seed_plan(database, n_sessions=3, on_watch=True)
+    created = _spy_creator(mcp_server, monkeypatch, {
+        "plan": {"id": 99, "weeks": 12, "target_time_sec": 1800,
+                 "start_date": "2026-11-02T00:00:00",
+                 "goal_date": "2027-01-25T00:00:00"},
+        "workouts": [{"id": 1}, {"id": 2}]})
+
+    out = await mcp_server.create_plan(
+        weeks=12, target_time_sec=1800, start_date="2026-11-02",
+        replace_active=True)
+
+    assert len(created) == 1, "it must go through once consent is explicit"
+    assert created[0]["weeks"] == 12
+    assert created[0]["target_time_sec"] == 1800
+    assert created[0]["start_date"] == "2026-11-02"
+    assert "plan 99" in out.lower()
+    assert "30:00" in out and "2026-11-02" in out and "2027-01-25" in out
+    assert "2 sessions" in out
+    assert "sync_plan_to_watch" in out, "creation does not push; say what's next"
+    assert "none of them are on the watch yet" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_create_plan_with_no_active_plan_needs_no_consent(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cp4")
+    created = _spy_creator(mcp_server, monkeypatch,
+                           {"plan": {"id": 1, "weeks": 8}, "workouts": []})
+
+    out = await mcp_server.create_plan(weeks=8, target_time_sec=1900)
+
+    assert len(created) == 1, "nothing is destroyed, so nothing to consent to"
+    assert "plan 1" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_create_plan_validates_weeks_before_destroying_anything(monkeypatch):
+    """A bad argument must not cost the athlete his plan."""
+    main, mcp_server, database = await _app(monkeypatch, "cp5")
+    await _seed_plan(database, n_sessions=3, on_watch=True)
+    created = _spy_creator(mcp_server, monkeypatch)
+
+    out = await mcp_server.create_plan(
+        weeks=52, target_time_sec=1800, replace_active=True)
+
+    assert created == [], "an invalid week count must not reach the endpoint"
+    assert "4" in out and "20" in out, "state the allowed range"
+    # Not the consent refusal: the request was malformed, not unconsented.
+    assert "replace_active" not in out
+
+    from models import Plan
+    async with database.async_session() as s:
+        from sqlalchemy import select
+        actives = (await s.execute(
+            select(Plan).where(Plan.status == "active"))).scalars().all()
+        assert len(actives) == 1, "the existing plan must survive a bad request"
+
+
+@pytest.mark.asyncio
+async def test_a_bad_week_count_is_reported_as_such_not_as_a_consent_refusal(monkeypatch):
+    """Without the flag, validation must still come first.
+
+    With replace_active=True the weeks check returns before any create either
+    way, so only this variant can see whether validation precedes the guard.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "cp5b")
+    await _seed_plan(database, n_sessions=3, on_watch=True)
+    created = _spy_creator(mcp_server, monkeypatch)
+
+    out = await mcp_server.create_plan(weeks=52, target_time_sec=1800)
+
+    assert created == []
+    assert "between 4 and 20" in out
+    assert "replace_active" not in out
+    assert "still active" not in out
+
+
+@pytest.mark.asyncio
+async def test_create_plan_requires_a_target_time(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cp6")
+    await _seed_plan(database, n_sessions=2, on_watch=True)
+    created = _spy_creator(mcp_server, monkeypatch)
+
+    out = await mcp_server.create_plan(weeks=12, target_time_sec=None,
+                                       replace_active=True)
+
+    assert created == []
+    assert "target" in out.lower()
+    assert "replace_active" not in out, "validation comes before the consent check"
+
+
+@pytest.mark.asyncio
+async def test_create_plan_rejects_a_bad_start_date_before_the_guard(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "cp7")
+    await _seed_plan(database, n_sessions=2, on_watch=True)
+    created = _spy_creator(mcp_server, monkeypatch)
+
+    out = await mcp_server.create_plan(
+        weeks=12, target_time_sec=1800, start_date="next monday")
+
+    assert created == []
+    assert "YYYY-MM-DD" in out
+    assert "replace_active" not in out
+
+
+@pytest.mark.asyncio
+async def test_create_plan_renders_an_endpoint_rejection_as_a_sentence(monkeypatch):
+    from fastapi import HTTPException
+    main, mcp_server, database = await _app(monkeypatch, "cp8")
+
+    async def boom(session, **kw):
+        raise HTTPException(status_code=400, detail="weeks must be between 4 and 20")
+    monkeypatch.setattr(mcp_server, "_create_plan", boom)
+
+    out = await mcp_server.create_plan(weeks=12, target_time_sec=1800)
+
+    assert "weeks must be between 4 and 20" in out
+    assert _no_raw_http(out)
+    assert "HTTPException" not in out
+
