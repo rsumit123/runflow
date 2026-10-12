@@ -438,3 +438,97 @@ async def test_unpush_keeps_the_session_in_the_plan(monkeypatch):
         w = await s.get(PlannedWorkout, 1)
         assert w is not None, "the session must still exist in the plan"
         assert w.title == "Session 1"
+
+
+@pytest.mark.asyncio
+async def test_sync_plan_to_watch_names_the_sessions_that_failed(monkeypatch):
+    """A bare count does not tell him which runs his watch will not guide."""
+    main, mcp_server, database = await _app(monkeypatch, "sy")
+    await _seed_plan(database, n_sessions=4)
+
+    async def flaky(w):
+        if w.id == 2:
+            raise RuntimeError("garmin rejected step 3")
+        w.garmin_workout_id = 4000 + w.id
+    monkeypatch.setattr(main, "_garmin_push", flaky)
+
+    out = await mcp_server.sync_plan_to_watch()
+
+    assert "Session 2" in out, f"name the failed session: {out}"
+    assert "garmin rejected step 3" in out, "carry the reason"
+    for ok_title in ("Session 1", "Session 3", "Session 4"):
+        assert ok_title not in out, f"{ok_title} succeeded and must not be listed"
+    assert "Sent 3 sessions" in out, f"state exactly how many succeeded: {out}"
+    assert "1 failed" in out, f"state exactly how many failed: {out}"
+    assert "have not been sent" in out, "never claim the failed one is on the watch"
+
+
+@pytest.mark.asyncio
+async def test_sync_plan_to_watch_with_no_active_plan_is_a_sentence(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "sy2")
+
+    out = await mcp_server.sync_plan_to_watch()
+
+    assert "no active plan" in out.lower()
+    assert _no_raw_http(out) and "Traceback" not in out
+
+
+@pytest.mark.asyncio
+async def test_sync_plan_to_watch_reports_a_clean_run(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "sy3")
+    await _seed_plan(database, n_sessions=3)
+
+    async def ok(w):
+        w.garmin_workout_id = 4100 + w.id
+    monkeypatch.setattr(main, "_garmin_push", ok)
+
+    out = await mcp_server.sync_plan_to_watch()
+
+    assert "Sent 3 sessions" in out, out
+    assert "No failures" in out, out
+    assert "failed" not in out.lower().replace("no failures", "")
+    assert "only upcoming" in out.lower(), "say only upcoming structured sessions are sent"
+
+
+@pytest.mark.asyncio
+async def test_sync_plan_to_watch_with_nothing_eligible_says_so(monkeypatch):
+    """Unstructured sessions are skipped silently by the endpoint; that is not
+    a success and must not read as one."""
+    main, mcp_server, database = await _app(monkeypatch, "sy5")
+    await _seed_plan(database, n_sessions=2, with_steps=False)
+
+    async def boom(w):
+        raise AssertionError("must not be pushed")
+    monkeypatch.setattr(main, "_garmin_push", boom)
+
+    out = await mcp_server.sync_plan_to_watch()
+
+    assert "Nothing was sent" in out, out
+    assert "Sent 2" not in out
+
+
+@pytest.mark.asyncio
+async def test_sync_plan_to_watch_bounds_a_long_failure_list(monkeypatch):
+    """A 60-week plan failing wholesale must not blow the response budget.
+
+    Plan 1 shipped a defect where a report relied on cap_text for sizing and
+    silently dropped its most important sections. Bound the list here instead.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "sy4")
+    await _seed_plan(database, n_sessions=60)
+
+    async def always_broken(w):
+        raise RuntimeError("garmin is down " + "x" * 200)
+    monkeypatch.setattr(main, "_garmin_push", always_broken)
+
+    out = await mcp_server.sync_plan_to_watch()
+
+    import mcp_views as mv
+    cap = mcp_server.MAX_SYNC_FAILURES_LISTED
+    assert "truncated at" not in out, "must fit by construction, not by the cap"
+    assert len(out) < mv.MAX_RESPONSE_CHARS
+    assert "60 failed" in out, "the total count must still be stated"
+    assert out.count("Session ") == cap, "list exactly the bounded number"
+    assert f"and {60 - cap} more" in out
+    # Bounded without cap_text's help: far below the cap, not just under it.
+    assert len(out) < mv.MAX_RESPONSE_CHARS // 4, len(out)

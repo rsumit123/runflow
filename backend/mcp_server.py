@@ -1376,3 +1376,64 @@ async def unpush_workout(workout_id: int) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("unpush_workout failed")
         return f"Could not take workout {workout_id} off the watch: {exc}"
+
+
+# Upper bound on failed sessions listed by sync_plan_to_watch. A 12-week plan
+# has ~41 sessions; the rest are summarised as "and N more" so the response
+# fits by construction instead of leaning on mv.cap_text.
+MAX_SYNC_FAILURES_LISTED = 15
+_SYNC_TITLE_CHARS = 80
+
+
+async def _sync_plan_to_watch(session):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    return await _main.sync_plan_to_watch(session)
+
+
+@mcp.tool()
+async def sync_plan_to_watch() -> str:
+    """Push the whole active plan to the Garmin watch. Use it after a plan is
+    created or recalibrated.
+
+    It reports which sessions failed and why, by name, so a partial sync is
+    visible rather than hidden behind a count. Only upcoming, structured,
+    non-rest sessions are sent; past sessions and sessions without steps are
+    skipped, which is not a failure. (This is not sync_garmin, which pulls
+    finished runs in from Garmin.)
+    """
+    skipped_note = ("Only upcoming structured sessions are sent; rest days, "
+                    "sessions without steps and past dates are skipped.")
+    try:
+        async with async_session() as session:
+            try:
+                result = await _sync_plan_to_watch(session)
+            except HTTPException as exc:
+                return mv.cap_text(f"Nothing was sent to the watch: {exc.detail}.")
+            result = result or {}
+            pushed = int(result.get("pushed") or 0)
+            failed = result.get("failed") or []
+            total_failed = int(result.get("total_failed", len(failed)))
+
+            if not total_failed:
+                if not pushed:
+                    return mv.cap_text(
+                        f"Nothing was sent: the active plan has no upcoming "
+                        f"structured sessions. {skipped_note}")
+                return mv.cap_text(
+                    f"Sent {pushed} session{'s' if pushed != 1 else ''} to the "
+                    f"watch. No failures. {skipped_note}")
+
+            lines = [f"Sent {pushed} session{'s' if pushed != 1 else ''} to the "
+                     f"watch; {total_failed} failed. These have not been sent "
+                     f"to the watch, so it will not guide those runs:"]
+            for f in failed[:MAX_SYNC_FAILURES_LISTED]:
+                title = str(f.get("title") or "Untitled")[:_SYNC_TITLE_CHARS]
+                lines.append(f"- {title} (workout {f.get('id')}): {f.get('error')}")
+            if total_failed > MAX_SYNC_FAILURES_LISTED:
+                lines.append(f"  … and {total_failed - MAX_SYNC_FAILURES_LISTED} more")
+            lines.append(skipped_note)
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("sync_plan_to_watch failed")
+        return f"Could not sync the plan to the watch: {exc}"
