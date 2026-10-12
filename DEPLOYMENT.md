@@ -225,11 +225,59 @@ gcloud compute ssh socialflow --project=polar-pillar-450607-b7 --zone=us-east1-d
 ```
 Then re-paste the new URL in the Claude app.
 
-**Tools exposed.** Reads: `list_recent_runs`, `get_run_detail`, `compare_runs`,
-`get_recovery`, `get_records`, `get_training_context`, `get_aerobic_trend`,
-`get_weekly_volume`, and `call_api` (GET routes only). Writes: `sync_garmin`
-(triggers the Garmin import) and `set_run_note` (the athlete's own context on a
-run, max 2000 chars — the only field in the database this connector can change).
+**Tools exposed.** Reads: `list_recent_runs`, `get_run_detail`, `review_run`,
+`compare_runs`, `get_recovery`, `get_records`, `get_training_context`,
+`get_fitness_model`, `get_aerobic_trend`, `get_weekly_volume`,
+`get_training_block`, `get_plan_status`, and `call_api` (GET routes only).
+Writes: `sync_garmin` (triggers the Garmin import) and `set_run_note` (the
+athlete's own context on a run, max 2000 chars — the only field in the database
+this connector can change). Fifteen tools in total.
+
+**There are no plan write tools yet.** Nothing in this connector can create a
+plan, move a workout, push one to the watch, or apply a suggestion — those are
+plan 2 of 2. The session and suggestion ids the reads emit are stable and are
+what those tools will take, but until they exist the ids are for reporting to
+the athlete, not for acting on. An earlier draft of `get_plan_status` named
+five of them in its docstring; a model reading that would have offered to move
+a workout and then failed.
+
+The four fat reads, and why each exists:
+
+- `review_run(run_id, window_sec)` — one run in depth: 500 m splits on moving
+  time, HR and pace per window, pauses located with the HR either side of each,
+  cardiac drift, terrain, time in zones with the boundaries, the athlete's note,
+  and the planned targets beside the actuals when the run matched a session.
+  Answers "did I fade?" and "what HR was I at for the first five minutes?",
+  which previously meant reading stream JSON out of SQLite over SSH. Both tables
+  widen their own interval to stay inside `mcp_reports.MAX_TABLE_ROWS`, so the
+  report fits by construction rather than relying on the 25,000-character cap —
+  a 4-hour run at 10 s windows once produced 57,252 characters and silently
+  dropped cardiac drift, the zones, the note and the whole planned comparison.
+  When the adherence lookup fails it says so, rather than reporting "no planned
+  session matched", which would state there was nothing planned.
+- `get_fitness_model()` — easy pace with its method (`measured`,
+  `measured_stale`, `estimate` or `insufficient_data`), and whether the value
+  was clamped to the 7:30/km floor with the real measurement beside it; easy HR
+  ceiling; max HR; acute and chronic load; and the ACWR. The 1.5 risk threshold
+  is stated beside the number **only when the baseline supports it** — below
+  `fitness_model.THIN_BASELINE_KM` weekly chronic load the ratio is inflated by
+  design and reads as a comeback ramp, which is what `build_warnings` has always
+  done. Backed by `GET /api/fitness-model`.
+- `get_training_block(start, end, by)` — volume, pace and Zone 5 share per month
+  or week over any ISO date range, aggregated server-side so a multi-year
+  comparison costs one small response instead of hundreds of rows. Monthly rows
+  carry a median pace beside the mean (one long slow run drags the mean) and
+  `days_run` beside `runs`. Zone 5 reads as an em dash where no run carried HR
+  zones — the pre-2026 history has none, and `0.0%` there would read as a
+  measured zero. The weekly rate divides by the weeks a month actually spans, so
+  an in-progress month is not understated.
+- `get_plan_status()` — the active plan and its target, the sessions in the week
+  of the next one due with their ids and whether each is on the watch, adherence
+  so far, today's guidance given readiness and heat, and any outstanding
+  suggestions. The adherence percentage is withheld below
+  `mcp_reports.MIN_ADHERENCE_SAMPLE` past sessions, because 0 of 1 and 0 of 20
+  are not the same fact, and a failed guidance lookup is reported as a failure
+  rather than as an absence of guidance.
 
 **Verifying after a deploy:**
 ```bash
