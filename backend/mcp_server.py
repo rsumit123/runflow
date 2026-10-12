@@ -886,6 +886,15 @@ async def get_fitness_model() -> str:
             acwr = m.get("acwr")
             chronic = m.get("chronic_load_28d_km")
             thin = chronic is not None and chronic < fm.THIN_BASELINE_KM
+            # Boundary map, so the next reader sees the relationship rather
+            # than rediscovering a disagreement between two surfaces:
+            # fitness_model.build_warnings raises its danger-level load warning
+            # above ACWR_ELEVATED (1.3) and reframes it as a comeback note
+            # below THIN_BASELINE_KM of chronic load. This chain mirrors that —
+            # ratio first, baseline second — and keeps ACWR_RISK_THRESHOLD
+            # (1.5) for the "hold volume flat" verdict. Between the two marks
+            # on a real baseline the app flags a spike, so this cannot report
+            # "within the threshold" there.
             if acwr is None:
                 verdict = "not enough history to judge"
             elif acwr > ACWR_ELEVATED and thin:
@@ -901,6 +910,10 @@ async def get_fitness_model() -> str:
                 verdict = (f"thin baseline (chronic load under {fm.THIN_BASELINE_KM:g} "
                            "km/week): too little chronic load for the ratio to carry "
                            "much meaning in either direction")
+            elif acwr > ACWR_ELEVATED:
+                verdict = (f"elevated — past the {ACWR_ELEVATED} mark where RunFlow "
+                           f"flags a load spike, below the {ACWR_RISK_THRESHOLD} risk "
+                           "threshold; worth not adding more this week")
             else:
                 verdict = f"within the {ACWR_RISK_THRESHOLD} risk threshold"
             method = m.get("easy_pace_method")

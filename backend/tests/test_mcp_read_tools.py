@@ -724,8 +724,11 @@ async def test_get_fitness_model_thin_baseline_between_1_3_and_1_5_is_a_ramp(mon
                           _model(acwr=1.4, chronic_load_28d_km=20.0))
 
     assert "comeback ramp" in ramp, ramp
-    assert "within the 1.5 risk threshold" in quiet, quiet
+    # Same ratio on a real baseline is not a comeback ramp — and not "within"
+    # either, since the app flags a spike above 1.3. See the band test below.
+    assert "comeback ramp" not in quiet, quiet
     assert "thin baseline" not in quiet, quiet
+    assert "elevated" in quiet.lower(), quiet
 
 
 @pytest.mark.asyncio
@@ -798,3 +801,27 @@ def test_build_fitness_model_exports_the_detraining_adjusted_pace():
     assert m["easy_pace_method"] == "measured_stale"
     assert m["detrained_easy_pace_sec"] > m["measured_easy_pace_sec"]
     assert m["staleness_days"] >= 200
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_does_not_call_1_4_safe_when_the_app_flags_it(monkeypatch):
+    """build_warnings raises a danger above 1.3, so "within the 1.5 risk
+    threshold" had the Training page and the phone disagreeing on one number."""
+    line = await _fm_out(monkeypatch, "acwrband14",
+                         _model(acwr=1.4, chronic_load_28d_km=20.0,
+                                acute_load_7d_km=28.0))
+
+    assert "within" not in line, line
+    assert "elevated" in line.lower(), line
+    assert "1.3" in line and "1.5" in line, line
+    assert "thin baseline" not in line, line
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_still_reassures_below_the_elevated_mark(monkeypatch):
+    """The split must not swallow the case where nothing is wrong."""
+    line = await _fm_out(monkeypatch, "acwrband11",
+                         _model(acwr=1.1, chronic_load_28d_km=20.0))
+
+    assert "within the 1.5 risk threshold" in line, line
+    assert "elevated" not in line.lower(), line
