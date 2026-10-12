@@ -2,7 +2,6 @@
   "services": {
     "frontend": {
       "entrypoint": "frontend",
-      "routePrefix": "/",
       "framework": "create-react-app"
     }
   }
