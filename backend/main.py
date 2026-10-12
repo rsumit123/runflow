@@ -527,16 +527,14 @@ async def list_activities(
 
 @app.get("/api/training")
 async def training(session: AsyncSession = Depends(get_session)):
-    """Adaptive-coaching model: fitness metrics, gray-zone classification, warnings."""
-    result = await session.execute(select(Activity))
-    acts = [
-        {
-            "id": a.id, "name": a.name, "distance": a.distance,
-            "start_date": a.start_date, "average_speed": a.average_speed,
-            "average_heartrate": a.average_heartrate, "max_heartrate": a.max_heartrate,
-        }
-        for a in result.scalars().all()
-    ]
+    """Adaptive-coaching model: fitness metrics, gray-zone classification, warnings.
+
+    Uses `_plan_activity_dicts` rather than its own comprehension so that this
+    and `/api/fitness-model` cannot drift: the inline version omitted
+    `normalized_pace_sec`, and `fitness_model` prefers the heat-normalised pace,
+    so the same database reported an easy pace 40 s/km apart between the two.
+    """
+    acts = await _plan_activity_dicts(session)
     return fmodel.training_report(acts, datetime.utcnow())
 
 
