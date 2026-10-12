@@ -851,6 +851,19 @@ async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> 
     return await _plan_response(session, plan)
 
 
+@app.get("/api/fitness-model")
+async def get_fitness_model(session: AsyncSession = Depends(get_session)):
+    """The athlete's current training model — the numbers every plan is sized from.
+
+    Read-only. Includes `easy_pace_method`, which says whether the easy pace was
+    measured from recent easy running or is a stale fallback, and `acwr`, the
+    acute:chronic load ratio — the one number that says whether a volume
+    increase is safe. Both are invisible to every client without this endpoint.
+    """
+    dicts = await _plan_activity_dicts(session)
+    return fmodel.build_fitness_model(dicts, datetime.utcnow())
+
+
 @app.post("/api/plan")
 async def create_plan(req: PlanCreateRequest, session: AsyncSession = Depends(get_session)):
     if not (4 <= req.weeks <= 20):
