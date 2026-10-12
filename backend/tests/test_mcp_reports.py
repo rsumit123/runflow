@@ -485,3 +485,92 @@ def test_run_review_headline_keeps_a_measured_zero_distance():
     out = mr.run_review(_run_row(distance=0.0), {})
 
     assert out.split("\n")[1].startswith("0.0 km in")
+
+
+_CAL_PLAN = {"id": 14, "goal_type": "5k", "target_time_sec": 1800, "weeks": 12,
+             "start_date": datetime(2026, 10, 19), "goal_date": datetime(2027, 1, 9)}
+
+
+def _cal(**over):
+    """Shaped like pace_adaptation.calibrate: insights are dicts, not strings."""
+    base = {"has_changes": True,
+            "proposed": {"easy_low_sec": 420},
+            "changes": [{"field": "easy_pace", "from": "7:30-7:45/km",
+                         "to": "7:00-7:15/km", "delta_sec": 30,
+                         "reason": "Your last 6 easy-HR run(s) averaged 7:05/km."}],
+            "insights": [{"kind": "easy_pace_faster",
+                          "title": "Your easy pace has improved to 7:05/km",
+                          "detail": "Measured from 6 run(s) under the ceiling.",
+                          "evidence": [{"date": "2026-10-01"}],
+                          "confidence": "high"}]}
+    base.update(over)
+    return base
+
+
+def test_plan_status_shows_a_pending_calibration():
+    """apply_calibration asks for approval, so the preview must be visible.
+
+    The spec claimed get_plan_status already surfaced this. It did not.
+    """
+    out = mr.plan_status(_CAL_PLAN, [], {}, None, [], today=datetime(2026, 10, 20),
+                         calibration=_cal())
+
+    assert "calibrat" in out.lower()
+    assert "7:30-7:45/km" in out and "7:00-7:15/km" in out, "show from and to"
+    assert "averaged 7:05/km" in out, "show the evidence behind it"
+    assert "Measured from 6 run(s)" in out, "show the insight detail"
+    assert "apply_calibration" in out, "say how to accept it"
+    assert "evidence" not in out and "'kind'" not in out, "no raw dict repr"
+
+
+def test_plan_status_stays_quiet_when_there_is_nothing_to_calibrate():
+    """has_changes false prints nothing — even though real calibrate() fills
+    `insights` with on-track notes in that case, which must not leak."""
+    cal = _cal(has_changes=False, proposed={}, changes=[],
+               insights=[{"kind": "easy_pace_on_track",
+                          "title": "Your easy pace is tracking the plan",
+                          "detail": "nothing changes", "confidence": "high"}])
+
+    out = mr.plan_status(_CAL_PLAN, [], {}, None, [], today=datetime(2026, 10, 20),
+                         calibration=cal)
+
+    assert "calibrat" not in out.lower()
+    assert "tracking the plan" not in out
+
+
+def test_plan_status_calibration_is_absent_by_default():
+    """Existing callers pass no calibration; their output must not change."""
+    out = mr.plan_status(_CAL_PLAN, [], {}, None, [], today=datetime(2026, 10, 20))
+    assert "calibrat" not in out.lower()
+
+
+def test_plan_status_reports_a_failed_calibration_lookup_as_a_failure():
+    """Same rule as guidance: a failed check is not an absence of changes."""
+    out = mr.plan_status(_CAL_PLAN, [], {}, None, [], today=datetime(2026, 10, 20),
+                         calibration=None, calibration_error="plan table wedged")
+
+    low = out.lower()
+    assert "could not" in low and "calibrat" in low
+    assert "plan table wedged" in out
+    assert "nothing to calibrate" not in low
+
+
+def test_plan_status_reports_a_calibration_failure_with_no_message():
+    """`if calibration_error:` cannot tell an empty message from no error."""
+    out = mr.plan_status(_CAL_PLAN, [], {}, None, [], today=datetime(2026, 10, 20),
+                         calibration=None, calibration_error="")
+
+    low = out.lower()
+    assert "could not" in low and "calibrat" in low
+    assert "unknown error" in low
+
+
+def test_plan_status_bounds_the_calibration_insights():
+    many = [{"kind": "k", "title": f"Insight number {i}", "detail": "d"}
+            for i in range(40)]
+    out = mr.plan_status(_CAL_PLAN, [], {}, None, [], today=datetime(2026, 10, 20),
+                         calibration=_cal(insights=many))
+
+    shown = sum(f"Insight number {i}" in out for i in range(40))
+    assert shown == mr.MAX_CALIBRATION_INSIGHTS
+    assert f"{40 - mr.MAX_CALIBRATION_INSIGHTS} more" in out, "say what was cut"

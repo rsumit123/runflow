@@ -34,6 +34,10 @@ MAX_PAUSE_LINES = 20
 # that belongs in a run report. The renderer owns the bound so no caller can
 # forget it.
 MAX_ERROR_CHARS = 200
+# pace_adaptation.calibrate emits one insight per measurement (easy pace,
+# threshold), so a handful at most today; bounded anyway because the list is
+# produced elsewhere and nothing here enforces its length.
+MAX_CALIBRATION_INSIGHTS = 5
 
 # Below this many due sessions (or graded easy runs) a percentage or an alarm
 # is noise: one ordinary rest day three days into a plan would otherwise
@@ -227,7 +231,9 @@ def plan_status(plan: Optional[dict[str, Any]], workouts: list[dict[str, Any]],
                 summary: dict[str, Any], guidance: Optional[dict[str, Any]],
                 suggestions: list[dict[str, Any]],
                 today: Optional[Any] = None,
-                guidance_error: Optional[str] = None) -> str:
+                guidance_error: Optional[str] = None,
+                *, calibration: Optional[dict[str, Any]] = None,
+                calibration_error: Optional[str] = None) -> str:
     """Where the plan is, what today holds, and what the server thinks should change.
 
     One answer rather than four round trips, because "where am I and what is
@@ -329,6 +335,28 @@ def plan_status(plan: Optional[dict[str, Any]], workouts: list[dict[str, Any]],
                          f"{guidance_error[:MAX_ERROR_CHARS] or 'unknown error'}")
         else:
             lines.append("Today: no guidance available.")
+
+    if calibration_error is not None:
+        # Guard on absence, not truthiness: an empty message is still a failure.
+        lines.append("")
+        lines.append("Could not check for a pace calibration: "
+                     f"{calibration_error[:MAX_ERROR_CHARS] or 'unknown error'}")
+    elif calibration and calibration.get("has_changes"):
+        # No branch for has_changes false: saying nothing is the right output,
+        # and "no changes" would read like a check that failed.
+        lines.append("")
+        lines.append("Pending pace calibration (not applied; "
+                     "apply_calibration accepts it):")
+        for c in calibration.get("changes") or []:
+            lines.append(f"  {c.get('field')}: {c.get('from')} -> {c.get('to')}")
+            if c.get("reason"):
+                lines.append(f"    {c['reason']}")
+        insights = calibration.get("insights") or []
+        for ins in insights[:MAX_CALIBRATION_INSIGHTS]:
+            lines.append(f"  - {ins.get('title')}"
+                         + (f": {ins['detail']}" if ins.get("detail") else ""))
+        if len(insights) > MAX_CALIBRATION_INSIGHTS:
+            lines.append(f"  ... and {len(insights) - MAX_CALIBRATION_INSIGHTS} more")
 
     lines.append("")
     if suggestions:

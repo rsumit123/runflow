@@ -1080,17 +1080,20 @@ async def get_training_block(start: str, end: str, by: str = "month") -> str:
         return f"Could not read the training block: {exc}"
 
 
-async def _plan_state(session) -> tuple:
-    """Plan, graded workouts, adherence summary, guidance, suggestions, guidance error.
+async def _plan_state(session) -> dict:
+    """Everything get_plan_status shows, keyed by mr.plan_status's argument names.
 
     Indirection so tests can substitute the whole bundle, and so the lazy
-    `main` import stays in one place. Guidance and suggestions are each
-    best-effort: a failure in one must not deny the athlete the rest.
+    `main` import stays in one place. Guidance, suggestions and the calibration
+    preview are each best-effort: a failure in one must not deny the athlete
+    the rest. A dict rather than the earlier 6-tuple, which was already hard to
+    read and would have grown to eight.
     """
     import main as _main
     plan = await _main._active_plan(session)
     if plan is None:
-        return None, [], {}, None, [], None
+        return {"plan": None, "workouts": [], "summary": {}, "guidance": None,
+                "suggestions": []}
 
     plan_row = {
         "id": plan.id, "goal_type": plan.goal_type,
@@ -1116,7 +1119,21 @@ async def _plan_state(session) -> tuple:
     except Exception:  # noqa: BLE001
         logger.exception("plan suggestions failed inside get_plan_status")
 
-    return plan_row, graded["workouts"], graded["summary"], guidance, suggestions, guidance_error
+    # _calibration(session, plan), the helper behind GET /api/plan/calibration:
+    # it takes the plan already in hand, where the endpoint would fetch it again.
+    # Read-only; the endpoint's extra `history` key is not needed here.
+    calibration = None
+    calibration_error = None
+    try:
+        calibration = await _main._calibration(session, plan)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("calibration preview failed inside get_plan_status")
+        calibration_error = (str(exc) or exc.__class__.__name__)[:200]
+
+    return {"plan": plan_row, "workouts": graded["workouts"],
+            "summary": graded["summary"], "guidance": guidance,
+            "suggestions": suggestions, "guidance_error": guidance_error,
+            "calibration": calibration, "calibration_error": calibration_error}
 
 
 @mcp.tool()
@@ -1128,7 +1145,9 @@ async def get_plan_status() -> str:
     session?". One call returns the plan and its target, the current week's
     sessions with their ids and whether each is on the watch, how many sessions
     have been completed, today's guidance given readiness and heat, and any
-    outstanding suggestions the server has derived from measured adherence.
+    outstanding suggestions the server has derived from measured adherence,
+    and, when the athlete's easy runs support it, a pending pace calibration
+    (what would change and why; nothing is applied by reading it).
 
     Each session is listed with its id in brackets. Those ids are stable and
     are what a future write tool will take; there is no write tool for plans
@@ -1137,11 +1156,8 @@ async def get_plan_status() -> str:
     """
     try:
         async with async_session() as session:
-            (plan, workouts, summary, guidance, suggestions,
-             guidance_error) = await _plan_state(session)
-            return mr.plan_status(plan, workouts, summary, guidance, suggestions,
-                                  today=datetime.utcnow(),
-                                  guidance_error=guidance_error)
+            state = await _plan_state(session)
+            return mr.plan_status(today=datetime.utcnow(), **state)
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_plan_status failed")
         return f"Could not read the plan: {exc}"

@@ -825,3 +825,68 @@ async def test_get_fitness_model_still_reassures_below_the_elevated_mark(monkeyp
 
     assert "within the 1.5 risk threshold" in line, line
     assert "elevated" not in line.lower(), line
+
+
+def _state(**over):
+    plan = {"id": 14, "goal_type": "5k", "target_time_sec": 1800,
+            "weeks": 12, "start_date": datetime(2026, 10, 19),
+            "goal_date": datetime(2027, 1, 9)}
+    state = {"plan": plan, "workouts": [], "summary": {}, "guidance": None,
+             "suggestions": [], "guidance_error": None,
+             "calibration": None, "calibration_error": None}
+    state.update(over)
+    return state
+
+
+@pytest.mark.asyncio
+async def test_get_plan_status_includes_the_calibration_preview(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "pscal")
+
+    cal = {"has_changes": True, "proposed": {"easy_low_sec": 420},
+           "changes": [{"field": "easy_pace", "from": "7:30", "to": "7:00",
+                        "reason": "r"}],
+           "insights": [{"title": "Faster band", "detail":
+                         "Six easy runs support a faster band."}]}
+
+    async def fake_state(session):
+        return _state(calibration=cal)
+    monkeypatch.setattr(mcp_server, "_plan_state", fake_state)
+
+    out = await mcp_server.get_plan_status()
+
+    assert "calibrat" in out.lower()
+    assert "Six easy runs support a faster band." in out
+
+
+@pytest.mark.asyncio
+async def test_plan_state_survives_a_calibration_failure_with_no_message(monkeypatch):
+    """Through the real _plan_state: the lookup raising RuntimeError() (empty
+    str) must read as a failure naming the class, and the rest of the plan
+    status must still be there."""
+    main, mcp_server, database = await _app(monkeypatch, "pscalerr")
+    from models import Plan, PlannedWorkout
+
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        plan = Plan(goal_type="5k", goal_distance_m=5000, target_time_sec=1800,
+                    start_date=now - timedelta(days=7),
+                    goal_date=now + timedelta(days=70),
+                    weeks=12, status="active", created_at=now)
+        s.add(plan)
+        await s.flush()
+        s.add(PlannedWorkout(plan_id=plan.id, date=now + timedelta(days=1),
+                             week_number=2, day_type="easy",
+                             target_distance_m=5000, pace_low_sec=435,
+                             pace_high_sec=450, title="Easy marker",
+                             description="x"))
+        await s.commit()
+
+    async def broken(session, plan):
+        raise RuntimeError()
+    monkeypatch.setattr(main, "_calibration", broken)
+
+    out = await mcp_server.get_plan_status()
+
+    assert "Could not check for a pace calibration" in out
+    assert "RuntimeError" in out
+    assert "Easy marker" in out, "a calibration failure must not deny the rest"
