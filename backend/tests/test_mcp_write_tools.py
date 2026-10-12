@@ -706,3 +706,163 @@ async def test_push_adhoc_workout_accepts_the_documented_example(monkeypatch):
     built = gw.build_running_workout("Intervals", example)
     top = built.workoutSegments[0].workoutSteps
     assert len(top) == 3, "warmup, repeat group, cooldown"
+
+
+# ---------------------------------------------------------------------------
+# apply_suggestion
+# ---------------------------------------------------------------------------
+
+async def _seed_cap_fixture(database, *, big_gid):
+    """Completed 4 km long + MISSED long + oversized upcoming 6.5 km long: the
+    shape tests/test_plan_suggestions_endpoint.py uses to get cap_long_run.
+    Returns (workout_id, suggestion_id is derived by the caller)."""
+    from models import Plan, PlannedWorkout, Activity
+    now = datetime.utcnow()
+    steps = {"steps": [{"type": "run", "end_kind": "distance",
+                        "end_value": 6500, "target_kind": "pace",
+                        "pace_low_sec": 435, "pace_high_sec": 450}]}
+    async with database.async_session() as s:
+        plan = Plan(goal_type="5k", goal_distance_m=5000, target_time_sec=1642,
+                    start_date=now - timedelta(days=14),
+                    goal_date=now + timedelta(days=42),
+                    weeks=8, status="active", created_at=now)
+        s.add(plan)
+        await s.flush()
+        s.add(PlannedWorkout(plan_id=plan.id, date=now - timedelta(days=8),
+                             week_number=1, day_type="long",
+                             target_distance_m=4000, hr_ceiling=165,
+                             title="Long", description="x", structure=steps))
+        s.add(PlannedWorkout(plan_id=plan.id, date=now - timedelta(days=3),
+                             week_number=2, day_type="long",
+                             target_distance_m=5000, hr_ceiling=165,
+                             title="Long", description="x"))
+        big = PlannedWorkout(plan_id=plan.id, date=now + timedelta(days=4),
+                             week_number=3, day_type="long",
+                             target_distance_m=6500, hr_ceiling=165,
+                             title="Long 6.5k", description="x",
+                             structure=steps, garmin_workout_id=big_gid)
+        s.add(big)
+        s.add(Activity(id=900, name="Run", distance=4000.0,
+                       start_date=now - timedelta(days=8),
+                       average_speed=1000.0 / 430, average_heartrate=150.0))
+        await s.commit()
+        return big.id
+
+
+async def _cap_id(main, database):
+    async with database.async_session() as s:
+        sugg = (await main.get_plan_suggestions(s))["suggestions"]
+    cap = next((x for x in sugg if x["type"] == "cap_long_run"), None)
+    assert cap is not None, f"fixture should produce a cap suggestion: {sugg}"
+    return cap["id"]
+
+
+@pytest.mark.asyncio
+async def test_apply_suggestion_refuses_a_stale_id(monkeypatch):
+    """The server re-derives the list, so an unknown id must be refused."""
+    main, mcp_server, database = await _app(monkeypatch, "as")
+    await _seed_plan(database)
+
+    out = await mcp_server.apply_suggestion(suggestion_id="not-a-real-id")
+
+    assert "no longer applies" in out.lower(), out
+    assert "nothing was changed" in out.lower(), out
+    assert _no_raw_http(out) and "Traceback" not in out
+
+
+@pytest.mark.asyncio
+async def test_apply_suggestion_with_no_active_plan_is_a_sentence(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "as2")
+
+    out = await mcp_server.apply_suggestion(suggestion_id="anything")
+
+    assert "no active plan" in out.lower()
+    assert _no_raw_http(out)
+
+
+@pytest.mark.asyncio
+async def test_apply_suggestion_tells_him_which_session_came_off_the_watch(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "as3")
+    big_id = await _seed_cap_fixture(database, big_gid=7001)
+    sid = await _cap_id(main, database)
+    pushed, removed = [], []
+
+    async def spy_push(w):
+        pushed.append(w.id)
+
+    async def spy_remove(gid):
+        removed.append(gid)
+    monkeypatch.setattr(main, "_garmin_push", spy_push)
+    monkeypatch.setattr(main.garmin, "remove_workout", spy_remove)
+
+    out = await mcp_server.apply_suggestion(suggestion_id=sid)
+
+    assert removed == [7001] and pushed == []
+    assert "Cap your next long run at 5.0 km" in out, f"say what was applied: {out}"
+    assert "NOT on the watch" in out, out
+    assert "Long 6.5k" in out, "name the session that came off, as it was titled"
+    assert "workout %d" % big_id in out, out
+    assert "do not" in out.lower() and "push_workout" in out, (
+        "must warn that pushing it again would resend the stale steps")
+    assert "has been updated" not in out and "re-pushed" not in out.lower()
+    assert len(out) < 1500, "must not dump the plan response"
+    print("\n--- tool output (unscheduled) ---\n" + out)
+
+
+@pytest.mark.asyncio
+async def test_apply_suggestion_says_the_watch_still_holds_the_old_session_when_removal_fails(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "as4")
+    big_id = await _seed_cap_fixture(database, big_gid=7002)
+    sid = await _cap_id(main, database)
+
+    async def broken(gid):
+        raise RuntimeError("garmin 503")
+    monkeypatch.setattr(main.garmin, "remove_workout", broken)
+
+    out = await mcp_server.apply_suggestion(suggestion_id=sid)
+
+    assert "plan is updated" in out.lower() or "plan was updated" in out.lower(), out
+    assert "still on the watch" in out, out
+    assert "old" in out.lower() and "Long 6.5k" in out, out
+    assert "unpush_workout" in out, "name the retry"
+    assert "garmin 503" in out
+    assert "NOT on the watch" not in out, "it IS still on the watch"
+    print("\n--- tool output (removal failed) ---\n" + out)
+
+
+@pytest.mark.asyncio
+async def test_apply_suggestion_for_a_session_never_on_the_watch_does_not_mention_the_watch_changing(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "as5")
+    await _seed_cap_fixture(database, big_gid=None)
+    sid = await _cap_id(main, database)
+
+    out = await mcp_server.apply_suggestion(suggestion_id=sid)
+
+    assert "Cap your next long run at 5.0 km" in out
+    assert "came off" not in out and "NOT on the watch" not in out, out
+    assert "nothing on the watch needed changing" in out.lower(), out
+
+
+@pytest.mark.asyncio
+async def test_apply_suggestion_reports_repushed_and_bounds_long_lists(monkeypatch):
+    """A re-pushed session reads as updated; a long unscheduled list is bounded
+    by MAX_SYNC_FAILURES_LISTED, not left to cap_text."""
+    main, mcp_server, database = await _app(monkeypatch, "as6")
+    await _seed_plan(database)
+    n = mcp_server.MAX_SYNC_FAILURES_LISTED + 7
+    entries = [{"id": i, "title": f"T{i}", "date": "2026-10-20",
+                "was_titled": f"Old{i}"} for i in range(1, n + 1)]
+
+    async def fake(session, suggestion_id):
+        return {"watch": {"repushed": [entries[0]], "unscheduled": entries,
+                          "failed": []}}
+    async def fake_list(session):
+        return [{"id": "x", "title": "Do a thing", "detail": "because"}]
+    monkeypatch.setattr(mcp_server, "_apply_suggestion", fake)
+    monkeypatch.setattr(mcp_server, "_list_suggestions", fake_list)
+
+    out = await mcp_server.apply_suggestion(suggestion_id="x")
+
+    assert "re-sent to the watch" in out.lower() and "T1" in out
+    assert out.count("(workout ") <= mcp_server.MAX_SYNC_FAILURES_LISTED + 1
+    assert "7 more" in out, out

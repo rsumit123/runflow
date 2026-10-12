@@ -1562,3 +1562,112 @@ async def push_adhoc_workout(name: str, date: str, steps: list[dict]) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("push_adhoc_workout failed")
         return f"Could not push the workout: {exc}"
+
+
+async def _list_suggestions(session):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    return (await _main.get_plan_suggestions(session))["suggestions"]
+
+
+async def _apply_suggestion(session, suggestion_id: str):
+    """Indirection so tests can substitute the import. See _garmin_sync."""
+    import main as _main
+    return await _main.apply_plan_suggestion(
+        _main.SuggestionApplyRequest(id=suggestion_id), session)
+
+
+def _bulleted(entries: list, line) -> list:
+    """At most MAX_SYNC_FAILURES_LISTED bullets, then '… and N more'."""
+    out = [line(e) for e in entries[:MAX_SYNC_FAILURES_LISTED]]
+    if len(entries) > MAX_SYNC_FAILURES_LISTED:
+        out.append(f"  … and {len(entries) - MAX_SYNC_FAILURES_LISTED} more")
+    return out
+
+
+def _session_ref(e: dict) -> str:
+    title = str(e.get("title") or "Untitled")[:_SYNC_TITLE_CHARS]
+    was = str(e.get("was_titled") or title)[:_SYNC_TITLE_CHARS]
+    named = f"\"{title}\"" + (f" (the watch has it as \"{was}\")" if was != title else "")
+    return f"- {named} on {e.get('date')} (workout {e.get('id')})"
+
+
+def _suggestion_watch_lines(watch: dict) -> list:
+    """What the suggestion did to the watch, one block per outcome. Pure."""
+    unscheduled = watch.get("unscheduled") or []
+    repushed = watch.get("repushed") or []
+    failed = watch.get("failed") or []
+    lines = []
+    if unscheduled:
+        lines.append(
+            "These sessions came off the watch and are NOT on the watch now. "
+            "What the watch runs (the steps) no longer matches the changed "
+            "session, and sending the old steps would give you the wrong "
+            "workout. They are still in the plan: run them as the plan now "
+            "describes. Do not use push_workout on them until their steps "
+            "have been regenerated:")
+        lines += _bulleted(unscheduled, _session_ref)
+    if repushed:
+        lines.append("Re-sent to the watch with the new details:")
+        lines += _bulleted(repushed, _session_ref)
+    removal = [f for f in failed if f.get("action") == "remove"]
+    update = [f for f in failed if f.get("action") != "remove"]
+    if removal:
+        lines.append(
+            "The watch was NOT changed for these: they are still on the watch "
+            "holding the OLD version of the session, which no longer matches "
+            "the plan. Do not run them from the watch. Retry with "
+            "unpush_workout:")
+        lines += _bulleted(removal, lambda f: f"{_session_ref(f)}: {f.get('error')}")
+    if update:
+        lines.append(
+            "The watch update failed for these: the watch still holds the OLD "
+            "version. Retry with push_workout:")
+        lines += _bulleted(update, lambda f: f"{_session_ref(f)}: {f.get('error')}")
+    if not lines:
+        lines.append("Nothing on the watch needed changing.")
+    return lines
+
+
+@mcp.tool()
+async def apply_suggestion(suggestion_id: str) -> str:
+    """Apply one of the app's own plan suggestions, such as capping a long run
+    after a missed one or swapping a speed session for an easy run.
+
+    The ids come from get_plan_status. The server re-derives the suggestion list
+    and refuses an id that no longer applies, so a stale id is safe: it changes
+    nothing.
+
+    Applying a suggestion changes the plan. A session that was on the watch is
+    handled with care: if the change makes the watch's step list wrong (a new
+    distance, pace or session type) the session is taken OFF the watch and named
+    in the reply, because re-sending the old steps would give the athlete the
+    wrong workout; only cosmetic changes are re-sent. Nothing is ever newly
+    scheduled on the watch.
+
+    Args:
+        suggestion_id: the id of the suggestion, from get_plan_status.
+    """
+    try:
+        async with async_session() as session:
+            title = detail = None
+            try:
+                for s in await _list_suggestions(session):
+                    if s.get("id") == suggestion_id:
+                        title, detail = s.get("title"), s.get("detail")
+            except Exception:  # noqa: BLE001 — the title is nice-to-have
+                logger.exception("apply_suggestion: could not read suggestion text")
+            try:
+                resp = await _apply_suggestion(session, suggestion_id)
+            except HTTPException as exc:
+                return mv.cap_text(
+                    f"The suggestion was not applied: {exc.detail}. "
+                    f"Nothing was changed.")
+            applied = (f"Applied: {title}. {detail or ''}".strip()
+                       if title else f"Applied suggestion {suggestion_id}.")
+            lines = [applied, "The plan is updated."]
+            lines += _suggestion_watch_lines((resp or {}).get("watch") or {})
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("apply_suggestion failed")
+        return f"Could not apply the suggestion: {exc}"

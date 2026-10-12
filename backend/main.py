@@ -1234,12 +1234,72 @@ async def apply_plan_suggestion(req: SuggestionApplyRequest, session: AsyncSessi
     suggestion = next((s for s in await _plan_suggestions(session, plan) if s["id"] == req.id), None)
     if suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion no longer applies")
-    for ch in suggestion.get("changes", []):
+    changes = suggestion.get("changes", [])
+    old_titles = {}
+    for ch in changes:
         w = await session.get(PlannedWorkout, ch["workout_id"])
         if w is not None and ch.get("value") is not None:
+            old_titles.setdefault(w.id, w.title)
             setattr(w, ch["field"], ch["value"])
+    watch = await _repush_after_changes(session, changes, old_titles=old_titles)
     await session.commit()
-    return await _plan_response(session, plan)
+    resp = await _plan_response(session, plan)
+    resp["watch"] = watch
+    return resp
+
+
+# Fields whose change makes a workout's `structure` (the step list the watch
+# actually runs) disagree with the plan. No suggestion rewrites `structure`.
+_STRUCTURE_STALE_FIELDS = {"day_type", "target_distance_m", "pace_low_sec", "pace_high_sec"}
+
+
+async def _repush_after_changes(session: AsyncSession, changes: list,
+                                old_titles: Optional[dict] = None) -> dict:
+    """Bring the watch in step with already-applied suggestion changes.
+
+    Do NOT "just re-push everything". _garmin_push uploads w.structure, and
+    plan_adherence.suggest never touches structure: a capped long run would be
+    re-sent with its old 6.5 km steps (the push "succeeds", the watch is still
+    wrong), and a soften_quality swap would send the interval steps under an
+    easy-run title — an unplanned hard session for an athlete who must not run
+    one. So a workout whose structure went stale is taken OFF the watch and
+    reported; only title/description/hr_ceiling changes are re-pushed. Nothing
+    is ever newly scheduled. Regenerating structure is plan-generator work.
+
+    A Garmin failure must not lose the applied suggestion (as in calibration),
+    so failures are collected, not raised. A session that could not be removed
+    keeps its garmin_workout_id: it is still on the watch and a retry needs it.
+    Returns {"repushed": [...], "unscheduled": [...], "failed": [...]}.
+    """
+    old_titles = old_titles or {}
+    fields_by_workout: dict = {}
+    for ch in changes:
+        if ch.get("value") is not None:
+            fields_by_workout.setdefault(ch["workout_id"], set()).add(ch["field"])
+
+    out = {"repushed": [], "unscheduled": [], "failed": []}
+    for wid, fields in fields_by_workout.items():
+        w = await session.get(PlannedWorkout, wid)
+        if w is None or not w.garmin_workout_id:
+            continue          # not on the watch: a suggestion must not schedule it
+        entry = {"id": w.id, "title": w.title, "date": w.date.date().isoformat(),
+                 "was_titled": old_titles.get(w.id, w.title)}
+        if fields & _STRUCTURE_STALE_FIELDS:
+            try:
+                await garmin.remove_workout(w.garmin_workout_id)
+                w.garmin_workout_id = None
+                out["unscheduled"].append(entry)
+            except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not lose the suggestion
+                logger.warning("Could not unschedule stale workout %s: %s", w.id, exc)
+                out["failed"].append({**entry, "action": "remove", "error": str(exc)})
+        elif (w.structure or {}).get("steps"):
+            try:
+                await _garmin_push(w)   # replaces the old upload, so no duplicates
+                out["repushed"].append(entry)
+            except Exception as exc:  # noqa: BLE001 — same reasoning as above
+                logger.warning("Re-push after suggestion failed for %s: %s", w.id, exc)
+                out["failed"].append({**entry, "action": "update", "error": str(exc)})
+    return out
 
 
 @app.get("/api/activities/{activity_id}")
