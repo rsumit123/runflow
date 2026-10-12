@@ -255,3 +255,45 @@ def test_run_review_caps_the_pause_list():
         f"expected {mr.MAX_PAUSE_LINES} detail lines, got {len(detail)}"
     )
     assert "and 279 more" in out
+
+
+def test_plan_status_shows_the_week_todays_session_and_suggestions():
+    plan = {"id": 14, "goal_type": "5k", "target_time_sec": 1800, "weeks": 12,
+            "start_date": datetime(2026, 10, 19), "goal_date": datetime(2027, 1, 9)}
+    workouts = [
+        {"id": 1, "date": datetime(2026, 10, 19), "week_number": 1, "day_type": "easy",
+         "title": "Easy run", "target_distance_m": 3000.0, "pace_low_sec": 435,
+         "pace_high_sec": 450, "hr_ceiling": 160, "garmin_workout_id": 555,
+         "status": "done", "compliance": "ran_hard",
+         "actual": {"activity_id": 99, "pace_sec": 435, "avg_hr": 186.0,
+                    "distance_m": 3010.0}},
+        {"id": 2, "date": datetime(2026, 10, 22), "week_number": 1, "day_type": "easy",
+         "title": "Easy run", "target_distance_m": 3500.0, "pace_low_sec": 435,
+         "pace_high_sec": 450, "hr_ceiling": 160, "garmin_workout_id": None,
+         "status": "upcoming", "compliance": None, "actual": None},
+    ]
+    # Real keys from plan_adherence.match_and_grade's summary.
+    summary = {"done": 1, "missed": 0, "planned_past": 1, "easy_run_hard": 1,
+               "easy_graded": 1, "adherence_pct": 100}
+    guidance = {"recommendation": {"action": "proceed", "reason": "readiness 61"}}
+    # Real keys from plan_adherence.suggest: id, type, title, detail, changes.
+    suggestions = [{"id": "cap_long_2", "type": "cap_long_run",
+                    "title": "Cap your next long run at 5.0 km",
+                    "detail": "You missed a long run."}]
+
+    out = mr.plan_status(plan, workouts, summary, guidance, suggestions,
+                         today=datetime(2026, 10, 22))
+
+    assert "30:00" in out, "the target has to be legible, not raw seconds"
+    assert "2027-01-09" in out
+    assert "Easy run" in out
+    assert "on watch" in out.lower()
+    assert "proceed" in out.lower()
+    assert "ran_hard" in out, "an easy run run hard is the thing worth seeing"
+    assert "cap_long_2" in out, "a suggestion id is needed to apply it later"
+
+
+def test_plan_status_says_so_with_no_active_plan():
+    out = mr.plan_status(None, [], {}, None, [], today=datetime(2026, 10, 22))
+
+    assert "no active plan" in out.lower()

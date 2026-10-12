@@ -203,3 +203,85 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
             lines.append(f"  compliance: {planned['compliance']}")
 
     return mv.cap_text("\n".join(lines))
+
+
+def plan_status(plan: Optional[dict[str, Any]], workouts: list[dict[str, Any]],
+                summary: dict[str, Any], guidance: Optional[dict[str, Any]],
+                suggestions: list[dict[str, Any]],
+                today: Optional[Any] = None) -> str:
+    """Where the plan is, what today holds, and what the server thinks should change.
+
+    One answer rather than four round trips, because "where am I and what is
+    today" is a single question. Suggestion ids are printed because applying one
+    later requires passing its id back.
+    """
+    if plan is None:
+        return ("No active plan. Create one with create_plan once a target and "
+                "a start date have been agreed.")
+
+    lines: list[str] = []
+    target = plan.get("target_time_sec")
+    tgt = f"{target // 60}:{target % 60:02d}" if target else "—"
+    goal_date = plan.get("goal_date")
+    lines.append(f"Plan {plan.get('id')} — {plan.get('goal_type')} target {tgt}"
+                 f" over {plan.get('weeks')} weeks")
+    if goal_date:
+        lines.append(f"  starts {plan['start_date']:%Y-%m-%d}"
+                     f" · goal date {goal_date:%Y-%m-%d}")
+    if summary:
+        # Keys per plan_adherence.match_and_grade: done / missed / planned_past
+        # / easy_graded / easy_run_hard / adherence_pct.
+        lines.append(f"  adherence: {summary.get('done', 0)} done, "
+                     f"{summary.get('missed', 0)} missed of "
+                     f"{summary.get('planned_past', 0)} due"
+                     + (f" ({summary['adherence_pct']}%)"
+                        if summary.get("adherence_pct") is not None else ""))
+        if summary.get("easy_run_hard"):
+            lines.append(f"  WARNING: {summary['easy_run_hard']} of "
+                         f"{summary.get('easy_graded', 0)} easy runs were run hard")
+
+    day = today.date() if today is not None else None
+    current_week = None
+    if day is not None:
+        upcoming = [w for w in workouts if w.get("date") and w["date"].date() >= day]
+        current_week = (upcoming[0].get("week_number") if upcoming
+                        else (workouts[-1].get("week_number") if workouts else None))
+
+    if current_week is not None:
+        lines.append("")
+        lines.append(f"Week {current_week}:")
+        for w in [x for x in workouts if x.get("week_number") == current_week]:
+            marks = []
+            if w.get("garmin_workout_id"):
+                marks.append("on watch")
+            if w.get("status") and w["status"] != "upcoming":
+                marks.append(w["status"])
+            if w.get("compliance"):
+                marks.append(w["compliance"])
+            when = f"{w['date']:%a %d %b}" if w.get("date") else "—"
+            km = (w.get("target_distance_m") or 0) / 1000.0
+            lines.append(
+                f"  [{w.get('id')}] {when} · {w.get('title') or w.get('day_type')}"
+                f" · {mv.num(km)} km at {_pace(w.get('pace_low_sec'))}-"
+                f"{_pace(w.get('pace_high_sec'))}/km"
+                + (f" · HR ≤{w['hr_ceiling']}" if w.get("hr_ceiling") else "")
+                + (f" · {', '.join(marks)}" if marks else "")
+            )
+
+    lines.append("")
+    if guidance and guidance.get("recommendation"):
+        rec = guidance["recommendation"]
+        lines.append(f"Today: {rec.get('action')} — {rec.get('reason')}")
+    else:
+        lines.append("Today: no guidance available.")
+
+    lines.append("")
+    if suggestions:
+        lines.append("Outstanding suggestions (apply with apply_suggestion):")
+        for s in suggestions:
+            lines.append(f"  {s.get('id')} — {s.get('title')}"
+                         + (f": {s['detail']}" if s.get("detail") else ""))
+    else:
+        lines.append("No outstanding suggestions.")
+
+    return mv.cap_text("\n".join(lines))

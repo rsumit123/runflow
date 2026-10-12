@@ -1038,3 +1038,64 @@ async def get_training_block(start: str, end: str, by: str = "month") -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_training_block failed")
         return f"Could not read the training block: {exc}"
+
+
+async def _plan_state(session) -> tuple:
+    """Plan, graded workouts, adherence summary, today's guidance, suggestions.
+
+    Indirection so tests can substitute the whole bundle, and so the lazy
+    `main` import stays in one place. Guidance and suggestions are each
+    best-effort: a failure in one must not deny the athlete the rest.
+    """
+    import main as _main
+    plan = await _main._active_plan(session)
+    if plan is None:
+        return None, [], {}, None, []
+
+    plan_row = {
+        "id": plan.id, "goal_type": plan.goal_type,
+        "target_time_sec": plan.target_time_sec, "weeks": plan.weeks,
+        "start_date": plan.start_date, "goal_date": plan.goal_date,
+    }
+    workouts = await _main._workout_dicts(session, plan)
+    acts = await _main._plan_activity_dicts(session)
+    graded = _main.padh.match_and_grade(workouts, acts, datetime.utcnow(),
+                                        plan.start_date)
+
+    guidance = None
+    try:
+        guidance = await _main.today_guidance(refresh=False, session=session)
+    except Exception:  # noqa: BLE001
+        logger.exception("today_guidance failed inside get_plan_status")
+
+    suggestions = []
+    try:
+        suggestions = await _main._plan_suggestions(session, plan)
+    except Exception:  # noqa: BLE001
+        logger.exception("plan suggestions failed inside get_plan_status")
+
+    return plan_row, graded["workouts"], graded["summary"], guidance, suggestions
+
+
+@mcp.tool()
+async def get_plan_status() -> str:
+    """Where the training plan is, what today holds, and what should change.
+
+    Start here for any question about the plan rather than a specific run:
+    "what am I doing today?", "am I keeping up?", "should I move tomorrow's
+    session?". One call returns the plan and its target, the current week's
+    sessions with their ids and whether each is on the watch, how many sessions
+    have been completed, today's guidance given readiness and heat, and any
+    outstanding suggestions the server has derived from measured adherence.
+
+    The workout ids in the week listing are what move_workout, push_workout and
+    set_workout_note take. The suggestion ids are what apply_suggestion takes.
+    """
+    try:
+        async with async_session() as session:
+            plan, workouts, summary, guidance, suggestions = await _plan_state(session)
+            return mr.plan_status(plan, workouts, summary, guidance, suggestions,
+                                  today=datetime.utcnow())
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_plan_status failed")
+        return f"Could not read the plan: {exc}"

@@ -577,3 +577,41 @@ def test_weeks_covered_clips_to_range_and_today_and_floors_at_one_week(monkeypat
     assert wc(2026, 11, date(2026, 1, 1), date(2026, 12, 31), date(2026, 10, 12)) == 1.0
     # a one-day span does not inflate the rate sevenfold
     assert wc(2026, 10, date(2026, 10, 1), date(2026, 12, 31), date(2026, 10, 1)) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_get_plan_status_with_no_plan_is_readable(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "ps")
+
+    out = await mcp_server.get_plan_status()
+
+    assert "no active plan" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_plan_status_reports_an_active_plan(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "ps2")
+    from models import Activity, Plan, PlannedWorkout
+
+    now = datetime.utcnow()
+    monday = now - timedelta(days=now.weekday())
+    async with database.async_session() as s:
+        for i in range(6):
+            s.add(Activity(id=50 + i, name="Run", distance=3000.0, moving_time=1305,
+                           start_date=now - timedelta(days=3 * i),
+                           average_speed=3000.0 / 1305, average_heartrate=180.0,
+                           max_heartrate=194.0))
+        s.add(Plan(id=1, goal_type="5k", goal_distance_m=5000.0, target_time_sec=1800,
+                   start_date=monday, goal_date=monday + timedelta(weeks=12),
+                   weeks=12, status="active", created_at=now))
+        s.add(PlannedWorkout(id=1, plan_id=1, date=monday, week_number=1,
+                             day_type="easy", target_distance_m=3000.0,
+                             pace_low_sec=435, pace_high_sec=450, hr_ceiling=160,
+                             title="Easy run", description="Conversational."))
+        await s.commit()
+
+    out = await mcp_server.get_plan_status()
+
+    assert "30:00" in out
+    assert "Easy run" in out
+    assert "Week 1" in out
