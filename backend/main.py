@@ -860,17 +860,26 @@ async def create_plan(req: PlanCreateRequest, session: AsyncSession = Depends(ge
     if req.target_time_sec is None:
         raise HTTPException(status_code=400, detail="target_time_sec required for 5k plans")
     now = datetime.utcnow()
+    # The model reads today's fitness; the calendar is anchored wherever the
+    # caller asked. They differ whenever a plan is built mid-week, which is the
+    # normal case — see PlanCreateRequest.start_date.
+    anchor = now
+    if req.start_date:
+        try:
+            anchor = datetime.fromisoformat(req.start_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="start_date must be ISO (YYYY-MM-DD)")
     dicts = await _plan_activity_dicts(session)
 
     model = fmodel.build_fitness_model(dicts, now)
-    gen = pgen.generate_plan(model, req.weeks, req.target_time_sec, now)
+    gen = pgen.generate_plan(model, req.weeks, req.target_time_sec, anchor)
 
     # Only one active plan at a time — and it must be the only one on the watch too.
     await _abandon_active_plans(session)
 
     plan = Plan(
         goal_type="5k", goal_distance_m=5000.0, target_time_sec=req.target_time_sec,
-        start_date=now, goal_date=gen["goal_date"], weeks=req.weeks, status="active",
+        start_date=anchor, goal_date=gen["goal_date"], weeks=req.weeks, status="active",
         created_at=now, fitness_snapshot=model,
     )
     session.add(plan)
