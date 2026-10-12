@@ -229,17 +229,23 @@ Then re-paste the new URL in the Claude app.
 `compare_runs`, `get_recovery`, `get_records`, `get_training_context`,
 `get_fitness_model`, `get_aerobic_trend`, `get_weekly_volume`,
 `get_training_block`, `get_plan_status`, and `call_api` (GET routes only).
-Writes: `sync_garmin` (triggers the Garmin import) and `set_run_note` (the
-athlete's own context on a run, max 2000 chars — the only field in the database
-this connector can change). Fifteen tools in total.
+Writes: `sync_garmin` (triggers the Garmin import), `set_run_note` (the
+athlete's own context on a run, max 2000 chars), and nine plan writes:
+`set_workout_note`, `move_workout`, `push_workout`, `unpush_workout`,
+`sync_plan_to_watch`, `push_adhoc_workout`, `apply_suggestion`,
+`apply_calibration` and `create_plan`. Twenty-four tools in total.
 
-**There are no plan write tools yet.** Nothing in this connector can create a
-plan, move a workout, push one to the watch, or apply a suggestion — those are
-plan 2 of 2. The session and suggestion ids the reads emit are stable and are
-what those tools will take, but until they exist the ids are for reporting to
-the athlete, not for acting on. An earlier draft of `get_plan_status` named
-five of them in its docstring; a model reading that would have offered to move
-a workout and then failed.
+**What the writes can and cannot do.** `create_plan` refuses while a plan is
+active unless called with `replace_active=True`, because `POST /api/plan`
+abandons the active plan and clears the watch unconditionally, with no guard of
+its own (`main.py:889`); the refusal names the plan and how many of its sessions
+are on the watch. There is deliberately no tool to abandon a plan on its own, no
+tool to delete a planned workout, and no tool to delete an activity. Deleting a
+run is the one irreversible operation and is never exposed. `call_api` is still
+GET-only, so every write is reachable only through a named tool with its own
+docstring. A write reports what actually changed, not what was asked: a plan
+change whose watch push failed reads differently from one that succeeded, and
+says the watch still holds the old version.
 
 The four fat reads, and why each exists:
 
@@ -278,6 +284,44 @@ The four fat reads, and why each exists:
   `mcp_reports.MIN_ADHERENCE_SAMPLE` past sessions, because 0 of 1 and 0 of 20
   are not the same fact, and a failed guidance lookup is reported as a failure
   rather than as an absence of guidance.
+
+The nine plan writes, and why each exists:
+
+- `set_workout_note(workout_id, note)` — replaces a planned session's
+  `description`. The generator's easy-run text tells this athlete to take walk
+  breaks, which cause him next-day pain, and nothing else could edit it.
+- `move_workout(workout_id, date)` — moves one session. Reports whether the
+  watch actually took the change, because a move whose re-push failed leaves
+  the watch on the old day. The endpoint's `garmin_synced` is `False` both when
+  Garmin rejected the push and when the session was deliberately taken off the
+  watch (moved into the past, or became a rest day), so the tool reports the
+  session's resulting state rather than reading that flag alone.
+- `push_workout(workout_id)` — schedules one session on the watch. Separates
+  "no structured steps, asking again will not help" (400) from "Garmin is
+  down, try again" (502).
+- `unpush_workout(workout_id)` — takes one session off the watch and leaves the
+  plan untouched. It says so, because "remove" invites the reading that the
+  session is deleted.
+- `sync_plan_to_watch()` — pushes the whole active plan. Names each session that
+  failed and why rather than a bare count, with the list bounded by
+  construction.
+- `push_adhoc_workout(name, date, steps)` — a one-off structured session with no
+  plan behind it. Refuses a step whose pace bounds are missing or inverted,
+  because `garmin_workout.py` would otherwise send it to the watch with no pace
+  guard.
+- `apply_suggestion(suggestion_id)` — applies one of the app's own suggestions. The server
+  re-derives the list and refuses a stale id. It also **takes sessions off the
+  watch**: a suggestion that changes a session's day type, distance or paces
+  makes the watch's step list stale, and re-pushing would send the old steps
+  (`_garmin_push` uploads only `w.structure`, the title and the date). Those
+  sessions come off and the tool says which, rather than the watch holding a
+  session that no longer matches the plan. This was chosen over leaving the
+  watch stale, which is what the endpoint did before.
+- `apply_calibration()` — re-aims the remaining easy, long and strides days at
+  the measured easy pace and re-pushes them. The preview is read-only and
+  appears in `get_plan_status`, so the athlete sees the change before agreeing.
+- `create_plan(weeks, target_time_sec, start_date, replace_active)` — builds a new plan. Refuses while one is active
+  unless `replace_active=True`, for the reason above.
 
 **Verifying after a deploy:**
 ```bash
