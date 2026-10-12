@@ -614,4 +614,53 @@ async def test_get_plan_status_reports_an_active_plan(monkeypatch):
 
     assert "30:00" in out
     assert "Easy run" in out
-    assert "Week 1" in out
+    # The label changed from "Week 1:" to name what the list is. Which of the
+    # two labels shows depends on the weekday this runs on (Monday's session
+    # is upcoming on a Monday, past otherwise), so only the week is pinned.
+    assert "week 1" in out
+
+
+@pytest.mark.asyncio
+async def test_plan_status_does_not_promise_tools_that_do_not_exist(monkeypatch):
+    """The docstring and no-plan text named five unbuilt write tools.
+
+    A model reading them will offer to move workouts and push them to the
+    watch, then fail — the write tools are a separate plan, not yet built.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "psnotools")
+
+    out = await mcp_server.get_plan_status()
+    doc = mcp_server.get_plan_status.__doc__ or ""
+
+    for name in ("move_workout", "push_workout", "set_workout_note",
+                 "apply_suggestion", "create_plan"):
+        assert name not in out, f"{name} does not exist but the output names it"
+        assert name not in doc, f"{name} does not exist but the docstring names it"
+
+
+@pytest.mark.asyncio
+async def test_get_plan_status_reports_a_guidance_failure_as_one(monkeypatch):
+    main, mcp_server, database = await _app(monkeypatch, "psguid")
+    from models import Plan, PlannedWorkout
+
+    now = datetime.utcnow()
+    monday = now - timedelta(days=now.weekday())
+    async with database.async_session() as s:
+        s.add(Plan(id=1, goal_type="5k", goal_distance_m=5000.0, target_time_sec=1800,
+                   start_date=monday, goal_date=monday + timedelta(weeks=12),
+                   weeks=12, status="active", created_at=now))
+        s.add(PlannedWorkout(id=1, plan_id=1, date=monday + timedelta(days=6),
+                             week_number=1, day_type="easy", target_distance_m=3000.0,
+                             pace_low_sec=435, pace_high_sec=450, hr_ceiling=160,
+                             title="Easy run", description="x"))
+        await s.commit()
+
+    async def boom(**kw):
+        raise ValueError()
+
+    monkeypatch.setattr(main, "today_guidance", boom)
+
+    out = await mcp_server.get_plan_status()
+
+    assert "Could not read today's guidance: ValueError" in out
+    assert "Easy run" in out, "the rest of the plan must survive the failure"

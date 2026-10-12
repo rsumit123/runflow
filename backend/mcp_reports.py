@@ -35,6 +35,11 @@ MAX_PAUSE_LINES = 20
 # forget it.
 MAX_ERROR_CHARS = 200
 
+# Below this many due sessions (or graded easy runs) a percentage or an alarm
+# is noise: one ordinary rest day three days into a plan would otherwise
+# render as "0%", identically to 0 of 20.
+MIN_ADHERENCE_SAMPLE = 3   # one week of sessions
+
 
 def _pace(sec_per_km: Optional[float]) -> str:
     if not sec_per_km:
@@ -208,16 +213,16 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
 def plan_status(plan: Optional[dict[str, Any]], workouts: list[dict[str, Any]],
                 summary: dict[str, Any], guidance: Optional[dict[str, Any]],
                 suggestions: list[dict[str, Any]],
-                today: Optional[Any] = None) -> str:
+                today: Optional[Any] = None,
+                guidance_error: Optional[str] = None) -> str:
     """Where the plan is, what today holds, and what the server thinks should change.
 
     One answer rather than four round trips, because "where am I and what is
-    today" is a single question. Suggestion ids are printed because applying one
-    later requires passing its id back.
+    today" is a single question. Suggestion ids are printed so they can be
+    quoted back to the athlete; this connector cannot apply them yet.
     """
     if plan is None:
-        return ("No active plan. Create one with create_plan once a target and "
-                "a start date have been agreed.")
+        return "No active plan."
 
     lines: list[str] = []
     target = plan.get("target_time_sec")
@@ -226,30 +231,57 @@ def plan_status(plan: Optional[dict[str, Any]], workouts: list[dict[str, Any]],
     lines.append(f"Plan {plan.get('id')} — {plan.get('goal_type')} target {tgt}"
                  f" over {plan.get('weeks')} weeks")
     if goal_date:
-        lines.append(f"  starts {plan['start_date']:%Y-%m-%d}"
-                     f" · goal date {goal_date:%Y-%m-%d}")
+        start = plan.get("start_date")
+        lines.append((f"  starts {start:%Y-%m-%d} · " if start else "  ")
+                     + f"goal date {goal_date:%Y-%m-%d}")
     if summary:
-        # Keys per plan_adherence.match_and_grade: done / missed / planned_past
-        # / easy_graded / easy_run_hard / adherence_pct.
-        lines.append(f"  adherence: {summary.get('done', 0)} done, "
-                     f"{summary.get('missed', 0)} missed of "
-                     f"{summary.get('planned_past', 0)} due"
-                     + (f" ({summary['adherence_pct']}%)"
-                        if summary.get("adherence_pct") is not None else ""))
-        if summary.get("easy_run_hard"):
-            lines.append(f"  WARNING: {summary['easy_run_hard']} of "
-                         f"{summary.get('easy_graded', 0)} easy runs were run hard")
+        # Keys per plan_adherence.match_and_grade: done / done_past / missed /
+        # planned_past / easy_graded / easy_run_hard / adherence_pct.
+        # done_past, not done, sits beside the percentage: done includes
+        # sessions run ahead of their date, which are not among "due".
+        due = summary.get("planned_past", 0)
+        done_past = summary.get("done_past", summary.get("done", 0))
+        if due:
+            pct = summary.get("adherence_pct")
+            tail = (f" ({pct}%)" if pct is not None and due >= MIN_ADHERENCE_SAMPLE
+                    else " (too early for a percentage)")
+            lines.append(f"  adherence: {done_past} done, "
+                         f"{summary.get('missed', 0)} missed of {due} due{tail}")
+        else:
+            lines.append("  adherence: no sessions due yet")
+        ahead = summary.get("done", 0) - done_past
+        if ahead > 0:
+            lines.append(f"  {ahead} more run ahead of schedule")
+        hard = summary.get("easy_run_hard") or 0
+        if hard:
+            graded = summary.get("easy_graded", 0)
+            if graded >= MIN_ADHERENCE_SAMPLE:
+                lines.append(f"  WARNING: {hard} of {graded} easy runs were run hard")
+            else:
+                lines.append(f"  {hard} of {graded} easy runs "
+                             f"{'was' if hard == 1 else 'were'} run hard")
 
     day = today.date() if today is not None else None
     current_week = None
+    upcoming: list[dict[str, Any]] = []
     if day is not None:
         upcoming = [w for w in workouts if w.get("date") and w["date"].date() >= day]
         current_week = (upcoming[0].get("week_number") if upcoming
                         else (workouts[-1].get("week_number") if workouts else None))
 
-    if current_week is not None:
+    if not workouts:
         lines.append("")
-        lines.append(f"Week {current_week}:")
+        lines.append("No sessions are scheduled in this plan yet.")
+    elif current_week is not None:
+        lines.append("")
+        # The week of the next session due, which on a Sunday is next week —
+        # so it is labelled by what it is, not as "the current week".
+        if upcoming:
+            lines.append(f"Sessions in week {current_week} "
+                         "(the week of the next session due):")
+        else:
+            lines.append("No sessions remain; "
+                         f"last scheduled week (week {current_week}):")
         for w in [x for x in workouts if x.get("week_number") == current_week]:
             marks = []
             if w.get("garmin_workout_id"):
@@ -273,11 +305,16 @@ def plan_status(plan: Optional[dict[str, Any]], workouts: list[dict[str, Any]],
         rec = guidance["recommendation"]
         lines.append(f"Today: {rec.get('action')} — {rec.get('reason')}")
     else:
-        lines.append("Today: no guidance available.")
+        if guidance_error is not None:
+            # Guard on absence, not truthiness: an empty message is still a failure.
+            lines.append("Could not read today's guidance: "
+                         f"{guidance_error[:MAX_ERROR_CHARS] or 'unknown error'}")
+        else:
+            lines.append("Today: no guidance available.")
 
     lines.append("")
     if suggestions:
-        lines.append("Outstanding suggestions (apply with apply_suggestion):")
+        lines.append("Outstanding suggestions:")
         for s in suggestions:
             lines.append(f"  {s.get('id')} — {s.get('title')}"
                          + (f": {s['detail']}" if s.get("detail") else ""))

@@ -297,3 +297,106 @@ def test_plan_status_says_so_with_no_active_plan():
     out = mr.plan_status(None, [], {}, None, [], today=datetime(2026, 10, 22))
 
     assert "no active plan" in out.lower()
+
+
+def _plan14():
+    return {"id": 14, "goal_type": "5k", "target_time_sec": 1800, "weeks": 12,
+            "start_date": datetime(2026, 10, 19), "goal_date": datetime(2027, 1, 9)}
+
+
+def _wk(i, day, week, **over):
+    w = {"id": i, "date": day, "week_number": week, "day_type": "easy",
+         "title": "Easy run", "target_distance_m": 3000.0, "pace_low_sec": 435,
+         "pace_high_sec": 450, "hr_ceiling": 160, "garmin_workout_id": None,
+         "status": "upcoming", "compliance": None, "actual": None}
+    w.update(over)
+    return w
+
+
+def test_plan_status_withholds_the_percentage_on_a_tiny_sample():
+    """Three days in, "0 done, 1 missed of 1 due (0%)" read as a crisis."""
+    s = {"done": 0, "done_past": 0, "missed": 1, "planned_past": 1,
+         "easy_run_hard": 0, "easy_graded": 0, "adherence_pct": 0}
+
+    out = mr.plan_status(_plan14(), [_wk(1, datetime(2026, 10, 22), 1)], s, None, [],
+                         today=datetime(2026, 10, 21))
+
+    assert "adherence: 0 done, 1 missed of 1 due (too early for a percentage)" in out
+    assert "%" not in out
+
+
+def test_plan_status_keeps_the_percentage_with_enough_sessions_and_a_consistent_pair():
+    """done=3 includes one run ahead of its date; the line must use done_past."""
+    s = {"done": 3, "done_past": 2, "missed": 1, "planned_past": 3,
+         "easy_run_hard": 0, "easy_graded": 2, "adherence_pct": 67}
+
+    out = mr.plan_status(_plan14(), [_wk(1, datetime(2026, 10, 22), 1)], s, None, [],
+                         today=datetime(2026, 10, 21))
+
+    assert "adherence: 2 done, 1 missed of 3 due (67%)" in out
+
+
+def test_plan_status_hard_easy_runs_alarm_only_on_a_real_sample():
+    base = {"done": 3, "done_past": 3, "missed": 0, "planned_past": 3,
+            "adherence_pct": 100}
+    one = mr.plan_status(_plan14(), [], {**base, "easy_run_hard": 1, "easy_graded": 1},
+                         None, [], today=datetime(2026, 10, 21))
+    three = mr.plan_status(_plan14(), [], {**base, "easy_run_hard": 2, "easy_graded": 3},
+                           None, [], today=datetime(2026, 10, 21))
+
+    assert "1 of 1 easy runs was run hard" in one
+    assert "WARNING" not in one
+    assert "WARNING: 2 of 3 easy runs were run hard" in three
+
+
+def test_plan_status_says_when_guidance_could_not_be_read():
+    """A failed lookup is not the same fact as nothing to say."""
+    args = (_plan14(), [], {}, None, [])
+    failed = mr.plan_status(*args, today=datetime(2026, 10, 21), guidance_error="boom")
+    empty = mr.plan_status(*args, today=datetime(2026, 10, 21), guidance_error="")
+    huge = mr.plan_status(*args, today=datetime(2026, 10, 21), guidance_error="x" * 5000)
+    none = mr.plan_status(*args, today=datetime(2026, 10, 21))
+
+    assert "Could not read today's guidance: boom" in failed
+    assert "no guidance available" not in failed
+    assert "Could not read today's guidance: unknown error" in empty, \
+        "an empty message is still a failure"
+    assert "x" * (mr.MAX_ERROR_CHARS + 1) not in huge
+    assert "x" * mr.MAX_ERROR_CHARS in huge
+    assert "Today: no guidance available." in none
+
+
+def test_plan_status_says_so_when_the_plan_has_no_workouts_or_start_date():
+    plan = _plan14()
+    del plan["start_date"]
+
+    out = mr.plan_status(plan, [], {}, None, [], today=datetime(2026, 10, 21))
+
+    assert "No sessions are scheduled in this plan yet." in out
+
+
+def test_plan_status_labels_the_list_by_what_it_is_on_a_sunday():
+    """On Sunday the next session is Monday of week 2; calling that week the
+    current week was wrong."""
+    wos = [_wk(1, datetime(2026, 10, 24), 1, status="done"),
+           _wk(2, datetime(2026, 10, 26), 2)]
+
+    sunday = mr.plan_status(_plan14(), wos, {}, None, [], today=datetime(2026, 10, 25))
+    finished = mr.plan_status(_plan14(), wos, {}, None, [], today=datetime(2026, 12, 1))
+
+    assert "Sessions in week 2 (the week of the next session due):" in sunday
+    assert "Week 2:" not in sunday
+    assert "No sessions remain; last scheduled week (week 2):" in finished
+
+
+def test_plan_status_suggestion_text_names_no_unbuilt_tool():
+    """The suggestions header said "apply with apply_suggestion", a tool that
+    does not exist; the no-plan path never reaches that header."""
+    sugg = [{"id": "cap_long_2", "title": "Cap it", "detail": "d"}]
+
+    out = mr.plan_status(_plan14(), [], {}, None, sugg, today=datetime(2026, 10, 21))
+
+    assert "cap_long_2" in out
+    for name in ("apply_suggestion", "move_workout", "push_workout",
+                 "set_workout_note", "create_plan"):
+        assert name not in out

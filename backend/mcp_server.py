@@ -1041,7 +1041,7 @@ async def get_training_block(start: str, end: str, by: str = "month") -> str:
 
 
 async def _plan_state(session) -> tuple:
-    """Plan, graded workouts, adherence summary, today's guidance, suggestions.
+    """Plan, graded workouts, adherence summary, guidance, suggestions, guidance error.
 
     Indirection so tests can substitute the whole bundle, and so the lazy
     `main` import stays in one place. Guidance and suggestions are each
@@ -1050,7 +1050,7 @@ async def _plan_state(session) -> tuple:
     import main as _main
     plan = await _main._active_plan(session)
     if plan is None:
-        return None, [], {}, None, []
+        return None, [], {}, None, [], None
 
     plan_row = {
         "id": plan.id, "goal_type": plan.goal_type,
@@ -1063,10 +1063,12 @@ async def _plan_state(session) -> tuple:
                                         plan.start_date)
 
     guidance = None
+    guidance_error = None
     try:
         guidance = await _main.today_guidance(refresh=False, session=session)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception("today_guidance failed inside get_plan_status")
+        guidance_error = (str(exc) or exc.__class__.__name__)[:200]
 
     suggestions = []
     try:
@@ -1074,7 +1076,7 @@ async def _plan_state(session) -> tuple:
     except Exception:  # noqa: BLE001
         logger.exception("plan suggestions failed inside get_plan_status")
 
-    return plan_row, graded["workouts"], graded["summary"], guidance, suggestions
+    return plan_row, graded["workouts"], graded["summary"], guidance, suggestions, guidance_error
 
 
 @mcp.tool()
@@ -1088,14 +1090,18 @@ async def get_plan_status() -> str:
     have been completed, today's guidance given readiness and heat, and any
     outstanding suggestions the server has derived from measured adherence.
 
-    The workout ids in the week listing are what move_workout, push_workout and
-    set_workout_note take. The suggestion ids are what apply_suggestion takes.
+    Each session is listed with its id in brackets. Those ids are stable and
+    are what a future write tool will take; there is no write tool for plans
+    in this connector yet, so report them to the athlete rather than offering
+    to act on them.
     """
     try:
         async with async_session() as session:
-            plan, workouts, summary, guidance, suggestions = await _plan_state(session)
+            (plan, workouts, summary, guidance, suggestions,
+             guidance_error) = await _plan_state(session)
             return mr.plan_status(plan, workouts, summary, guidance, suggestions,
-                                  today=datetime.utcnow())
+                                  today=datetime.utcnow(),
+                                  guidance_error=guidance_error)
     except Exception as exc:  # noqa: BLE001
         logger.exception("get_plan_status failed")
         return f"Could not read the plan: {exc}"
