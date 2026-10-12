@@ -415,15 +415,17 @@ def test_monthly_buckets_counts_two_runs_on_one_day_as_one_day_run():
 
 def test_monthly_buckets_median_pace_resists_one_slow_outlier():
     from datetime import datetime
-    # Three runs at 400 s/km and one at 900 s/km over the same distance.
+    # Paces of 380, 400, 420 and 900 s/km over the same distance. An even
+    # count, so this also pins median_high rather than an averaged median,
+    # which would report 410.
     rows = [{"start_date": datetime(2026, 3, d), "distance": 5000.0,
-             "moving_time": sec, "z5": None}
-            for d, sec in [(1, 2000), (2, 2000), (3, 2000), (4, 4500)]]
+             "moving_time": p * 5, "z5": None}
+            for d, p in [(1, 380), (2, 400), (3, 420), (4, 900)]]
 
     months = mv.monthly_buckets(rows)
 
-    assert months[0]["median_pace_sec_per_km"] == 400
-    assert months[0]["pace_sec_per_km"] > 400, "the mean is dragged by the outlier"
+    assert months[0]["median_pace_sec_per_km"] == 420
+    assert months[0]["pace_sec_per_km"] > 420, "the mean is dragged by the outlier"
 
 
 def test_monthly_buckets_z5_share_is_time_weighted():
@@ -443,3 +445,79 @@ def test_monthly_buckets_handles_no_runs_and_missing_dates():
     assert mv.monthly_buckets([]) == []
     assert mv.monthly_buckets([{"start_date": None, "distance": 5000.0,
                                 "moving_time": 2000, "z5": None}]) == []
+
+
+def test_monthly_buckets_z5_ignores_runs_with_no_hr_data():
+    """A null Z5 in the denominator makes partial HR coverage read low."""
+    from datetime import datetime
+    rows = [
+        {"start_date": datetime(2026, 3, 1), "distance": 5000.0, "moving_time": 1000, "z5": 20.0},
+        {"start_date": datetime(2026, 3, 2), "distance": 5000.0, "moving_time": 1000, "z5": None},
+    ]
+
+    assert mv.monthly_buckets(rows)[0]["z5_pct"] == 20.0
+
+
+def test_monthly_buckets_z5_is_none_when_no_run_has_hr_data():
+    """2021 has no HR at all; reporting 0.0% would read as a measured zero."""
+    from datetime import datetime
+    rows = [{"start_date": datetime(2021, 4, d), "distance": 5000.0,
+             "moving_time": 2000, "z5": None} for d in (16, 17)]
+
+    assert mv.monthly_buckets(rows)[0]["z5_pct"] is None
+
+
+def test_monthly_buckets_z5_zero_is_kept_as_a_measured_zero():
+    from datetime import datetime
+    rows = [{"start_date": datetime(2026, 3, 1), "distance": 5000.0,
+             "moving_time": 1000, "z5": 0.0}]
+
+    assert mv.monthly_buckets(rows)[0]["z5_pct"] == 0.0
+
+
+def test_monthly_buckets_mean_pace_skips_runs_it_cannot_measure():
+    """A null distance or time used to produce an impossible mean pace."""
+    from datetime import datetime
+    no_distance = [
+        {"start_date": datetime(2026, 3, 1), "distance": 10000.0, "moving_time": 4100, "z5": None},
+        {"start_date": datetime(2026, 3, 2), "distance": None, "moving_time": 3600, "z5": None},
+    ]
+    no_time = [
+        {"start_date": datetime(2026, 3, 1), "distance": 10000.0, "moving_time": 4100, "z5": None},
+        {"start_date": datetime(2026, 3, 2), "distance": 10000.0, "moving_time": None, "z5": None},
+    ]
+
+    a = mv.monthly_buckets(no_distance)[0]
+    b = mv.monthly_buckets(no_time)[0]
+
+    assert a["pace_sec_per_km"] == 410, "the unmeasurable run must not drag the mean"
+    assert b["pace_sec_per_km"] == 410, "a null time must not imply a 3:25/km month"
+    # Volume still counts every run, which is why the populations differ.
+    assert b["km"] == 20.0
+    assert b["runs"] == 2
+
+
+def test_monthly_buckets_sorts_oldest_first_from_unordered_input():
+    """The existing grouping test feeds chronological rows, so it cannot prove this."""
+    from datetime import datetime
+    rows = [
+        {"start_date": datetime(2021, 5, 2), "distance": 5100.0, "moving_time": 2148, "z5": None},
+        {"start_date": datetime(2021, 4, 16), "distance": 5030.0, "moving_time": 2073, "z5": None},
+    ]
+
+    months = mv.monthly_buckets(rows)
+
+    assert [(m["year"], m["month"]) for m in months] == [(2021, 4), (2021, 5)]
+
+
+def test_monthly_buckets_returns_every_documented_key():
+    """Later tasks render these keys, so the whole contract is pinned here."""
+    from datetime import datetime
+    rows = [{"start_date": datetime(2026, 3, 1), "distance": 5000.0,
+             "moving_time": 2000, "z5": 12.0}]
+
+    m = mv.monthly_buckets(rows)[0]
+
+    assert m == {"year": 2026, "month": 3, "runs": 1, "days_run": 1,
+                 "km": 5.0, "minutes": 33, "pace_sec_per_km": 400,
+                 "median_pace_sec_per_km": 400, "z5_pct": 12.0}

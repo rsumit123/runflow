@@ -10,6 +10,7 @@ window on data and buries the three numbers that answer the question.
 """
 from __future__ import annotations
 
+import statistics
 from typing import Any, Optional
 
 # A gap longer than this with no distance gained is the watch auto-pausing,
@@ -388,6 +389,16 @@ def monthly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     block felt like day to day. `days_run` is separate from `runs` because
     thirty runs across twenty-five days is a different block from thirty
     across thirty.
+
+    `km` and `minutes` count every run; both paces count only runs that have
+    both a distance and a moving time, so the two populations can differ.
+    `z5_pct` is None when no run in the month carried HR zones — a month with
+    no HR data is not a month with no Zone 5.
+
+    Buckets use the stored UTC wall-clock. For a +05:30 athlete a run started
+    before 05:30 local lands in the previous day, and at a month boundary in
+    the previous month. Fixing that needs a local-time column, not a change
+    here; `weekly_buckets` has the same property at ISO-week boundaries.
     """
     if not rows:
         return []
@@ -399,6 +410,7 @@ def monthly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = (d.year, d.month)
         b = buckets.setdefault(key, {
             "runs": 0, "metres": 0.0, "seconds": 0, "z5_weighted": 0.0,
+            "z5_seconds": 0, "pace_metres": 0.0, "pace_seconds": 0,
             "days": set(), "paces": [],
         })
         metres = r.get("distance") or 0.0
@@ -406,16 +418,22 @@ def monthly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         b["runs"] += 1
         b["metres"] += metres
         b["seconds"] += secs
-        b["z5_weighted"] += (r.get("z5") or 0.0) * secs
+        z5 = r.get("z5")
+        if z5 is not None:
+            b["z5_weighted"] += z5 * secs
+            b["z5_seconds"] += secs
         b["days"].add(d.date())
         if metres > 0 and secs > 0:
             b["paces"].append(secs / (metres / 1000.0))
+            b["pace_metres"] += metres
+            b["pace_seconds"] += secs
 
     out = []
     for (year, month), b in sorted(buckets.items()):
         km = b["metres"] / 1000.0
-        paces = sorted(b["paces"])
-        median = paces[len(paces) // 2] if paces else None
+        # median_high, not an average of the two middle values: on an even,
+        # bimodal month the average is a pace nobody actually ran.
+        median = statistics.median_high(b["paces"]) if b["paces"] else None
         out.append({
             "year": year,
             "month": month,
@@ -423,8 +441,9 @@ def monthly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "days_run": len(b["days"]),
             "km": round(km, 2),
             "minutes": round(b["seconds"] / 60.0),
-            "pace_sec_per_km": round(b["seconds"] / km) if km else None,
-            "median_pace_sec_per_km": round(median) if median else None,
-            "z5_pct": round(b["z5_weighted"] / b["seconds"], 1) if b["seconds"] else None,
+            "pace_sec_per_km": (round(b["pace_seconds"] / (b["pace_metres"] / 1000.0))
+                                if b["pace_metres"] > 0 else None),
+            "median_pace_sec_per_km": round(median) if median is not None else None,
+            "z5_pct": round(b["z5_weighted"] / b["z5_seconds"], 1) if b["z5_seconds"] else None,
         })
     return out
