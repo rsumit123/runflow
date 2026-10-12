@@ -3726,6 +3726,32 @@ async def sync_plan_to_watch(session: AsyncSession = Depends(get_session)):
     return {"pushed": pushed, "failed": failed, "total_failed": len(failed)}
 
 
+@app.patch("/api/plan/workout/{workout_id}/note")
+async def set_planned_workout_note(workout_id: int, req: NoteRequest,
+                                   session: AsyncSession = Depends(get_session)):
+    """Replace a planned workout's description with the athlete's own text.
+
+    The generator's easy-run description recommends walk breaks, which is wrong
+    for an athlete whose start-stop running causes next-day pain, and nothing
+    else can edit it. An empty string clears it. Over-long text is rejected,
+    never truncated, so a rejected note changes nothing.
+    """
+    w = await session.get(PlannedWorkout, workout_id)
+    if w is None:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    text = (req.note or "").strip()
+    if len(text) > config.NOTE_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Note too long ({len(text)} chars, max {config.NOTE_MAX_CHARS})",
+        )
+    # No _garmin_push here: the description is text for the athlete; the watch
+    # carries steps and paces, so a text edit must not risk a Garmin failure.
+    w.description = text or None
+    await session.commit()
+    return {"id": workout_id, "description": w.description}
+
+
 @app.post("/api/plan/workout/{workout_id}/push")
 async def push_workout_to_garmin(workout_id: int,
                                  session: AsyncSession = Depends(get_session)):
