@@ -71,4 +71,83 @@ async def test_review_run_clamps_an_absurd_window(monkeypatch):
     out = await mcp_server.review_run(run_id=1, window_sec=1)
 
     assert "hr profile" in out.lower()
-    assert len(out) < 25_200
+    assert "10 s windows" in out, (
+        "window_sec=1 must clamp to the 10 s floor; unclamped the composer "
+        "widens it to 8 s on its own, which is why the old length assertion "
+        "passed with the clamp removed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_review_run_shows_the_planned_session_it_matched(monkeypatch):
+    """The match path was never exercised, so a wrong key would go unnoticed.
+
+    match_and_grade puts the matched run under `actual`, keyed activity_id —
+    not under `matched_activity.id`, which an earlier draft of this plan
+    claimed. Nothing proved which one was right until this test.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "rrplan")
+    from models import Activity, Plan, PlannedWorkout
+    from datetime import datetime, timedelta
+
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        plan = Plan(goal_type="5k", goal_distance_m=5000, target_time_sec=1800,
+                    start_date=now - timedelta(days=14),
+                    goal_date=now + timedelta(days=70),
+                    weeks=12, status="active", created_at=now)
+        s.add(plan)
+        await s.flush()
+        s.add(PlannedWorkout(plan_id=plan.id, date=now - timedelta(days=1),
+                             week_number=2, day_type="long",
+                             target_distance_m=5000, hr_ceiling=165,
+                             pace_low_sec=435, pace_high_sec=450,
+                             title="Long run", description="x"))
+        s.add(Activity(id=700, name="Track run", distance=5000.0,
+                       moving_time=2200, elapsed_time=2202,
+                       start_date=now - timedelta(days=1),
+                       average_speed=5000.0 / 2200, average_heartrate=180.0,
+                       max_heartrate=190.0))
+        await s.commit()
+
+    out = await mcp_server.review_run(run_id=700)
+
+    assert "No planned session matched" not in out, (
+        "the run should have matched the planned long run"
+    )
+    assert "Long run" in out
+    assert "Planned:" in out
+
+
+@pytest.mark.asyncio
+async def test_review_run_says_so_when_it_cannot_check_the_plan(monkeypatch):
+    """A failed check used to render as 'No planned session matched this run.'
+
+    That tells the athlete nothing was planned on a day something was, which is
+    a wrong answer stated confidently rather than a missing one.
+    """
+    main, mcp_server, database = await _app(monkeypatch, "rrerr")
+    from models import Activity
+    from datetime import datetime, timedelta
+
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        s.add(Activity(id=701, name="Run", distance=5000.0, moving_time=2200,
+                       elapsed_time=2202, start_date=now - timedelta(days=1),
+                       average_speed=5000.0 / 2200, average_heartrate=180.0,
+                       max_heartrate=190.0))
+        await s.commit()
+
+    async def broken(session, run_id):
+        raise RuntimeError("plan table is wedged")
+    monkeypatch.setattr(mcp_server, "_planned_for", broken)
+
+    out = await mcp_server.review_run(run_id=701)
+
+    assert "Could not check this run against the plan" in out
+    assert "plan table is wedged" in out
+    assert "No planned session matched" not in out, (
+        "a failed check must not be reported as an absence of planned work"
+    )
+    # The run's own data must still be there — a plan problem cannot deny it.
+    assert "5.0 km" in out

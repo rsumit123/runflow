@@ -48,7 +48,8 @@ def _dur(secs: Optional[float]) -> str:
 
 def run_review(run: dict[str, Any], streams: dict[str, list],
                 planned: Optional[dict[str, Any]] = None,
-                window_sec: int = 60) -> str:
+                window_sec: int = 60,
+                planned_error: Optional[str] = None) -> str:
     """One run, in the depth a coaching conversation needs.
 
     Order matters here: the headline numbers first, then whether the run was
@@ -56,6 +57,10 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
     more important than the pace — then splits, then how HR behaved, then the
     context the sensors cannot supply, and last how it compared to what was
     planned.
+
+    `planned_error` distinguishes "no session matched" from "the adherence
+    lookup failed": reporting a failed check as an absence of planned work
+    tells the athlete something false on a day they did have a session.
     """
     km = (run.get("distance") or 0.0) / 1000.0
     moving = run.get("moving_time") or 0
@@ -171,7 +176,10 @@ def run_review(run: dict[str, Any], streams: dict[str, list],
 
     lines.append("")
     if planned is None:
-        lines.append("No planned session matched this run.")
+        if planned_error:
+            lines.append(f"Could not check this run against the plan: {planned_error}")
+        else:
+            lines.append("No planned session matched this run.")
     else:
         lines.append(f"Planned: {planned.get('title') or planned.get('day_type')} "
                      f"({planned.get('day_type')})")

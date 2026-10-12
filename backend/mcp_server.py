@@ -830,12 +830,15 @@ async def review_run(run_id: int, window_sec: int = 60) -> str:
                 "dew_point_c": a.dew_point_c, "notes": a.notes,
             }
             streams = await _streams_for(session, run_id)
+            planned = None
+            planned_error = None
             try:
                 planned = await _planned_for(session, run_id)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 logger.exception("adherence lookup failed for run %s", run_id)
-                planned = None
-            return mr.run_review(run, streams, planned=planned, window_sec=window_sec)
+                planned_error = str(exc)
+            return mr.run_review(run, streams, planned=planned,
+                                 window_sec=window_sec, planned_error=planned_error)
     except Exception as exc:  # noqa: BLE001
         logger.exception("review_run failed")
         return f"Could not review run {run_id}: {exc}"
