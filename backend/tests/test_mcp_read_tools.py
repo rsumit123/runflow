@@ -212,3 +212,98 @@ def test_run_review_treats_an_empty_error_as_a_failure_not_an_absence():
 
     assert "Could not check this run against the plan" in out
     assert "No planned session matched" not in out
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_reports_the_load_ratio_with_its_meaning(monkeypatch):
+    """The raw ACWR number means nothing without the threshold beside it."""
+    main, mcp_server, database = await _app(monkeypatch, "fmt")
+    from models import Activity
+
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        # One recent big week against a quiet month: a deliberately high ratio.
+        s.add(Activity(id=1, name="Long", distance=6000.0, moving_time=2775,
+                       start_date=now - timedelta(days=1),
+                       average_speed=6000.0 / 2775, average_heartrate=181.0,
+                       max_heartrate=194.0))
+        for i in range(3):
+            s.add(Activity(id=10 + i, name="Short", distance=2500.0, moving_time=1090,
+                           start_date=now - timedelta(days=20 + 3 * i),
+                           average_speed=2500.0 / 1090, average_heartrate=176.0,
+                           max_heartrate=187.0))
+        await s.commit()
+
+    out = await mcp_server.get_fitness_model()
+
+    assert "easy" in out.lower()
+    assert "acwr" in out.lower() or "load ratio" in out.lower()
+    assert "1.5" in out, "the risk threshold has to appear next to the number"
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_flags_a_stale_easy_pace(monkeypatch):
+    """measured_stale means the band is a fallback, not a measurement."""
+    main, mcp_server, database = await _app(monkeypatch, "fmt2")
+    from models import Activity
+
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        for i in range(5):
+            s.add(Activity(id=20 + i, name="Hard", distance=3000.0, moving_time=1300,
+                           start_date=now - timedelta(days=4 * i),
+                           average_speed=3000.0 / 1300, average_heartrate=186.0,
+                           max_heartrate=205.0))
+        await s.commit()
+
+    out = await mcp_server.get_fitness_model()
+
+    assert "ESTIMATE, not measured" in out
+    assert "7:30" in out and "floor clamp" in out
+    assert "/km/km" not in out
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_sparse_data_does_not_crash(monkeypatch):
+    """No runs at all: every optional field is None; ACWR must say so."""
+    main, mcp_server, database = await _app(monkeypatch, "fmt3")
+    out = await mcp_server.get_fitness_model()
+    assert "not enough history" in out
+    assert "—" in out
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_thin_baseline_is_not_called_a_spike(monkeypatch):
+    """A rebuild block has a tiny chronic load; a big ratio there is not a spike."""
+    main, mcp_server, database = await _app(monkeypatch, "fmt4")
+    from models import Activity
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        s.add(Activity(id=1, name="Run", distance=3000.0, moving_time=1300,
+                       start_date=now - timedelta(days=1), average_speed=3000.0 / 1300,
+                       average_heartrate=150.0, max_heartrate=190.0))
+        await s.commit()
+    out = await mcp_server.get_fitness_model()
+    assert "thin baseline" in out
+    assert "do not add" not in out
+
+
+@pytest.mark.asyncio
+async def test_get_fitness_model_real_spike_says_hold_volume(monkeypatch):
+    """With a real baseline (>=5 km/week) a ratio over 1.5 is a genuine spike."""
+    main, mcp_server, database = await _app(monkeypatch, "fmt5")
+    from models import Activity
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        s.add(Activity(id=1, name="Big", distance=20000.0, moving_time=7000,
+                       start_date=now - timedelta(days=1), average_speed=20000.0 / 7000,
+                       average_heartrate=150.0, max_heartrate=190.0))
+        for i in range(3):
+            s.add(Activity(id=10 + i, name="Base", distance=5000.0, moving_time=1800,
+                           start_date=now - timedelta(days=10 + 5 * i),
+                           average_speed=5000.0 / 1800, average_heartrate=150.0,
+                           max_heartrate=190.0))
+        await s.commit()
+    out = await mcp_server.get_fitness_model()
+    assert "ABOVE the 1.5 risk threshold" in out and "do not add" in out
+    assert "thin baseline" not in out

@@ -41,6 +41,7 @@ from typing import Optional
 
 from sqlalchemy import select
 
+import fitness_model as fm
 import mcp_reports as mr
 import mcp_views as mv
 from database import async_session
@@ -845,3 +846,81 @@ async def review_run(run_id: int, window_sec: int = 60) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception("review_run failed")
         return f"Could not review run {run_id}: {exc}"
+
+
+ACWR_RISK_THRESHOLD = 1.5
+THIN_BASELINE_KM = 5.0  # mirrors build_warnings: below this the ratio is a comeback artefact
+
+
+async def _fitness_model(session) -> dict:
+    """Indirection so tests can substitute the model build."""
+    import main as _main
+    dicts = await _main._plan_activity_dicts(session)
+    return _main.fmodel.build_fitness_model(dicts, datetime.utcnow())
+
+
+@mcp.tool()
+async def get_fitness_model() -> str:
+    """The numbers every training decision should be sized from.
+
+    Call this before recommending any change in volume or intensity, and before
+    interpreting an "easy" run that came out hard.
+
+    Two fields decide most arguments. `easy_pace_method` says whether the easy
+    pace band was measured from recent easy running or is a stale fallback — a
+    stale band is not evidence about the athlete. And the acute:chronic load
+    ratio compares the last 7 days against the 28-day average: above roughly
+    1.5 is the conventional injury-risk threshold, so a high ratio means the
+    honest recommendation is to hold volume flat however motivated the athlete
+    sounds.
+    """
+    try:
+        async with async_session() as session:
+            m = await _fitness_model(session)
+            acwr = m.get("acwr")
+            chronic = m.get("chronic_load_28d_km")
+            thin = chronic is not None and chronic < THIN_BASELINE_KM
+            if acwr is None:
+                verdict = "not enough history to judge"
+            elif thin:
+                verdict = (f"thin baseline (chronic load under {THIN_BASELINE_KM:g} "
+                           f"km/week): the {ACWR_RISK_THRESHOLD} risk threshold does not apply yet; "
+                           "the ratio is inflated by design, a comeback ramp and not a spike — keep weekly increases to 10% or less")
+            elif acwr > ACWR_RISK_THRESHOLD:
+                verdict = (f"ABOVE the {ACWR_RISK_THRESHOLD} risk threshold — "
+                           "hold volume flat, do not add")
+            else:
+                verdict = f"within the {ACWR_RISK_THRESHOLD} risk threshold"
+            method = m.get("easy_pace_method")
+            pace = m.get("easy_pace_sec")
+            if method == "estimate":
+                kind = "ESTIMATE, not measured — no recent easy-HR runs to measure from"
+                if pace is not None and pace >= fm.EASY_PACE_FLOOR_SEC:
+                    kind += f"; this is the {_fmt_pace(fm.EASY_PACE_FLOOR_SEC)} floor clamp"
+            elif method == "measured_stale":
+                kind = "measured but STALE — adjusted for detraining since the last easy runs"
+            elif method == "measured":
+                kind = "measured from recent easy-HR runs"
+            else:
+                kind = f"{method} — no usable easy pace"
+            lines = [
+                "Fitness model",
+                f"  max HR: {mv.num(m.get('athlete_max_hr'))}"
+                f"   easy HR ceiling: {mv.num(m.get('easy_hr_ceiling'))}",
+                f"  easy pace: {_fmt_pace(pace)}  ({kind})",
+                f"  threshold pace: {_fmt_pace(m.get('threshold_pace_sec'))}",
+                "",
+                f"  28-day volume: {mv.num(m.get('weekly_volume_28d_km'))} km/week",
+                f"  longest run, 28d: {mv.num(m.get('longest_run_28d_km'))} km"
+                f"   90d: {mv.num(m.get('longest_run_90d_km'))} km",
+                f"  acute load (7d): {mv.num(m.get('acute_load_7d_km'))} km"
+                f"   chronic (28d avg): {mv.num(m.get('chronic_load_28d_km'))} km",
+                f"  ACWR: {mv.num(acwr, 2)} — {verdict}",
+                "",
+                f"  runs on record: {m.get('total_runs')}"
+                f"   with HR data: {m.get('hr_coverage')}",
+            ]
+            return mv.cap_text("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_fitness_model failed")
+        return f"Could not read the fitness model: {exc}"
