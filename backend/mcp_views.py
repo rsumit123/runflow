@@ -378,3 +378,53 @@ def weekly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "z5_pct": round(b["z5_weighted"] / b["seconds"], 1) if b["seconds"] else None,
         })
     return out
+
+
+def monthly_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group runs into calendar months, oldest first.
+
+    Carries two paces deliberately. Over a week the mean is honest; over a
+    month one long slow run drags it, and the median is closer to what the
+    block felt like day to day. `days_run` is separate from `runs` because
+    thirty runs across twenty-five days is a different block from thirty
+    across thirty.
+    """
+    if not rows:
+        return []
+    buckets: dict[tuple[int, int], dict[str, Any]] = {}
+    for r in rows:
+        d = r.get("start_date")
+        if d is None:
+            continue
+        key = (d.year, d.month)
+        b = buckets.setdefault(key, {
+            "runs": 0, "metres": 0.0, "seconds": 0, "z5_weighted": 0.0,
+            "days": set(), "paces": [],
+        })
+        metres = r.get("distance") or 0.0
+        secs = r.get("moving_time") or 0
+        b["runs"] += 1
+        b["metres"] += metres
+        b["seconds"] += secs
+        b["z5_weighted"] += (r.get("z5") or 0.0) * secs
+        b["days"].add(d.date())
+        if metres > 0 and secs > 0:
+            b["paces"].append(secs / (metres / 1000.0))
+
+    out = []
+    for (year, month), b in sorted(buckets.items()):
+        km = b["metres"] / 1000.0
+        paces = sorted(b["paces"])
+        median = paces[len(paces) // 2] if paces else None
+        out.append({
+            "year": year,
+            "month": month,
+            "runs": b["runs"],
+            "days_run": len(b["days"]),
+            "km": round(km, 2),
+            "minutes": round(b["seconds"] / 60.0),
+            "pace_sec_per_km": round(b["seconds"] / km) if km else None,
+            "median_pace_sec_per_km": round(median) if median else None,
+            "z5_pct": round(b["z5_weighted"] / b["seconds"], 1) if b["seconds"] else None,
+        })
+    return out

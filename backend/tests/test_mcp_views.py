@@ -382,3 +382,64 @@ def test_hr_profile_matches_the_shape_of_a_real_warmup():
     avgs = [r["hr_avg"] for r in rows]
     assert avgs == sorted(avgs), "HR rose every minute of that warmup"
     assert all(420 <= r["pace_sec_per_km"] <= 510 for r in rows)
+
+
+def test_monthly_buckets_group_by_calendar_month():
+    from datetime import datetime
+    rows = [
+        {"start_date": datetime(2021, 4, 16), "distance": 5030.0, "moving_time": 2073, "z5": None},
+        {"start_date": datetime(2021, 4, 17), "distance": 5040.0, "moving_time": 2085, "z5": None},
+        {"start_date": datetime(2021, 5, 2), "distance": 5100.0, "moving_time": 2148, "z5": None},
+    ]
+
+    months = mv.monthly_buckets(rows)
+
+    assert [(m["year"], m["month"]) for m in months] == [(2021, 4), (2021, 5)]
+    assert months[0]["runs"] == 2
+    assert months[0]["days_run"] == 2
+    assert months[0]["km"] == 10.07
+
+
+def test_monthly_buckets_counts_two_runs_on_one_day_as_one_day_run():
+    from datetime import datetime
+    rows = [
+        {"start_date": datetime(2021, 7, 8, 7, 0), "distance": 5260.0, "moving_time": 1843, "z5": None},
+        {"start_date": datetime(2021, 7, 8, 18, 0), "distance": 5330.0, "moving_time": 1839, "z5": None},
+    ]
+
+    months = mv.monthly_buckets(rows)
+
+    assert months[0]["runs"] == 2
+    assert months[0]["days_run"] == 1
+
+
+def test_monthly_buckets_median_pace_resists_one_slow_outlier():
+    from datetime import datetime
+    # Three runs at 400 s/km and one at 900 s/km over the same distance.
+    rows = [{"start_date": datetime(2026, 3, d), "distance": 5000.0,
+             "moving_time": sec, "z5": None}
+            for d, sec in [(1, 2000), (2, 2000), (3, 2000), (4, 4500)]]
+
+    months = mv.monthly_buckets(rows)
+
+    assert months[0]["median_pace_sec_per_km"] == 400
+    assert months[0]["pace_sec_per_km"] > 400, "the mean is dragged by the outlier"
+
+
+def test_monthly_buckets_z5_share_is_time_weighted():
+    from datetime import datetime
+    rows = [
+        {"start_date": datetime(2026, 10, 7), "distance": 3770.0, "moving_time": 1749, "z5": 10.0},
+        {"start_date": datetime(2026, 10, 8), "distance": 3730.0, "moving_time": 1658, "z5": 30.0},
+    ]
+
+    months = mv.monthly_buckets(rows)
+
+    # (10 * 1749 + 30 * 1658) / (1749 + 1658)
+    assert months[0]["z5_pct"] == 19.7
+
+
+def test_monthly_buckets_handles_no_runs_and_missing_dates():
+    assert mv.monthly_buckets([]) == []
+    assert mv.monthly_buckets([{"start_date": None, "distance": 5000.0,
+                                "moving_time": 2000, "z5": None}]) == []
