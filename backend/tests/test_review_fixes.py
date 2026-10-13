@@ -200,3 +200,83 @@ async def test_bg_import_does_not_block_another_users_login(monkeypatch):
         gate.set()
         await task
     assert main.import_progress["j"]["status"] == "completed"
+
+
+async def test_client_for_during_a_refresh_write_returns_the_same_live_client(monkeypatch):
+    """The client's in-memory token runs ahead of the database while on_refresh's
+    write waits; that must not read as a replaced credential."""
+    import httpx
+    await setup_app(monkeypatch, "rv9")
+    import credentials, database, strava_accounts
+    strava_accounts._clients.clear()
+    async with database.async_session() as s:
+        await credentials.put(s, 2, "strava", {"access_token": "AT", "refresh_token": "RT1"})
+        await s.commit()
+    c1 = await strava_accounts.client_for(2)
+
+    def token_endpoint(request):
+        return httpx.Response(200, json={"access_token": "AT2", "refresh_token": "RT2",
+                                         "expires_at": 1})
+    c1._client = httpx.AsyncClient(transport=httpx.MockTransport(token_endpoint))
+
+    entered, gate = asyncio.Event(), asyncio.Event()
+    real_put = credentials.put
+
+    async def slow_put(*a, **k):
+        entered.set()
+        await gate.wait()           # the DB write is stuck behind another writer
+        return await real_put(*a, **k)
+    monkeypatch.setattr(credentials, "put", slow_put)
+
+    refresh = asyncio.create_task(c1.refresh_access_token())
+    await asyncio.wait_for(entered.wait(), 10)
+    assert c1.refresh_token == "RT2"                       # memory is ahead of the DB
+    c_again = await strava_accounts.client_for(2)
+    assert c_again is c1 and not c1._client.is_closed
+    gate.set()
+    await refresh
+    async with database.async_session() as s:
+        cred = await credentials.get(s, 2, "strava")
+    assert cred.data["refresh_token"] == "RT2" and cred.status == "ok"
+    assert await strava_accounts.client_for(2) is c1
+
+
+class FailingStreams:
+    refresh_token = "RT"
+
+    async def get_activity_detail(self, aid):
+        return {"splits_metric": []}
+
+    async def get_activity_streams(self, aid):
+        raise RuntimeError("strava hiccup")
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.parametrize("detailed", [True, False])
+async def test_a_failed_streams_fetch_keeps_existing_streams(monkeypatch, detailed):
+    main, database = await setup_app(monkeypatch, "rv10%s" % detailed)
+    import strava_accounts
+    from datetime import datetime
+    from sqlalchemy import select, func
+    from models import Activity, Stream
+    strava_accounts._clients.clear()
+    strava_accounts._clients[2] = FailingStreams()
+    await _store_strava(database)
+    with tenancy.user_context(2):
+        async with database.async_session() as s:
+            s.add(Activity(id=5001, name="r", sport_type="Run", distance=5000.0,
+                           start_date=datetime(2026, 1, 1), has_detailed_data=detailed))
+            s.add(Stream(activity_id=5001, stream_type="time", data=[0, 1, 2]))
+            await s.commit()
+        async with database.async_session() as s:
+            act = await s.get(Activity, 5001)
+            await main._import_detail_and_streams(s, act)
+            await s.commit()
+        async with database.async_session() as s:
+            n = (await s.execute(select(func.count(Stream.id)).where(
+                Stream.activity_id == 5001))).scalar()
+            act = await s.get(Activity, 5001)
+            assert n == 1
+            assert bool(act.has_detailed_data) is detailed

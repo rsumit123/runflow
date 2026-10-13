@@ -168,6 +168,8 @@ async def client_for(user_id: int | None) -> StravaClient:
                 await credentials.put(s, user_id, "strava", tokens)
                 await s.commit()
                 held["rt"] = tokens.get("refresh_token", held["rt"])
+                # Only now is the new token durable; cache freshness is judged by this.
+                client.persisted_refresh_token = held["rt"]
 
         async def on_invalid() -> None:
             async with database.async_session() as s:
@@ -182,16 +184,20 @@ async def client_for(user_id: int | None) -> StravaClient:
         client = StravaClient(access_token=cred.data.get("access_token", ""),
                               refresh_token=cred.data.get("refresh_token", ""),
                               on_refresh=on_refresh, on_invalid=on_invalid)
+        client.persisted_refresh_token = held["rt"]
         _clients[user_id] = client
         return client
 
 
 async def _still_current(user_id: int, client: StravaClient) -> bool:
-    """True while the stored credential still carries the client's refresh token."""
+    """True while the stored credential still carries the last refresh token this
+    client is known to have persisted (not its in-memory one, which runs ahead of
+    the database for the duration of a refresh's write)."""
     async with database.async_session() as s:
         cred = await credentials.get(s, user_id, "strava")
     return (cred is not None and cred.status == "ok"
-            and cred.data.get("refresh_token") == client.refresh_token)
+            and cred.data.get("refresh_token") == getattr(
+                client, "persisted_refresh_token", client.refresh_token))
 
 
 async def token_revoked(user_id: int) -> bool:

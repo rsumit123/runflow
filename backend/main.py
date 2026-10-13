@@ -524,7 +524,7 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
         streams_resp = await strava.get_activity_streams(act.id)
     except Exception as exc:
         logger.warning("Failed to fetch streams for activity %s: %s", act.id, exc)
-        streams_resp = []
+        streams_resp = None  # failed: leave existing streams and the detail flag alone
 
     # Update fields that may only appear in detail
     act.elev_high = detail.get("elev_high", act.elev_high)
@@ -553,12 +553,13 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
         )
         session.add(split)
 
-    # Remove old streams
-    existing_streams = await session.execute(
-        select(Stream).where(Stream.activity_id == act.id)
-    )
-    for old in existing_streams.scalars().all():
-        await session.delete(old)
+    # Remove old streams (only if we have replacements to write)
+    if streams_resp is not None:
+        existing_streams = await session.execute(
+            select(Stream).where(Stream.activity_id == act.id)
+        )
+        for old in existing_streams.scalars().all():
+            await session.delete(old)
 
     # streams_resp is a list of stream objects from the API
     latlng_data = None
@@ -579,7 +580,8 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
     if latlng_data and not act.map_summary_polyline:
         act.map_summary_polyline = encode_polyline(latlng_data)
 
-    act.has_detailed_data = True
+    if streams_resp is not None:
+        act.has_detailed_data = True  # else a later sync retries
 
     # Auto-compute best efforts from streams
     try:
