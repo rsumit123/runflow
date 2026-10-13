@@ -98,28 +98,58 @@ def _has_table(con, name: str) -> bool:
                        (name,)).fetchone() is not None
 
 
-def _verify_backup(backup_path: str, source_counts: dict) -> None:
-    """An existing backup is only trusted if it is intact and matches the source."""
+def _signature(con) -> dict:
+    """Per tenant table: (row count, a fingerprint of which rows exist).
+
+    The fingerprint is SUM(rowid). The migration keeps every table's rowids, with
+    one exception: daily_wellness is keyed by a text date, so it has no stable
+    integer rowid and the rebuild renumbers it (any gap in the old numbering
+    shifts the sum). For that table the fingerprint is a hash of its dates, which
+    the rebuild preserves. A table that does not exist counts as (0, 0), so the
+    empty tables a finished migration adds do not make a re-run look different.
+    """
+    import hashlib
+    sig = {}
+    for t in TENANT_TABLES:
+        if not _has_table(con, t):
+            continue
+        n = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        if t == "daily_wellness":
+            h = hashlib.sha256()
+            for (d,) in con.execute("SELECT date FROM daily_wellness ORDER BY date"):
+                h.update(str(d).encode() + b"\n")
+            fp = h.hexdigest() if n else 0
+        else:
+            fp = con.execute(f"SELECT COALESCE(SUM(rowid), 0) FROM {t}").fetchone()[0]
+        sig[t] = (n, fp)
+    return sig
+
+
+def _verify_backup(backup_path: str, source_sig: dict) -> None:
+    """An existing backup is only trusted if it is intact, pre-migration, and
+    matches the source."""
+    hint = "move it away or choose another --backup path"
     try:
         con = _ro(backup_path)
         try:
             ok = con.execute("PRAGMA integrity_check").fetchone()[0]
-            counts = _counts(con)
+            migrated = _has_table(con, "users") or (
+                _has_table(con, "activities") and "user_id" in
+                [r[1] for r in con.execute("PRAGMA table_info(activities)")])
+            sig = _signature(con)
         finally:
             con.close()
     except sqlite3.Error as e:
-        raise RuntimeError(f"existing backup {backup_path} is unreadable ({e}); "
-                           "move it away or choose another --backup path") from e
+        raise RuntimeError(f"existing backup {backup_path} is unreadable ({e}); {hint}") from e
     if ok != "ok":
-        raise RuntimeError(f"existing backup {backup_path} fails integrity_check ({ok}); "
-                           "move it away or choose another --backup path")
-    # After a successful run the source gained empty tables the backup predates;
-    # a table missing on one side counts as empty.
-    tables = set(counts) | set(source_counts)
-    if any(counts.get(t, 0) != source_counts.get(t, 0) for t in tables):
-        raise RuntimeError(f"existing backup {backup_path} has row counts {counts}, the "
-                           f"database has {source_counts}; move it away or choose another "
-                           "--backup path")
+        raise RuntimeError(f"existing backup {backup_path} fails integrity_check ({ok}); {hint}")
+    if migrated:
+        raise RuntimeError(f"existing backup {backup_path} was already migrated (it has a "
+                           f"users table or user_id columns), so it is not a pre-migration "
+                           f"backup; {hint}")
+    if any(sig.get(t, (0, 0)) != source_sig.get(t, (0, 0)) for t in set(sig) | set(source_sig)):
+        raise RuntimeError(f"existing backup {backup_path} does not match the database: "
+                           f"row counts or row ids differ; {hint}")
 
 
 def _write_backup(db_path: str, backup_path: str) -> None:
@@ -134,7 +164,53 @@ def _write_backup(db_path: str, backup_path: str) -> None:
     finally:
         dst.close()
         src.close()
+    fd = os.open(tmp, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     os.replace(tmp, backup_path)
+    dfd = os.open(os.path.dirname(os.path.abspath(backup_path)), os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+
+def _journal_header_is_stale(header: bytes) -> bool:
+    """A rollback journal whose first 28 bytes are all zero (or that is empty) is
+    one SQLite ignores: a killed rebuild leaves such a file behind."""
+    return not any(header[:28])
+
+
+def _resolve_journal(db_path: str) -> None:
+    """A hard-killed run can leave `<db>-journal`. Opening the database read-write
+    makes SQLite roll back a hot journal; a zero-header one is stale and stays."""
+    journal = Path(db_path + "-journal")
+    if not journal.exists():
+        return
+    try:
+        con = sqlite3.connect(db_path, timeout=1)
+        try:
+            ok = con.execute("PRAGMA integrity_check").fetchone()[0]
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        raise RuntimeError(f"{journal} exists and the database cannot be opened ({e}); "
+                           "another process may have it open; stop the app") from e
+    if not journal.exists():
+        print(f"recovered an interrupted run: rolled back {journal}")
+        return
+    with open(journal, "rb") as f:
+        header = f.read(28)
+    if not _journal_header_is_stale(header):
+        raise RuntimeError(f"{journal} is live: another process has the database open; "
+                           "stop the app")
+    if ok != "ok":
+        raise RuntimeError(f"{journal} is stale but {db_path} fails integrity_check ({ok}); "
+                           "restore from the backup")
+    journal.unlink()
+    print(f"removed stale journal {journal} (zero header, integrity_check ok)")
 
 
 def preflight(db_path, backup_path, owner_email, *, confirmed, no_strava=False,
@@ -152,7 +228,8 @@ def preflight(db_path, backup_path, owner_email, *, confirmed, no_strava=False,
         raise RuntimeError("the backup path is the database itself")
     if Path(os.path.realpath(backup_path)) == Path(os.path.realpath(db_path)):
         raise RuntimeError("the backup path is the database itself")
-    for suffix in ("-wal", "-shm", "-journal"):
+    _resolve_journal(db_path)
+    for suffix in ("-wal", "-shm"):
         if Path(db_path + suffix).exists():
             raise RuntimeError(f"{db_path}{suffix} exists: stop the app before migrating")
     if str(database.DB_PATH) != db_path:
@@ -162,6 +239,7 @@ def preflight(db_path, backup_path, owner_email, *, confirmed, no_strava=False,
     con = _ro(db_path)
     try:
         before = _counts(con)
+        sig = _signature(con)
         users = (con.execute("SELECT id, email, password_hash FROM users").fetchall()
                  if _has_table(con, "users") else [])
 
@@ -227,7 +305,7 @@ def preflight(db_path, backup_path, owner_email, *, confirmed, no_strava=False,
                                "pass --no-garmin to skip") from e
     if not confirmed:
         raise RuntimeError(f"not confirmed: re-run with --yes to migrate to owner {email}")
-    plan.update(before=before, email=email, at=at, rt=rt, secret=secret, store=store)
+    plan.update(before=before, sig=sig, email=email, at=at, rt=rt, secret=secret, store=store)
     return plan
 
 
@@ -247,7 +325,7 @@ async def migrate(db_path, backup_path, owner_email: str,
     before, email = plan["before"], plan["email"]
 
     if os.path.exists(backup_path):
-        _verify_backup(backup_path, before)
+        _verify_backup(backup_path, plan["sig"])
         print(f"backup already present and verified, left untouched: {backup_path}")
     else:
         _write_backup(db_path, backup_path)

@@ -395,12 +395,102 @@ async def test_unconfirmed_migration_is_refused(monkeypatch):
     assert Path(path).read_bytes() == before
 
 
-async def test_journal_file_blocks_the_migration(monkeypatch):
+async def test_live_journal_blocks_the_migration(monkeypatch):
+    """Another connection mid-write holds the database, so its journal is real
+    (non-zero header) and SQLite cannot roll it back."""
     path = _old_db()
-    Path(path + "-journal").write_bytes(b"x")
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO activities (id, name) VALUES (99, 'in flight')")
+    assert Path(path + "-journal").exists()
+    before = Path(path).read_bytes()
     mm = _prep(monkeypatch, path)
-    with pytest.raises(RuntimeError, match="stop"):
-        await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+    try:
+        with pytest.raises(RuntimeError, match="another process has the database open; stop"):
+            await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+    finally:
+        holder.execute("ROLLBACK"); holder.close()
+    assert Path(path).read_bytes() == before
+    assert not Path(path + ".bak").exists()
+
+
+async def test_stale_zero_header_journal_is_cleared_and_migration_proceeds(monkeypatch):
+    path = _old_db()
+    Path(path + "-journal").write_bytes(bytes(512))
+    mm = _prep(monkeypatch, path)
+    report = await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+    assert report["after"]["activities"] == 2
+    assert not Path(path + "-journal").exists()
+
+
+@pytest.mark.parametrize("header,stale", [(b"", True), (bytes(28), True), (bytes(512), True),
+                                          (b"\xd9\xd5\x05\xf9" + bytes(24), False),
+                                          (bytes(27) + b"\x01", False), (b"x", False)])
+def test_journal_header_classification(header, stale):
+    import migrate_multiuser
+    assert migrate_multiuser._journal_header_is_stale(header) is stale
+
+
+async def test_stale_journal_with_a_damaged_database_aborts(monkeypatch):
+    path = _old_db()
+    Path(path + "-journal").write_bytes(bytes(512))
+    mm = _prep(monkeypatch, path)
+    real = sqlite3.connect
+
+    class Bad:
+        def __init__(self, c): self.c = c
+        def execute(self, sql, *a):
+            if "integrity_check" in sql:
+                class R:
+                    def fetchone(self): return ("row 3 missing",)
+                return R()
+            return self.c.execute(sql, *a)
+        def close(self): self.c.close()
+    monkeypatch.setattr(mm.sqlite3, "connect", lambda *a, **k: Bad(real(*a, **k)))
+    with pytest.raises(RuntimeError, match="integrity_check"):
+        mm._resolve_journal(path)
+    assert Path(path + "-journal").exists()
+
+
+async def test_existing_backup_with_same_counts_but_different_rows_is_rejected(monkeypatch):
+    path = _old_db()
+    bak = path + ".bak"
+    src = sqlite3.connect(path); dst = sqlite3.connect(bak); src.backup(dst)
+    dst.execute("DELETE FROM activities WHERE id = 1")
+    dst.execute("INSERT INTO activities VALUES (77, 'other', 1, '2026-01-01 00:00:00')")
+    dst.commit(); dst.close(); src.close()
+    before = Path(path).read_bytes()
+    mm = _prep(monkeypatch, path)
+    with pytest.raises(RuntimeError, match="does not match"):
+        await mm.migrate(path, bak, "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+
+
+async def test_existing_backup_that_was_already_migrated_is_rejected(monkeypatch):
+    path = _old_db()
+    mm = _prep(monkeypatch, path)
+    await mm.migrate(path, path + ".first.bak", "o@x.co", confirmed=True)
+    migrated_copy = path + ".migrated.bak"
+    src = sqlite3.connect(path); dst = sqlite3.connect(migrated_copy); src.backup(dst)
+    dst.close(); src.close()
+    before = Path(path).read_bytes()
+    with pytest.raises(RuntimeError, match="already migrated"):
+        await mm.migrate(path, migrated_copy, "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+
+
+async def test_rerun_passes_even_when_daily_wellness_rowids_had_gaps(monkeypatch):
+    """The rebuild renumbers daily_wellness rowids; the backup check must not care."""
+    path = _old_db()
+    con = sqlite3.connect(path)
+    con.execute("DELETE FROM daily_wellness WHERE date = '2026-10-01'")
+    con.execute("INSERT INTO daily_wellness VALUES ('2026-10-05', 50, '{}')")
+    con.commit(); con.close()
+    mm = _prep(monkeypatch, path)
+    bak = path + ".bak"
+    first = await mm.migrate(path, bak, "o@x.co", confirmed=True)
+    second = await mm.migrate(path, bak, "o@x.co", confirmed=True)
+    assert second["after"] == first["after"]
 
 
 async def test_typo_in_owner_email_needs_the_fix_flag(monkeypatch):
