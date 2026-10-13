@@ -5,7 +5,7 @@ training plan, but it is exactly the kind of run that needs the watch to hold
 the pace, because the athlete's failure mode is starting too fast.
 """
 import tempfile
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -49,7 +49,7 @@ async def test_pushes_an_adhoc_workout_and_returns_the_garmin_id(monkeypatch):
         return {"workout_id": 987}
     monkeypatch.setattr(main.garmin, "push_workout", fake_push)
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
     res = await main.push_adhoc_workout(main.AdhocWorkoutRequest(
         name="5K test", date=tomorrow, steps=_steps()
     ))
@@ -65,7 +65,7 @@ async def test_refuses_a_workout_with_no_steps(monkeypatch):
     main = await _app(monkeypatch, "ab")
     from fastapi import HTTPException
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
     with pytest.raises(HTTPException):
         await main.push_adhoc_workout(main.AdhocWorkoutRequest(
             name="Empty", date=tomorrow, steps=[]
@@ -78,7 +78,7 @@ async def test_refuses_a_date_in_the_past(monkeypatch):
     main = await _app(monkeypatch, "ac")
     from fastapi import HTTPException
 
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
     with pytest.raises(HTTPException):
         await main.push_adhoc_workout(main.AdhocWorkoutRequest(
             name="Past", date=yesterday, steps=_steps()
@@ -94,7 +94,7 @@ async def test_surfaces_a_garmin_failure_as_502(monkeypatch):
         raise RuntimeError("no garmin token")
     monkeypatch.setattr(main.garmin, "push_workout", broken)
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
     with pytest.raises(HTTPException) as exc:
         await main.push_adhoc_workout(main.AdhocWorkoutRequest(
             name="5K test", date=tomorrow, steps=_steps()
