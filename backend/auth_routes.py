@@ -78,6 +78,10 @@ class AuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        # Lifespan (and any future scope type) has no path: pass it through
+        # before touching one, or startup never runs.
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
         # Judge the path the router will see: uvicorn puts root_path into
         # scope["path"], Starlette routes on the path with it stripped.
         route_path = get_route_path(scope)

@@ -176,3 +176,57 @@ async def test_a_database_error_while_resolving_the_session_is_a_503(monkeypatch
     async with client(main, "anything") as c:
         r = await c.get("/api/activities")
     assert r.status_code == 503 and r.json() == {"detail": "Service temporarily unavailable"}
+
+
+async def test_the_lifespan_scope_passes_straight_through_the_middleware():
+    """Lifespan has no "path". Reading it raised KeyError, uvicorn then decided
+    lifespan was unsupported and served without running startup at all."""
+    import auth_routes
+    seen = []
+
+    async def inner(scope, receive, send):
+        seen.append(scope)
+
+    scope = {"type": "lifespan", "asgi": {"version": "3.0"}}
+    await auth_routes.AuthMiddleware(inner)(scope, None, None)
+    assert seen == [scope]
+
+
+async def test_the_apps_own_lifespan_runs_and_starts_the_mcp_manager(monkeypatch):
+    """Runs main.app's REAL lifespan (TestClient drives startup and shutdown) and
+    calls an MCP tool without entering session_manager.run() by hand: that only
+    works if the app's own lifespan started the manager."""
+    import asyncio
+    import json
+    import socket
+    from starlette.testclient import TestClient
+
+    def refuse(*a, **k):
+        raise OSError("network disabled in tests")
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+
+    main, database = await setup_app(monkeypatch, "r14")
+
+    async def no_pass():
+        return None
+    monkeypatch.setattr(main, "_auto_sync_pass", no_pass)
+
+    import connector
+    async with database.async_session() as s:
+        token = await connector.rotate(s, 1)
+        await s.commit()
+
+    def run():
+        with TestClient(main.app, base_url="http://localhost") as c:  # startup raises on failure
+            r = c.post(f"/mcp/{token}/mcp", headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"},
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                      "params": {"name": "list_recent_runs", "arguments": {}}})
+            return r.status_code, r.text
+
+    status, text = await asyncio.to_thread(run)
+    assert status == 200, text
+    payload = next((l[5:].strip() for l in text.splitlines() if l.startswith("data:")), text)
+    assert "result" in json.loads(payload), text
