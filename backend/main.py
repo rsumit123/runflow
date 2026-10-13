@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,11 +16,13 @@ from sqlalchemy.orm import selectinload
 
 import auth_routes
 import config
+import credentials
+import strava_accounts
 import tenancy
 from database import init_db, get_session, async_session
 from models import (Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal, Plan,
                     PlannedWorkout, DailyWellness, ChatMessage)
-from strava_client import StravaClient, STREAM_TYPES
+from strava_client import STREAM_TYPES
 from bulk_import import import_from_export, encode_polyline
 from best_efforts import compute_and_store_best_efforts, compute_all_best_efforts, TARGET_DISTANCES
 from goals import recommend_speed_goal, recommend_consistency_goal, recommend_volume_goal
@@ -59,7 +61,21 @@ logger = logging.getLogger(__name__)
 # Lifespan
 # ---------------------------------------------------------------------------
 
-strava = StravaClient()
+class _CurrentUserStrava:
+    """`strava.method(...)` calls the Strava client of the user in context.
+
+    Keeps the existing call sites unchanged while each now acts for whoever
+    is making the request.
+    """
+
+    def __getattr__(self, name):
+        async def call(*args, **kwargs):
+            c = await strava_accounts.client_for(tenancy.current_user_id())
+            return await getattr(c, name)(*args, **kwargs)
+        return call
+
+
+strava = _CurrentUserStrava()
 
 # In-memory progress tracking for long-running imports
 # key: job_id (str), value: dict with status, imported, total, etc.
@@ -117,7 +133,7 @@ async def lifespan(app: FastAPI):
     async with mcp_server.mcp.session_manager.run():
         yield
     task.cancel()
-    await strava.close()
+    await strava_accounts.close_all()
 
 
 app = FastAPI(title="RunFlow", lifespan=lifespan)
@@ -138,6 +154,12 @@ app.add_middleware(
 )
 
 app.include_router(auth_routes.router)
+
+
+@app.exception_handler(strava_accounts.StravaNotConnected)
+async def _strava_not_connected(request, exc):
+    return JSONResponse(status_code=409,
+                        content={"detail": "Strava is not connected. Connect it in Settings."})
 
 
 @app.exception_handler(tenancy.NoUserContext)
@@ -2166,6 +2188,46 @@ async def delete_goal(goal_id: int, session: AsyncSession = Depends(get_session)
 
 
 # ---------------------------------------------------------------------------
+# Strava connection (per user)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/strava/connect")
+async def strava_connect():
+    """Send the logged-in user to Strava to grant access."""
+    return RedirectResponse(strava_accounts.authorize_url(tenancy.current_user_id()),
+                            status_code=302)
+
+
+@app.get("/api/strava/callback")
+async def strava_callback(code: str | None = None, state: str | None = None,
+                          error: str | None = None):
+    """Strava's redirect. Public: the user comes from the signed state, not a cookie."""
+    back = f"{config.FRONTEND_URL}/settings"
+    uid = strava_accounts.verify_state(state or "")
+    if uid is None:
+        return RedirectResponse(f"{back}?strava=error&reason=state", status_code=302)
+    if error or not code:
+        return RedirectResponse(f"{back}?strava=error&reason=denied", status_code=302)
+    try:
+        data = await strava_accounts.exchange_code(code)
+    except strava_accounts.StravaConnectError as exc:
+        return RedirectResponse(f"{back}?strava=error&reason={exc.reason}", status_code=302)
+    try:
+        await strava_accounts.save_tokens(uid, data)
+    except credentials.AlreadyLinked:
+        # One Strava athlete maps to one RunFlow user, or webhooks are ambiguous.
+        return RedirectResponse(f"{back}?strava=error&reason=already_linked",
+                                status_code=302)
+    return RedirectResponse(f"{back}?strava=connected", status_code=302)
+
+
+@app.post("/api/strava/disconnect")
+async def strava_disconnect():
+    await strava_accounts.disconnect(tenancy.current_user_id())
+    return {"strava": None}
+
+
+# ---------------------------------------------------------------------------
 # Strava Webhook
 # ---------------------------------------------------------------------------
 
@@ -2199,6 +2261,16 @@ async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
 
     logger.info("Webhook received: type=%s, aspect=%s, id=%s", object_type, aspect_type, activity_id)
 
+    owner_id = body.get("owner_id")
+    if (object_type == "athlete" and aspect_type == "update"
+            and str((body.get("updates") or {}).get("authorized")).lower() == "false"):
+        async with async_session() as s:
+            uid = await credentials.user_for_external(s, "strava", owner_id)
+        if uid is not None:
+            await strava_accounts.forget(uid)
+            logger.info("Strava deauthorized for user %s", uid)
+        return {"status": "ok"}
+
     # Only process activity creates/updates
     if object_type != "activity" or aspect_type not in ("create", "update"):
         return {"status": "ok"}
@@ -2206,35 +2278,42 @@ async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
     if not activity_id:
         return {"status": "ok"}
 
-    # Process in background
-    background_tasks.add_task(_webhook_import_activity, activity_id)
+    async with async_session() as s:
+        uid = await credentials.user_for_external(s, "strava", owner_id)
+    if uid is None:
+        logger.info("Webhook: no user for Strava athlete %s; ignored", owner_id)
+        return {"status": "ok"}
+
+    # Process in background, as that user
+    background_tasks.add_task(_webhook_import_activity, activity_id, uid)
 
     return {"status": "ok"}
 
 
-async def _webhook_import_activity(activity_id: int):
+async def _webhook_import_activity(activity_id: int, user_id: int):
     """Background task: fetch and import a single activity from webhook."""
-    import asyncio
-    # Wait a bit for Strava to finish processing streams
-    await asyncio.sleep(30)
-    try:
-        async with async_session() as session:
-            # Fetch activity from Strava API
-            act_data = await strava.get_activity_detail(activity_id)
+    with tenancy.user_context(user_id):
+        import asyncio
+        # Wait a bit for Strava to finish processing streams
+        await asyncio.sleep(30)
+        try:
+            async with async_session() as session:
+                # Fetch activity from Strava API
+                act_data = await strava.get_activity_detail(activity_id)
 
-            sport = act_data.get("sport_type") or act_data.get("type") or ""
-            if not _is_running(sport):
-                logger.info("Webhook: skipping non-running activity %s (type=%s)", activity_id, sport)
-                return
+                sport = act_data.get("sport_type") or act_data.get("type") or ""
+                if not _is_running(sport):
+                    logger.info("Webhook: skipping non-running activity %s (type=%s)", activity_id, sport)
+                    return
 
-            # Upsert activity
-            act = await _upsert_activity_summary(session, act_data)
-            await _import_detail_and_streams(session, act)
-            await session.commit()
+                # Upsert activity
+                act = await _upsert_activity_summary(session, act_data)
+                await _import_detail_and_streams(session, act)
+                await session.commit()
 
-            logger.info("Webhook: imported activity %s (%s)", activity_id, act.name)
-    except Exception as exc:
-        logger.error("Webhook: failed to import activity %s: %s", activity_id, exc)
+                logger.info("Webhook: imported activity %s (%s)", activity_id, act.name)
+        except Exception as exc:
+            logger.error("Webhook: failed to import activity %s: %s", activity_id, exc)
 
 
 @app.get("/api/phases")
@@ -2688,6 +2767,8 @@ async def import_by_date(req: DateImportRequest, session: AsyncSession = Depends
             activities = await strava.get_activities(
                 page=page, per_page=per_page, after=after_epoch, before=before_epoch
             )
+        except strava_accounts.StravaNotConnected:
+            raise
         except Exception as exc:
             logger.error("Error fetching activities page %d: %s", page, exc)
             break
@@ -2741,6 +2822,8 @@ async def import_all(background_tasks: BackgroundTasks):
     Bulk import: fetch ALL running activities from Strava API.
     Runs as a background task — returns a job_id to poll for progress.
     """
+    # Fail with a clear 409 now rather than inside the background job.
+    await strava_accounts.client_for(tenancy.current_user_id())
     job_id = str(uuid.uuid4())
     import_progress[job_id] = {
         "user_id": tenancy.current_user_id(),
@@ -2774,6 +2857,8 @@ async def import_sync(session: AsyncSession = Depends(get_session)):
     while True:
         try:
             activities = await strava.get_activities(page=page, per_page=per_page)
+        except strava_accounts.StravaNotConnected:
+            raise
         except Exception as exc:
             logger.error("Error fetching activities page %d: %s", page, exc)
             break

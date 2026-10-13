@@ -231,7 +231,11 @@ VOLATILE: dict[str, tuple[str, str]] = {}
 
 # GET routes user A cannot get a 2xx from, with the reason. A stale entry (the
 # route now answers 2xx) fails the test, so this list can only shrink.
-UNREACHABLE: dict[str, str] = {}
+UNREACHABLE: dict[str, str] = {
+    "/api/strava/connect":
+        "Always answers 302 to strava.com, never 2xx: it is a redirect into the OAuth "
+        "flow. It reads no rows; the signed state it builds carries only the caller's id.",
+}
 
 # GET routes whose answer is identical for A and B even though A has data B lacks,
 # so "B's answer is unchanged by A" cannot detect a leak there. Each needs a reason.

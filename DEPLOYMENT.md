@@ -162,17 +162,16 @@ Required in `/opt/runflow/.env`:
 ```
 strava_client_id=<your_client_id>
 strava_client_secret=<your_client_secret>
-strava_access_token=<auto_refreshed>
-strava_refresh_token=<auto_refreshed>
+STRAVA_REDIRECT_URI=https://runflow-api.skdev.one/api/strava/callback
 ```
 
-Tokens are auto-refreshed by the app when they expire.
+Each user connects their own Strava in Settings. Their tokens are stored encrypted in the database and refreshed there; nothing is written to `.env`.
 
 ## Strava OAuth Callback
 
 The OAuth callback URL configured in the Strava API app must match:
-- **Local dev**: `http://localhost:8000/api/auth/callback`
-- **Production**: `https://runflow-api.skdev.one/api/auth/callback`
+- **Local dev**: `http://localhost:8000/api/strava/callback`
+- **Production**: `https://runflow-api.skdev.one/api/strava/callback`
 
 Update the Strava API app settings at `https://www.strava.com/settings/api` if needed.
 

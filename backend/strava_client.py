@@ -14,13 +14,17 @@ STREAM_TYPES = ["latlng", "altitude", "distance", "time", "velocity_smooth"]
 class StravaClient:
     """Async Strava API client with automatic token refresh and rate-limit handling."""
 
-    def __init__(self) -> None:
-        self.access_token: str = config.STRAVA_ACCESS_TOKEN
-        self.refresh_token: str = config.STRAVA_REFRESH_TOKEN
+    def __init__(self, access_token: str = "", refresh_token: str = "",
+                 on_refresh=None) -> None:
+        self.access_token: str = access_token
+        self.refresh_token: str = refresh_token
         self.client_id: str = config.STRAVA_CLIENT_ID
         self.client_secret: str = config.STRAVA_CLIENT_SECRET
         self.base_url: str = config.STRAVA_API_BASE
         self._client: httpx.AsyncClient | None = None
+        # Called with {access_token, refresh_token, expires_at} after a refresh,
+        # so the owning user's stored credentials stay current.
+        self._on_refresh = on_refresh
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -53,8 +57,10 @@ class StravaClient:
         data = resp.json()
         self.access_token = data["access_token"]
         self.refresh_token = data["refresh_token"]
-        # Persist new tokens to .env and in-memory config
-        config.update_env_tokens(self.access_token, self.refresh_token)
+        if self._on_refresh is not None:
+            await self._on_refresh({"access_token": self.access_token,
+                                    "refresh_token": self.refresh_token,
+                                    "expires_at": data.get("expires_at")})
         logger.info("Strava access token refreshed successfully.")
         return self.access_token
 
