@@ -123,10 +123,11 @@ Auto-renews via Certbot's systemd timer.
 # SSH into VM
 gcloud compute ssh socialflow --project=polar-pillar-450607-b7 --zone=us-east1-d --tunnel-through-iap
 
-# Pull latest code
-cd /opt/runflow && git pull
+# Get the latest code (see the note below: not `git pull`)
+cd /opt/runflow && git fetch origin && git reset --hard origin/main
 
-# Rebuild and restart
+# Keep the running image as a rollback target, then rebuild and restart
+sudo docker tag runflow-backend:latest runflow-backend:previous
 cd backend
 sudo docker build -t runflow-backend .
 sudo docker rm -f runflow-backend
@@ -140,6 +141,12 @@ sudo docker run -d \
   -e DB_PATH=/data/training.db \
   runflow-backend
 ```
+
+The `/opt/runflow` clone on the VM holds history from before the repository was
+rewritten, so `git pull` fails or tries to merge unrelated histories. Always use
+`git fetch origin && git reset --hard origin/<branch>`. `data/` and `.env*` are
+gitignored and are left alone. Publish on `127.0.0.1:8020`, never `8020`, as in
+Docker Setup.
 
 ### Frontend Update
 
@@ -224,58 +231,174 @@ inviting people.
 ## Multi-user migration (one-time)
 
 Moves the existing single-athlete database to accounts. All current data is assigned
-to the owner, `rsumit123@gmail.com`. Do this once, in this order. It touches the only
-copy of the data, so keep the backup it writes.
+to the owner, `rsumit123@gmail.com`. It touches the only copy of the data and costs a
+few minutes of downtime, so do it in this order and stop if any check fails.
 
-1. **Strava settings.** Set Authorization Callback Domain to `runflow-api.skdev.one`
-   (above). Note the Athlete Capacity, and your Strava athlete id (the number in your
-   profile URL).
-2. **Back up `.env`**, then add the new variables from the section above. Keep the old
-   `strava_access_token`, `strava_refresh_token` and `MCP_SECRET` in it for now:
-   the migration reads them once.
-3. **Build the new image** (see Backend Update) but do not start it.
-4. **Stop the old container:** `sudo docker stop runflow-backend`.
-5. **Run the migration** in the new image with `/data` mounted:
-   ```bash
-   sudo docker run --rm \
-     -v /opt/runflow/.env:/app/.env -v /opt/runflow/data:/data \
-     -e ENV_PATH=/app/.env -e DB_PATH=/data/training.db \
-     runflow-backend python migrate_multiuser.py \
-       --backup /data/training.pre-multiuser.db \
-       --owner-email rsumit123@gmail.com \
-       --strava-athlete-id <athlete_id> --yes
-   ```
-   It copies the database to `--backup` first and never touches that copy, preflights
-   every input, and exits non-zero if any table's row count changes. The preflight
-   must report Strava, Garmin and the connector as `found, will move`. It is safe to
-   run again: a re-run changes nothing. Check the printed count table against the
-   counts before you started.
-   - `--yes` is required; without it the migration only preflights and stops.
-   - `--no-strava`, `--no-garmin`, `--no-connector` skip a source you do not have.
-   - `--fix-owner-email` corrects the owner's email if it was created with a typo.
-6. **Keep connector tokens out of nginx logs.** The token is in the URL path. Back up
-   `/etc/nginx/sites-available/runflow-api.skdev.one`, then add a `location /mcp/`
-   block with `access_log off;` and the same `proxy_*` directives as `location /`.
-   Then `sudo nginx -t && sudo systemctl reload nginx`. Check whether the old secret
-   was already logged: `sudo grep -c '/mcp/' /var/log/nginx/access.log*`. If it was,
-   rotate your connector URL from Settings after the deploy.
-7. **Start the new container** with `-p 127.0.0.1:8020:8000` (see Docker Setup).
-   Check `curl -s -o /dev/null -w '%{http_code}\n' https://runflow-api.skdev.one/api/activities`
-   returns `401`, and that the loopback check above fails from outside.
-8. **Set your password** (the owner is created with an unusable password):
-   ```bash
-   gcloud compute ssh socialflow --zone us-east1-d --project polar-pillar-450607-b7 -- -t \
-     sudo docker exec -it runflow-backend python admin.py set-password rsumit123@gmail.com
-   ```
-9. **Frontend:** merge `multi-user` into `main` and push; Vercel deploys it. Check
-   `/` redirects to `/login`, log in, and check the run count matches your baseline.
-10. **Cleanup,** once everything works: remove `strava_access_token`,
-    `strava_refresh_token` and `MCP_SECRET` from the VM `.env`. Keep the
-    pre-migration backup.
+Below, `V` means
+`gcloud compute ssh socialflow --zone us-east1-d --project polar-pillar-450607-b7 --command`,
+and every command on the VM runs with `sudo`. `<id>` and `<...>` are placeholders.
 
-**Rollback:** stop the container; restore `/data/training.pre-multiuser.db` over
-`/data/training.db`; restore `.env` from its backup; run the previous image; promote
-the previous Vercel deployment.
+**0. Prerequisites.**
+- In `https://www.strava.com/settings/api` set **Authorization Callback Domain** to
+  `runflow-api.skdev.one` (domain only, no scheme or path), and note the Athlete
+  Capacity shown there.
+- Agree the deploy window.
+
+**1. Push the branch, not `main`.** Pushing `main` deploys the frontend.
+```bash
+git push -u origin multi-user
+gh workflow run ci.yml --ref multi-user && gh run watch
+```
+CI only runs on `main` and on PRs to `main`, which is why it is triggered by hand.
+Both jobs must be green.
+
+**2. Baseline.** The API is still public before the deploy:
+```bash
+curl -s https://runflow-api.skdev.one/api/fitness-model     # record total_runs
+```
+Also record the active plan's id and status. Find your Strava athlete id (the number
+in your profile URL). If you do not know it, read it from the running app's token:
+`GET https://www.strava.com/api/v3/athlete` with the current access token, keeping
+only `id`.
+
+**3. Backups on the VM.**
+```bash
+cp -a /opt/runflow/.env /opt/runflow/.env.pre-multiuser
+docker tag runflow-backend:latest runflow-backend:pre-multiuser
+cp /etc/nginx/sites-available/runflow-api.skdev.one{,.pre-multiuser}
+```
+The `:pre-multiuser` image is what the rollback runs.
+
+**4. Code on the VM.** `/opt/runflow` is a clone with pre-rewrite history, so
+`git pull` will not work:
+```bash
+cd /opt/runflow && git fetch origin && git reset --hard origin/multi-user && git log -1
+```
+`data/` and `.env*` are gitignored and untouched.
+
+**5. Environment.** Append to `/opt/runflow/.env` (values here are placeholders):
+```
+CREDENTIALS_KEY=<fernet key>
+SESSION_STATE_SECRET=<random string>
+FRONTEND_URL=https://runflow.skdev.one
+PUBLIC_API_URL=https://runflow-api.skdev.one
+STRAVA_REDIRECT_URI=https://runflow-api.skdev.one/api/strava/callback
+STRAVA_SUBSCRIPTION_ID=336241
+```
+Generate the two secrets as shown under Environment Variables. **Copy
+`CREDENTIALS_KEY` somewhere off the VM (a password manager) as soon as it exists.**
+Without it every stored Strava and Garmin token is unreadable. Confirm the
+subscription id with Strava's `push_subscriptions` call first (also shown there).
+Leave `strava_access_token`, `strava_refresh_token` and `MCP_SECRET` in `.env`: the
+migration reads them once.
+
+**6. Build, and test in the built image.**
+```bash
+docker build -t runflow-backend:latest /opt/runflow/backend
+docker run --rm runflow-backend:latest sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q"
+```
+Requirements are pinned, so the image must report the same pass count as CI. This
+catches dependency drift here rather than in production.
+
+**7. Stop, then migrate.** Remove the old container first, or the new one cannot
+take its name:
+```bash
+docker stop runflow-backend && docker rm runflow-backend
+docker run --rm \
+  -v /opt/runflow/.env:/app/.env -v /opt/runflow/data:/data \
+  -e ENV_PATH=/app/.env -e DB_PATH=/data/training.db \
+  runflow-backend:latest python migrate_multiuser.py \
+    --backup /data/training.pre-multiuser.db \
+    --owner-email rsumit123@gmail.com \
+    --strava-athlete-id <id> --yes
+```
+The preflight must report strava, garmin and connector as `found, will move`, and
+all 11 row counts must be unchanged. Stop if they are not. The migration copies the
+database to `--backup` first and never touches that copy, exits non-zero if a count
+changes, and is safe to re-run (a re-run changes nothing).
+- `--yes` is required; without it the migration only preflights and stops.
+- `--no-strava`, `--no-garmin`, `--no-connector` skip a source you do not have.
+- `--fix-owner-email` corrects the owner's email if it was created with a typo.
+
+**8. Start on loopback only.**
+```bash
+docker run -d --name runflow-backend --restart unless-stopped \
+  -p 127.0.0.1:8020:8000 \
+  -v /opt/runflow/.env:/app/.env -v /opt/runflow/data:/data \
+  -e ENV_PATH=/app/.env -e DB_PATH=/data/training.db \
+  runflow-backend:latest
+docker logs runflow-backend
+```
+The log must show `Application startup complete` and
+`StreamableHTTP session manager started`, and must not show
+`lifespan protocol appears unsupported`.
+
+**9. nginx.** In `/etc/nginx/sites-available/runflow-api.skdev.one`:
+- change `proxy_pass http://localhost:8020` to `proxy_pass http://127.0.0.1:8020`;
+- add a block that keeps connector tokens (they are in the URL path) out of the
+  access log, repeating the same `proxy_*` lines as `location /`:
+  ```nginx
+  location /mcp/ {
+      access_log off;
+      proxy_pass http://127.0.0.1:8020;
+      # ...the same proxy_set_header lines as location /
+  }
+  ```
+- `nginx -t && systemctl reload nginx`.
+- Check whether the old secret was already logged: `grep -c '/mcp/' /var/log/nginx/access.log*`.
+  If the count is not zero, rotate your connector URL from Settings after the deploy.
+
+**10. Backend checks.**
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://runflow-api.skdev.one/api/activities   # 401
+curl -m 5 http://34.139.217.34:8020/docs                                                 # must fail
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://runflow-api.skdev.one/mcp/wrong/mcp   # 404
+```
+The old connector URL (`/mcp/<old MCP_SECRET>/mcp`) must answer the `tools/call`
+probe under MCP Connector with 200 and a JSON-RPC result.
+
+**11. Set your password.** The owner is created with an unusable password:
+```bash
+gcloud compute ssh socialflow --zone us-east1-d --project polar-pillar-450607-b7 -- -t \
+  sudo docker exec -it runflow-backend python admin.py set-password rsumit123@gmail.com
+```
+
+**12. Frontend.** Merge `multi-user` into `main` (fast-forward) and push; Vercel
+deploys it. Watch the production build, and if the domain does not move, promote that
+deployment. Check the new bundle is live and points at `runflow-api`, and that `/`
+redirects to `/login`.
+
+**13. End-to-end check, logged in.**
+- The run count matches the baseline from step 2, and the active plan is intact.
+- Settings shows Strava and Garmin as connected (migrated).
+- A Garmin sync works (`POST /api/import/garmin/sync`) and `/api/sync/status` reports
+  no error.
+- The phone connector still answers.
+
+**14. Cleanup, once you are satisfied.** Remove `strava_access_token`,
+`strava_refresh_token` and `MCP_SECRET` from the VM `.env` and restart the container.
+Keep `training.pre-multiuser.db`, `.env.pre-multiuser` and the
+`runflow-backend:pre-multiuser` image for a week.
+
+### Rollback
+
+Valid at any point before step 14:
+```bash
+docker stop runflow-backend && docker rm runflow-backend
+cp /opt/runflow/data/training.pre-multiuser.db /opt/runflow/data/training.db
+cp /opt/runflow/.env.pre-multiuser /opt/runflow/.env
+cp /etc/nginx/sites-available/runflow-api.skdev.one.pre-multiuser \
+   /etc/nginx/sites-available/runflow-api.skdev.one && nginx -t && systemctl reload nginx
+docker run -d --name runflow-backend --restart unless-stopped \
+  -p 127.0.0.1:8020:8000 \
+  -v /opt/runflow/.env:/app/.env -v /opt/runflow/data:/data \
+  -e ENV_PATH=/app/.env -e DB_PATH=/data/training.db \
+  runflow-backend:pre-multiuser
+```
+Then promote the previous Vercel deployment. The VM checkout does not need resetting,
+because the image is self-contained. Keep the loopback bind even on rollback. If the
+new app refreshed Strava or Garmin tokens before the rollback, the old `.env` and
+token directory hold stale ones; reconnect if needed.
 
 ### Admin CLI
 
