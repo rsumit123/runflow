@@ -628,3 +628,30 @@ async def test_live_writer_is_never_touched(monkeypatch):
     assert holder.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert holder.execute("SELECT COUNT(*) FROM activities").fetchone()[0] == 3
     holder.close()
+
+
+async def test_stale_journal_is_removed_while_the_exclusive_lock_is_held(monkeypatch):
+    path = _old_db()
+    Path(path + "-journal").write_bytes(bytes(512))
+    mm = _prep(monkeypatch, path)
+    real = sqlite3.connect
+    seen = {}
+
+    class Spy:
+        def __init__(self, c): self.c = c
+        def execute(self, sql, *a):
+            if sql == "ROLLBACK":  # the lock is still held at this point
+                seen["journal_gone"] = not Path(path + "-journal").exists()
+                other = real(path, timeout=0, isolation_level=None)
+                try:
+                    other.execute("BEGIN IMMEDIATE")
+                    seen["other"] = "got the lock"
+                except sqlite3.OperationalError as e:
+                    seen["other"] = str(e)
+                finally:
+                    other.close()
+            return self.c.execute(sql, *a)
+        def close(self): self.c.close()
+    monkeypatch.setattr(mm.sqlite3, "connect", lambda *a, **k: Spy(real(*a, **k)))
+    mm._resolve_journal(path)
+    assert seen == {"journal_gone": True, "other": "database is locked"}

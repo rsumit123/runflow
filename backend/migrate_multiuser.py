@@ -198,8 +198,15 @@ def _resolve_journal(db_path: str) -> None:
             if "locked" in str(e) or "busy" in str(e):
                 raise RuntimeError(live) from e
             raise
+        removed = False
         try:
             ok = con.execute("PRAGMA integrity_check").fetchone()[0]
+            # Whatever journal survives our EXCLUSIVE lock is stale. Remove it while
+            # still holding the lock, so no other process can start a write and
+            # have its fresh journal deleted.
+            if ok == "ok" and journal.exists():
+                journal.unlink()
+                removed = True
         finally:
             con.execute("ROLLBACK")
     finally:
@@ -207,8 +214,7 @@ def _resolve_journal(db_path: str) -> None:
     if ok != "ok":
         raise RuntimeError(f"{db_path} fails integrity_check ({ok}) after an interrupted "
                            "run; restore from the backup")
-    if journal.exists():
-        journal.unlink()
+    if removed:
         print(f"removed stale journal {journal} (database unlocked, integrity_check ok)")
     else:
         print(f"recovered an interrupted run: rolled back {journal}")
