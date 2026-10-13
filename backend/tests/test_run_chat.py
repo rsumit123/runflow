@@ -79,7 +79,10 @@ async def test_tools_over_real_db(monkeypatch):
     import main
     importlib.reload(main)
 
-    now = datetime(2026, 7, 14, 12, 0, 0)
+    # Anchor to real now, not a literal date: the tools under test cut off at
+    # `datetime.utcnow() - since_days`, so fixtures pinned to a fixed day fall
+    # out of the window as the calendar moves and the test rots.
+    now = datetime.utcnow()
     async with database.async_session() as s:
         a = Activity(id=700, name="Morning Run", distance=5000.0, moving_time=1500,
                      start_date=now - timedelta(days=3), average_heartrate=150.0, max_heartrate=170.0,
