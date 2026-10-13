@@ -8,3 +8,5 @@ gpxpy
 fitdecode
 garminconnect
 mcp
+bcrypt
+cryptography

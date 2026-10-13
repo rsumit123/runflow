@@ -1,0 +1,198 @@
+"""Accounts: passwords, sessions, invites, and a login rate limiter.
+
+Cookie values, invite codes and connector tokens are random and only their
+sha256 is stored, so a copy of the database does not hand out live sessions.
+"""
+from __future__ import annotations
+
+import hashlib
+import secrets
+import time
+from collections import defaultdict, deque
+from datetime import datetime, timedelta
+
+import bcrypt
+from sqlalchemy import select, update, delete
+
+import config
+
+MIN_PASSWORD_LEN = 10
+MAX_PASSWORD_BYTES = 72          # bcrypt's hard limit
+# Not a valid bcrypt string, so nothing ever verifies against it. Used for the
+# migrated owner until a real password is set from the admin CLI.
+UNUSABLE_PASSWORD = "!unusable"
+# Compared against when the email is unknown, so a miss costs the same time
+# as a wrong password and response timing does not reveal who has an account.
+_DUMMY_HASH = bcrypt.hashpw(b"timing-equaliser", bcrypt.gensalt()).decode()
+
+
+class AuthError(Exception):
+    """A user-facing auth failure. The message is safe to return."""
+
+
+def new_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def normalize_email(email: str) -> str:
+    e = (email or "").strip().lower()
+    if "@" not in e or e.startswith("@") or e.endswith("@") or len(e) > 254:
+        raise AuthError("Enter a valid email address.")
+    return e
+
+
+def check_password_policy(password: str) -> None:
+    if len(password or "") < MIN_PASSWORD_LEN:
+        raise AuthError(f"Password must be at least {MIN_PASSWORD_LEN} characters.")
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        raise AuthError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes.")
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw((password or "").encode(), password_hash.encode())
+    except ValueError:  # malformed hash, e.g. UNUSABLE_PASSWORD
+        return False
+
+
+async def create_user(session, email: str, password: str | None,
+                      is_admin: bool = False):
+    """Create a user. password=None gives an unusable hash (set it later)."""
+    from models import User
+    if password is not None:
+        check_password_policy(password)
+    user = User(email=normalize_email(email),
+                password_hash=hash_password(password) if password else UNUSABLE_PASSWORD,
+                is_admin=is_admin, created_at=datetime.utcnow())
+    session.add(user)
+    await session.flush()
+    return user
+
+
+async def get_user_by_email(session, email: str):
+    from models import User
+    return (await session.execute(
+        select(User).where(User.email == normalize_email(email))
+    )).scalar_one_or_none()
+
+
+async def authenticate(session, email: str, password: str):
+    """The user if the password is right, else None. Never says which part failed."""
+    try:
+        user = await get_user_by_email(session, email)
+    except AuthError:
+        user = None
+    if user is None:
+        verify_password(password, _DUMMY_HASH)
+        return None
+    return user if verify_password(password, user.password_hash) else None
+
+
+async def create_session(session, user_id: int) -> str:
+    from models import AuthSession
+    raw = new_token()
+    now = datetime.utcnow()
+    session.add(AuthSession(token_hash=hash_token(raw), user_id=user_id,
+                            created_at=now,
+                            expires_at=now + timedelta(days=config.SESSION_TTL_DAYS)))
+    await session.flush()
+    return raw
+
+
+async def resolve_session(session, raw: str | None) -> int | None:
+    """The user id for a cookie value, or None. Slides the expiry forward daily."""
+    if not raw:
+        return None
+    from models import AuthSession
+    row = await session.get(AuthSession, hash_token(raw))
+    now = datetime.utcnow()
+    if row is None or row.expires_at <= now:
+        return None
+    fresh_expiry = now + timedelta(days=config.SESSION_TTL_DAYS)
+    if fresh_expiry - row.expires_at > timedelta(days=1):
+        row.expires_at = fresh_expiry
+        await session.commit()
+    return row.user_id
+
+
+async def end_session(session, raw: str | None) -> None:
+    if not raw:
+        return
+    from models import AuthSession
+    await session.execute(delete(AuthSession).where(AuthSession.token_hash == hash_token(raw)))
+
+
+async def create_invite(session, created_by: int | None, uses: int = 1,
+                        expires_days: int | None = None) -> str:
+    from models import Invite
+    if uses < 1:
+        raise AuthError("An invite needs at least one use.")
+    raw = new_token()
+    now = datetime.utcnow()
+    session.add(Invite(code_hash=hash_token(raw), created_by=created_by, uses_left=uses,
+                       expires_at=now + timedelta(days=expires_days) if expires_days else None,
+                       created_at=now))
+    await session.flush()
+    return raw
+
+
+async def signup(session, email: str, password: str, invite_code: str):
+    """Create an account against an invite. Atomic with the caller's commit.
+
+    The invite is decremented in the same transaction as the insert, so a
+    failed signup (e.g. duplicate email) rolls the use back.
+    """
+    from models import Invite
+    email = normalize_email(email)
+    check_password_policy(password)
+    if await get_user_by_email(session, email) is not None:
+        raise AuthError("That email is already registered.")
+    now = datetime.utcnow()
+    res = await session.execute(
+        update(Invite)
+        .where(Invite.code_hash == hash_token(invite_code or ""),
+               Invite.uses_left > 0,
+               (Invite.expires_at.is_(None)) | (Invite.expires_at > now))
+        .values(uses_left=Invite.uses_left - 1)
+    )
+    if res.rowcount != 1:
+        raise AuthError("That invite code is not valid.")
+    return await create_user(session, email, password)
+
+
+class LoginRateLimiter:
+    """In-memory failed-login counter. Single process, which is what we run."""
+
+    def __init__(self, per_email: int = 5, per_ip: int = 20,
+                 window_sec: float = 15 * 60, clock=time.monotonic):
+        self.per_email, self.per_ip, self.window = per_email, per_ip, window_sec
+        self.clock = clock
+        self._email: dict[str, deque] = defaultdict(deque)
+        self._ip: dict[str, deque] = defaultdict(deque)
+
+    def _prune(self, q: deque) -> deque:
+        cutoff = self.clock() - self.window
+        while q and q[0] <= cutoff:
+            q.popleft()
+        return q
+
+    def blocked(self, email: str, ip: str) -> bool:
+        key = (email or "").strip().lower()
+        return (len(self._prune(self._email[key])) >= self.per_email
+                or len(self._prune(self._ip[ip])) >= self.per_ip)
+
+    def record_failure(self, email: str, ip: str) -> None:
+        now = self.clock()
+        self._email[(email or "").strip().lower()].append(now)
+        self._ip[ip].append(now)
+
+    def record_success(self, email: str) -> None:
+        self._email.pop((email or "").strip().lower(), None)

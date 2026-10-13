@@ -101,3 +101,17 @@ NOTE_MAX_CHARS = 2000
 # Past this age, a run with no weather-archive row never will have one — stop
 # retrying it. Also bounds how far back the self-healing retry sweeps.
 WEATHER_GIVE_UP_DAYS = 30
+
+# --- Accounts -------------------------------------------------------------
+# Fernet key for provider tokens at rest. Generate with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+CREDENTIALS_KEY = os.getenv("CREDENTIALS_KEY", "").strip()
+# HMAC key for OAuth `state`.
+SESSION_STATE_SECRET = os.getenv("SESSION_STATE_SECRET", "").strip()
+SESSION_COOKIE_NAME = "rf_session"
+SESSION_TTL_DAYS = 30
+# Secure cookies need HTTPS; set to 0 only for local http development.
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") != "0"
+ALLOWED_ORIGINS = ["https://runflow.skdev.one", "http://localhost:3000"]
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "http://localhost:8000").rstrip("/")
