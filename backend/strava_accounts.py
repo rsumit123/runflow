@@ -20,7 +20,6 @@ from strava_client import StravaClient, StravaNotConnected  # noqa: F401 - re-ex
 logger = logging.getLogger(__name__)
 
 STATE_TTL_SEC = 600
-NONCE_COOKIE = "strava_oauth"
 # One client per user, cached in this process. That is only correct with a single
 # uvicorn worker (the Dockerfile CMD runs exactly one): with several, each worker
 # would hold its own copy of a rotating refresh token and they would burn each
@@ -148,20 +147,26 @@ async def client_for(user_id: int | None) -> StravaClient:
         if cred is None or cred.status != "ok":
             raise StravaNotConnected("Strava is not connected")
 
+        # The refresh token this client currently holds. The stored credential is
+        # only touched while it still carries that token: otherwise the user has
+        # disconnected (row gone) or reconnected (new grant), and this client's
+        # tokens belong to a grant that no longer exists.
+        held = {"rt": cred.data.get("refresh_token", "")}
+
         async def on_refresh(tokens: dict) -> None:
-            # Update only. If the user disconnected while the request was in
-            # flight, the row is gone and these tokens are dropped, not resurrected.
             async with database.async_session() as s:
-                if await credentials.get(s, user_id, "strava") is None:
+                stored = await credentials.get(s, user_id, "strava")
+                if stored is None or stored.data.get("refresh_token") != held["rt"]:
                     return
                 await credentials.put(s, user_id, "strava", tokens)
                 await s.commit()
+                held["rt"] = tokens.get("refresh_token", held["rt"])
 
         async def on_invalid() -> None:
             async with database.async_session() as s:
                 stored = await credentials.get(s, user_id, "strava")
                 # Only if it is still this grant: a reconnect may have replaced it.
-                if stored is not None and stored.data.get("refresh_token") == client.refresh_token:
+                if stored is not None and stored.data.get("refresh_token") == held["rt"]:
                     await credentials.set_status(s, user_id, "strava", "needs_reconnect")
                     await s.commit()
             if _clients.get(user_id) is client:

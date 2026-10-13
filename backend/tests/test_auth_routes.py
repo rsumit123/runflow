@@ -131,7 +131,9 @@ async def test_duplicate_session_cookies_cannot_outlive_logout(monkeypatch):
     must end every session the header names."""
     main, database = await setup_app(monkeypatch, "r11")
     valid = await session_cookie(database, 1)
-    dup = {"Cookie": f"rf_session={valid}; rf_session=junk"}
+    import config
+    n = config.SESSION_COOKIE_NAME
+    dup = {"Cookie": f"{n}={valid}; {n}=junk"}
     async with client(main) as c:
         assert (await c.post("/api/auth/logout", headers=dup)).status_code == 200
     async with client(main, valid) as c:
@@ -143,7 +145,7 @@ async def test_duplicate_session_cookies_cannot_outlive_logout(monkeypatch):
 async def test_websocket_scopes_under_api_are_closed(monkeypatch):
     main, database = await setup_app(monkeypatch, "r12")
     valid = await session_cookie(database, 1)
-    for headers in ([], [(b"cookie", f"rf_session={valid}".encode())]):
+    for headers in ([], [(b"cookie", f"{__import__('config').SESSION_COOKIE_NAME}={valid}".encode())]):
         scope = {"type": "websocket", "path": "/api/anything", "raw_path": b"/api/anything",
                  "root_path": "", "scheme": "wss", "query_string": b"", "headers": headers,
                  "subprotocols": [], "server": ("test", 443), "client": ("1.2.3.4", 1)}

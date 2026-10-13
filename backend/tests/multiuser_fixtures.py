@@ -182,7 +182,8 @@ def client(main, cookie: str | None = None, origin="https://runflow.skdev.one",
            root_path: str = ""):
     headers = {"Origin": origin}
     if cookie:
-        headers["Cookie"] = f"rf_session={cookie}"
+        import config
+        headers["Cookie"] = f"{config.SESSION_COOKIE_NAME}={cookie}"
     # raise_app_exceptions=False: a route that crashes must show up as a 500
     # response the sweep can inspect, not abort the whole sweep.
     transport = httpx.ASGITransport(app=main.app, raise_app_exceptions=False,

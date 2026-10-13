@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -2202,9 +2203,9 @@ async def strava_connect():
     nonce = strava_accounts.new_nonce()
     resp = RedirectResponse(strava_accounts.authorize_url(tenancy.current_user_id(), nonce),
                             status_code=302)
-    resp.set_cookie(strava_accounts.NONCE_COOKIE, nonce, max_age=strava_accounts.STATE_TTL_SEC,
+    resp.set_cookie(config.STRAVA_OAUTH_COOKIE_NAME, nonce, max_age=strava_accounts.STATE_TTL_SEC,
                     httponly=True, secure=config.SESSION_COOKIE_SECURE, samesite="lax",
-                    path="/api/strava")
+                    path="/")
     return resp
 
 
@@ -2218,7 +2219,7 @@ async def strava_callback(request: Request, code: str | None = None,
 
     def done(query: str) -> RedirectResponse:
         resp = RedirectResponse(f"{back}?{query}", status_code=302)
-        resp.delete_cookie(strava_accounts.NONCE_COOKIE, path="/api/strava",
+        resp.delete_cookie(config.STRAVA_OAUTH_COOKIE_NAME, path="/",
                            httponly=True, secure=config.SESSION_COOKIE_SECURE, samesite="lax")
         return resp
 
@@ -2226,11 +2227,14 @@ async def strava_callback(request: Request, code: str | None = None,
     if parsed is None:
         return done("strava=error&reason=state")
     uid, nonce = parsed
-    if not strava_accounts.nonce_matches(request.cookies.get(strava_accounts.NONCE_COOKIE), nonce):
+    if not strava_accounts.nonce_matches(request.cookies.get(config.STRAVA_OAUTH_COOKIE_NAME), nonce):
         return done("strava=error&reason=state")
     async with async_session() as s:
         session_uid = await auth.resolve_session(
             s, request.cookies.get(config.SESSION_COOKIE_NAME))
+    if session_uid is None:
+        # The login lapsed during the flow: ask for a fresh sign-in, not a bug report.
+        return done("strava=error&reason=signin")
     if session_uid != uid:
         return done("strava=error&reason=state")
     if error or not code:
@@ -2274,6 +2278,33 @@ async def webhook_verify(
 WEBHOOK_MAX_PENDING_PER_USER = 10
 _webhook_pending: dict[int, set[int]] = {}
 
+# Public-endpoint throttles. Every Strava call a forged event can trigger spends a
+# rate limit shared by all users, so each is bounded per user. _clock is a seam
+# for tests.
+WEBHOOK_MAX_PER_HOUR = 30
+WEBHOOK_WINDOW_SEC = 3600
+DEAUTH_CHECK_INTERVAL_SEC = 600
+_webhook_recent: dict[int, list[float]] = {}
+_deauth_checked: dict[int, float] = {}
+_detached: set = set()
+
+
+def _clock() -> float:
+    return time.monotonic()
+
+
+async def _confirm_deauthorize(uid: int) -> None:
+    """Ask Strava whether the grant is really gone; forget it only if so."""
+    try:
+        if await strava_accounts.token_revoked(uid):
+            await strava_accounts.forget(uid)
+            logger.info("Strava deauthorized for user %s", uid)
+        else:
+            logger.warning("Webhook: deauthorize for user %s but Strava still accepts "
+                           "the token; ignored", uid)
+    except Exception as exc:  # noqa: BLE001 - detached task: nobody awaits it
+        logger.error("Deauthorize check for user %s failed: %s", uid, type(exc).__name__)
+
 
 def _clip(value: Any) -> str:
     return str(value)[:40]
@@ -2314,13 +2345,19 @@ async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
             uid = await credentials.user_for_external(s, "strava", owner_id)
         if uid is None:
             return {"status": "ok"}
-        # The event alone proves nothing (the athlete id is public): ask Strava.
-        if await strava_accounts.token_revoked(uid):
-            await strava_accounts.forget(uid)
-            logger.info("Strava deauthorized for user %s", uid)
-        else:
-            logger.warning("Webhook: deauthorize for user %s but Strava still accepts "
-                           "the token; ignored", uid)
+        # The event alone proves nothing (the athlete id is public), so Strava is
+        # asked, but off the request (Strava wants a 200 within ~2 s and a 429
+        # would stall this handler) and at most once per user per window. The
+        # time is recorded BEFORE the call so a burst cannot slip several through.
+        now = _clock()
+        last = _deauth_checked.get(uid)
+        if last is not None and now - last < DEAUTH_CHECK_INTERVAL_SEC:
+            logger.info("Webhook: deauthorize for user %s already checked recently; ignored", uid)
+            return {"status": "ok"}
+        _deauth_checked[uid] = now
+        task = _asyncio.create_task(_confirm_deauthorize(uid))
+        _detached.add(task)
+        task.add_done_callback(_detached.discard)
         return {"status": "ok"}
 
     # Only process activity creates/updates
@@ -2344,6 +2381,15 @@ async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
         logger.warning("Webhook: user %s already has %d imports queued; event ignored",
                        uid, len(pending))
         return {"status": "ok"}
+    now = _clock()
+    recent = [t for t in _webhook_recent.get(uid, []) if now - t < WEBHOOK_WINDOW_SEC]
+    if len(recent) >= WEBHOOK_MAX_PER_HOUR:
+        _webhook_recent[uid] = recent
+        logger.warning("Webhook: user %s is over %d imports per hour; event ignored",
+                       uid, WEBHOOK_MAX_PER_HOUR)
+        return {"status": "ok"}
+    recent.append(now)
+    _webhook_recent[uid] = recent
     pending.add(activity_id)
 
     # Process in background, as that user
