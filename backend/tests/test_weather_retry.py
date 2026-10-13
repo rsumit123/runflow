@@ -102,7 +102,7 @@ async def test_auto_sync_backfills_weather(monkeypatch):
     monkeypatch.setattr(main, "_backfill_weather", fake_weather)
     monkeypatch.setattr(main, "_wellness", fake_wellness)
 
-    await main._auto_sync_once()
+    await main._auto_sync_once(1, True)
 
     assert "weather" in calls
 

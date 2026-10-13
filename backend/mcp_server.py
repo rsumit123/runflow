@@ -1,8 +1,9 @@
 """The RunFlow MCP server — RunFlow as a Claude app connector.
 
-Mounted into the FastAPI app at a path containing a shared secret, because
-Claude app custom connectors accept only authless or OAuth servers: there is no
-field for a bearer token or a custom header. The mount path *is* the credential.
+Mounted into the FastAPI app at /mcp/{token} through connector.ConnectorApp, one
+secret URL per user, because Claude app custom connectors accept only authless
+or OAuth servers: there is no field for a bearer token or a custom header. The
+token in the path is the credential and decides whose data every tool sees.
 
 Scope is read + trigger-sync. Nothing here writes training data.
 """
@@ -27,11 +28,14 @@ _ALLOWED_HOSTS = [
     "127.0.0.1:*",
 ]
 
+# Stateless: each request carries its own tool call, so it runs entirely inside
+# the request that ConnectorApp scoped to the token's owner. In stateful mode
+# tool calls run in a long-lived per-session task that would keep whichever
+# user opened the session.
 asgi_app = mcp.streamable_http_app(
+    stateless_http=True,
     transport_security=TransportSecuritySettings(allowed_hosts=_ALLOWED_HOSTS),
 )
-
-MOUNT_PATH = f"/mcp/{config.MCP_SECRET}" if config.MCP_SECRET else None
 
 
 import json

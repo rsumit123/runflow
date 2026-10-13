@@ -19,6 +19,7 @@ from sqlalchemy.orm import selectinload
 import auth
 import auth_routes
 import config
+import connector
 import credentials
 import strava_accounts
 import tenancy
@@ -90,40 +91,59 @@ import_progress: dict[str, dict[str, Any]] = {}
 # the last import. Leaving that to a button meant a run could land on the watch and
 # never reach the plan.
 AUTO_SYNC_INTERVAL_SEC = 2 * 60 * 60
-last_auto_sync: dict[str, Any] = {"at": None, "imported": 0, "error": None}
+_last_auto_sync: dict[int, dict[str, Any]] = {}
 
 
-async def _auto_sync_once() -> None:
-    """One pass: import new runs, refresh recovery, then catch up the weather.
+async def _auto_sync_once(user_id: int, has_garmin: bool) -> None:
+    """One pass for the user in context: new runs and recovery from Garmin when
+    connected, then the weather catch-up for everyone.
 
     The weather catch-up matters because the archive lags the run by a few days.
     Without a scheduled retry a fresh run keeps null conditions forever, and
     every pace comparison silently loses its heat normalisation.
     """
-    async with async_session() as session:
-        res = await import_garmin_sync(session)
-    # Today's recovery numbers keep settling through the morning, so refresh
-    # them on the same beat rather than pinning whatever we saw first.
-    async with async_session() as session:
-        await _wellness(session, datetime.utcnow().date().isoformat(), refresh=True)
+    imported = 0
+    if has_garmin:
+        async with async_session() as session:
+            res = await import_garmin_sync(session)
+        imported = res.get("imported", 0)
+        async with async_session() as session:
+            await _wellness(session, datetime.utcnow().date().isoformat(), refresh=True)
     async with async_session() as session:
         wx = await _backfill_weather(session)
-    last_auto_sync.update({"at": datetime.utcnow().isoformat(),
-                           "imported": res.get("imported", 0),
-                           "weather_updated": wx.get("updated", 0), "error": None})
-    if res.get("imported"):
-        logger.info("Auto-sync imported %s new run(s)", res["imported"])
-    if wx.get("updated"):
-        logger.info("Auto-sync backfilled weather on %s run(s)", wx["updated"])
+    _last_auto_sync[user_id] = {"at": datetime.utcnow().isoformat(), "imported": imported,
+                                "weather_updated": wx.get("updated", 0), "error": None}
+    if imported:
+        logger.info("Auto-sync imported %s new run(s) for user %s", imported, user_id)
+
+
+async def _auto_sync_pass() -> None:
+    """Every connected user, each in their own context. One failure never stops the rest."""
+    async with async_session() as s:
+        garmin_users = set(await credentials.users_with(s, "garmin"))
+        strava_users = set(await credentials.users_with(s, "strava"))
+    for uid in sorted(garmin_users | strava_users):
+        with tenancy.user_context(uid):
+            try:
+                await _auto_sync_once(uid, uid in garmin_users)
+            except Exception as exc:  # noqa: BLE001 - a failed sync must never kill the loop
+                logger.warning("Auto-sync failed for user %s: %s", uid, exc)
+                _last_auto_sync[uid] = {"at": datetime.utcnow().isoformat(),
+                                        "imported": 0, "error": str(exc)[:200]}
+            if uid in garmin_users:
+                try:
+                    await garmin_auth.save_if_rotated(uid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Saving rotated Garmin tokens failed for user %s: %s",
+                                   uid, exc)
 
 
 async def _auto_sync_loop() -> None:
     while True:
         try:
-            await _auto_sync_once()
-        except Exception as exc:  # noqa: BLE001 — a failed sync must never kill the loop
-            logger.warning("Auto-sync failed: %s", exc)
-            last_auto_sync.update({"at": datetime.utcnow().isoformat(), "error": str(exc)[:200]})
+            await _auto_sync_pass()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto-sync pass failed: %s", exc)
         await _asyncio.sleep(AUTO_SYNC_INTERVAL_SEC)
 
 
@@ -228,11 +248,23 @@ async def _no_user_context(request, exc):
     logger.error("NoUserContext on %s %s: %s", request.method, request.url.path, exc)
     return JSONResponse(status_code=500, content={"detail": "Internal error"})
 
-# MCP connector for the Claude app. The secret is in the mount path because
-# custom connectors support only authless or OAuth — no bearer-token field.
-# No secret => no mount => 404, rather than an open endpoint.
-if mcp_server.MOUNT_PATH:
-    app.mount(mcp_server.MOUNT_PATH, mcp_server.asgi_app)
+# MCP connector for the Claude app, one secret URL per user. An unknown token
+# gets a 404, the same fail-closed behaviour as the old single secret.
+app.mount("/mcp/{token}", connector.ConnectorApp(mcp_server.asgi_app))
+
+@app.get("/api/connector")
+async def connector_status():
+    async with async_session() as s:
+        return {"exists": await connector.exists(s, tenancy.current_user_id())}
+
+
+@app.post("/api/connector/rotate")
+async def connector_rotate():
+    """Issue a new connector URL. Shown once; the previous URL stops working."""
+    async with async_session() as s:
+        raw = await connector.rotate(s, tenancy.current_user_id())
+        await s.commit()
+    return {"url": connector.url_for(raw)}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -3746,7 +3778,9 @@ async def backfill_weather(force: bool = False,
 @app.get("/api/sync/status")
 async def sync_status():
     """When the data behind the plan was last refreshed."""
-    return {**last_auto_sync, "interval_sec": AUTO_SYNC_INTERVAL_SEC}
+    return {**_last_auto_sync.get(tenancy.current_user_id(),
+                                  {"at": None, "imported": 0, "error": None}),
+            "interval_sec": AUTO_SYNC_INTERVAL_SEC}
 
 
 @app.get("/api/analysis/pace-hr")

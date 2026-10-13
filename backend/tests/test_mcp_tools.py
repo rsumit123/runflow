@@ -3,51 +3,28 @@ import tempfile
 import pytest
 
 
+def _mount_paths(main):
+    return [getattr(r, "path", "") for r in main.app.routes if "/mcp/" in getattr(r, "path", "")]
+
+
 @pytest.mark.asyncio
-async def test_mcp_mounts_only_when_a_secret_is_set(monkeypatch):
-    """No MCP_SECRET must mean no mounted route — fail closed, not fail open."""
+async def test_mcp_is_mounted_per_token_through_the_connector_app(monkeypatch):
+    """One mount, keyed by a per-user token; no shared-secret path exists any more."""
     tmp = tempfile.mktemp(suffix=".db")
     monkeypatch.setenv("DB_PATH", tmp)
     monkeypatch.setenv("MCP_SECRET", "")
     import importlib, sys, config, database
-    # Start from clean module state: `database` reloads build a new Base, and a
-    # `models`/`main` left over from an earlier test is still bound to the old
-    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
-    # against a table that already has the columns. The conftest clears these
-    # after each test; whether that has happened depends on ordering, so clear
-    # them here too.
-    for _m in ("main", "mcp_server", "models"):
+    for _m in ("main", "mcp_server", "models", "connector"):
         sys.modules.pop(_m, None)
     importlib.reload(config); importlib.reload(database)
     import models  # noqa: F401 — populates Base.metadata before init_db
     await database.init_db()
-    import mcp_server, main
-    importlib.reload(mcp_server); importlib.reload(main)
+    import connector, mcp_server, main
 
-    assert not any("/mcp/" in getattr(r, "path", "") for r in main.app.routes)
-
-
-@pytest.mark.asyncio
-async def test_mcp_mounts_under_the_secret_path(monkeypatch):
-    tmp = tempfile.mktemp(suffix=".db")
-    monkeypatch.setenv("DB_PATH", tmp)
-    monkeypatch.setenv("MCP_SECRET", "testsecret")
-    import importlib, sys, config, database
-    # Start from clean module state: `database` reloads build a new Base, and a
-    # `models`/`main` left over from an earlier test is still bound to the old
-    # one — which leaves Base.metadata empty (no tables) or re-runs migrations
-    # against a table that already has the columns. The conftest clears these
-    # after each test; whether that has happened depends on ordering, so clear
-    # them here too.
-    for _m in ("main", "mcp_server", "models"):
-        sys.modules.pop(_m, None)
-    importlib.reload(config); importlib.reload(database)
-    import models  # noqa: F401 — populates Base.metadata before init_db
-    await database.init_db()
-    import mcp_server, main
-    importlib.reload(mcp_server); importlib.reload(main)
-
-    assert any(getattr(r, "path", "") == "/mcp/testsecret" for r in main.app.routes)
+    assert _mount_paths(main) == ["/mcp/{token}"]
+    mount = next(r for r in main.app.routes if getattr(r, "path", "") == "/mcp/{token}")
+    assert isinstance(mount.app, connector.ConnectorApp)
+    assert mount.app.inner is mcp_server.asgi_app
 
 
 from datetime import datetime, timedelta

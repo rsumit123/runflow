@@ -240,11 +240,6 @@ UNREACHABLE: dict[str, str] = {
 # GET routes whose answer is identical for A and B even though A has data B lacks,
 # so "B's answer is unchanged by A" cannot detect a leak there. Each needs a reason.
 SAME_FOR_A_AND_B: dict[str, str] = {
-    "/api/sync/status":
-        "Cannot reveal A's rows (nothing in it is read from the database), so a sweep "
-        "has nothing to compare. It does currently disclose process-wide sync state, "
-        "including the text of the last sync error, to EVERY signed-in user. Task 7 "
-        "makes it per-user and closes that.",
 }
 
 # Routes allowed to answer 5xx in a sweep, with the reason.
@@ -320,6 +315,15 @@ async def _collect_b(monkeypatch, tag, with_a):
     main, database = await setup_app(monkeypatch, tag)
     await seed_user_b(database, FIXED_NOW)
     ids = await seed_user_a(database, FIXED_NOW) if with_a else None
+    if with_a:
+        # A-only state outside the data tables, so the routes that read it
+        # (sync status, connector) answer A differently from B.
+        import connector
+        async with database.async_session() as s:
+            await connector.rotate(s, 1)
+            await s.commit()
+        main._last_auto_sync[1] = {"at": "2026-10-13T00:00:00", "imported": 9,
+                                   "error": MARK}
     return main, database, ids
 
 
