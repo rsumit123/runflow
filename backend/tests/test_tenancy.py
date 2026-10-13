@@ -5,7 +5,10 @@ These use a private schema so they test the mechanism, not RunFlow's models.
 import tempfile
 
 import pytest
-from sqlalchemy import Column, ForeignKey, Integer, String, func, select, text, update, delete
+import asyncio
+
+from sqlalchemy import (Column, ForeignKey, Integer, String, delete, exists, func, insert,
+                        literal_column, select, text, union, update)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -37,6 +40,14 @@ class _Child(TenantMixin, _Base):
     label = Column(String)
 
 
+class _Note(_Base):
+    """Not a tenant table: reaches tenant data only through a join or subquery."""
+    __tablename__ = "notes"
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer)
+    txt = Column(String)
+
+
 async def _db():
     engine = create_async_engine(f"sqlite+aiosqlite:///{tempfile.mktemp(suffix='.db')}")
     async with engine.begin() as conn:
@@ -51,6 +62,7 @@ async def _db():
                        _Item(id=20, name="two-a", user_id=2)])
             s.add_all([_Child(item_id=10, label="c1", user_id=1),
                        _Child(item_id=20, label="c2", user_id=2)])
+            s.add_all([_Note(id=1, item_id=10, txt="n1"), _Note(id=2, item_id=20, txt="n2")])
             await s.commit()
     return maker
 
@@ -165,13 +177,9 @@ async def test_a_textual_statement_cannot_leak_another_users_rows():
     maker = await _db()
     with tenancy.user_context(2):
         async with maker() as s:
-            try:
-                rows = (await s.execute(
-                    select(_Item).from_statement(text("SELECT * FROM items"))
-                )).scalars().all()
-            except CrossTenantAccess:
-                return
-    assert all(r.user_id == 2 for r in rows), [r.user_id for r in rows]
+            with pytest.raises(CrossTenantAccess):
+                await s.execute(
+                    select(_Item).from_statement(text("SELECT * FROM items")))
 
 
 async def test_system_scope_sees_every_user():
@@ -196,3 +204,208 @@ def test_user_context_rejects_non_ids(bad):
     with pytest.raises(ValueError):
         with tenancy.user_context(bad):
             pass
+
+
+# ---- statements that reach a tenant table without a top-level tenant mapper ----
+
+async def _as(uid, stmt, how="all"):
+    maker = await _db()
+    with tenancy.user_context(uid):
+        async with maker() as s:
+            r = await s.execute(stmt)
+            return getattr(r, how)()
+
+
+async def _all_items():
+    maker = await _db()
+    with tenancy.system_scope():
+        async with maker() as s:
+            return dict((await s.execute(select(_Item.id, _Item.name))).all())
+
+
+async def test_count_star_via_select_from_is_scoped():
+    assert await _as(2, select(func.count()).select_from(_Item), "scalar_one") == 1
+
+
+async def test_count_star_via_select_from_with_no_user_raises():
+    maker = await _db()
+    async with maker() as s:
+        with pytest.raises(NoUserContext):
+            await s.execute(select(func.count()).select_from(_Item))
+
+
+async def test_count_over_a_subquery_is_scoped():
+    stmt = select(func.count()).select_from(select(_Item).subquery())
+    assert await _as(2, stmt, "scalar_one") == 1
+
+
+async def test_non_tenant_table_joined_to_a_tenant_table_is_scoped():
+    stmt = select(_Note.txt).join(_Item, _Item.id == _Note.item_id)
+    assert (await _as(2, stmt, "scalars")).all() == ["n2"]
+
+
+async def test_in_subquery_on_a_tenant_table_is_scoped():
+    stmt = select(_Note.txt).where(_Note.item_id.in_(select(_Item.id)))
+    assert (await _as(2, stmt, "scalars")).all() == ["n2"]
+
+
+async def test_scalar_subquery_is_scoped():
+    stmt = select(select(func.count(_Item.id)).scalar_subquery())
+    assert await _as(2, stmt, "scalar_one") == 1
+
+
+async def test_union_is_scoped():
+    stmt = union(select(_Item.name), select(_Child.label))
+    assert sorted(r[0] for r in await _as(2, stmt)) == ["c2", "two-a"]
+
+
+async def test_cte_is_scoped():
+    stmt = select(literal_column("name")).select_from(select(_Item.name).cte("x"))
+    assert [r[0] for r in await _as(2, stmt)] == ["two-a"]
+
+
+async def test_exists_on_a_tenant_table_is_refused():
+    for stmt in (select(exists().where(_Item.id == 10)),
+                 select(_Note.txt).where(exists().where(_Item.id == _Note.item_id))):
+        with pytest.raises(CrossTenantAccess):
+            await _as(2, stmt)
+
+
+async def test_core_table_select_is_refused():
+    with pytest.raises(CrossTenantAccess):
+        await _as(2, select(_Item.__table__))
+
+
+async def test_select_of_a_plain_table_column_is_refused():
+    with pytest.raises(CrossTenantAccess):
+        await _as(2, select(_Item.__table__.c.name))
+
+
+async def test_core_table_update_is_refused_and_modifies_nothing():
+    with pytest.raises(CrossTenantAccess):
+        await _as(2, update(_Item.__table__).values(name="x"))
+    assert await _all_items() == {10: "one-a", 11: "one-b", 20: "two-a"}
+
+
+async def test_insert_is_refused():
+    with pytest.raises(CrossTenantAccess):
+        await _as(2, insert(_Item).values(name="x", user_id=2))
+    assert await _all_items() == {10: "one-a", 11: "one-b", 20: "two-a"}
+
+
+async def _as_many(uid):
+    maker = await _db()
+    with tenancy.user_context(uid):
+        async with maker() as s:
+            await s.execute(insert(_Item), [{"name": "x", "user_id": uid},
+                                            {"name": "y", "user_id": uid}])
+
+
+async def test_insert_executemany_is_refused():
+    with pytest.raises(CrossTenantAccess):
+        await _as_many(2)
+    assert await _all_items() == {10: "one-a", 11: "one-b", 20: "two-a"}
+
+
+async def test_insert_with_no_user_raises_no_user_context():
+    maker = await _db()
+    async with maker() as s:
+        with pytest.raises(NoUserContext):
+            await s.execute(insert(_Item).values(name="x", user_id=1))
+
+
+async def test_update_that_sets_user_id_is_refused_and_modifies_nothing():
+    maker = await _db()
+    with tenancy.user_context(2):
+        async with maker() as s:
+            with pytest.raises(CrossTenantAccess):
+                await s.execute(update(_Item).values(user_id=1))
+    with tenancy.system_scope():
+        async with maker() as s:
+            owners = dict((await s.execute(select(_Item.id, _Item.user_id))).all())
+    assert owners == {10: 1, 11: 1, 20: 2}
+
+
+async def test_bulk_update_by_primary_key_with_user_id_is_refused():
+    maker = await _db()
+    with tenancy.user_context(2):
+        async with maker() as s:
+            with pytest.raises(CrossTenantAccess):
+                await s.execute(update(_Item), [{"id": 20, "user_id": 1}])
+    with tenancy.system_scope():
+        async with maker() as s:
+            assert (await s.get(_Item, 20)).user_id == 2
+
+
+async def test_editing_another_users_loaded_object_raises_on_flush():
+    maker = await _db()
+    async with maker() as s:
+        with tenancy.user_context(1):
+            row = await s.get(_Item, 10)
+        with tenancy.user_context(2):
+            row.name = "hijacked"
+            with pytest.raises(CrossTenantAccess):
+                await s.commit()
+    assert (await _all_items())[10] == "one-a"
+
+
+async def test_deleting_another_users_loaded_object_raises_on_flush():
+    maker = await _db()
+    async with maker() as s:
+        with tenancy.user_context(1):
+            row = await s.get(_Item, 10)
+        with tenancy.user_context(2):
+            await s.delete(row)
+            with pytest.raises(CrossTenantAccess):
+                await s.commit()
+    assert 10 in await _all_items()
+
+
+async def test_refreshing_another_users_object_does_not_return_its_data():
+    maker = await _db()
+    async with maker() as s:
+        with tenancy.user_context(1):
+            row = await s.get(_Item, 10)
+        s.expire(row)
+        with tenancy.user_context(2):
+            with pytest.raises(CrossTenantAccess):
+                await s.refresh(row)
+        assert "name" not in row.__dict__  # nothing was re-read into the object
+
+
+async def test_system_scope_wins_over_a_nested_user_context():
+    maker = await _db()
+    with tenancy.system_scope():
+        with tenancy.user_context(2):
+            async with maker() as s:
+                n = (await s.execute(select(func.count(_Item.id)))).scalar_one()
+    assert n == 3
+
+
+async def test_one_session_queried_under_two_users_sees_each_users_own_rows():
+    maker = await _db()
+    async with maker() as s:
+        with tenancy.user_context(1):
+            a = (await s.execute(select(_Item.name).order_by(_Item.id))).scalars().all()
+        with tenancy.user_context(2):
+            b = (await s.execute(select(_Item.name).order_by(_Item.id))).scalars().all()
+    assert a == ["one-a", "one-b"]
+    assert b == ["two-a"]
+
+
+async def test_concurrent_workers_each_see_only_their_own_rows():
+    maker = await _db()
+
+    async def worker(uid):
+        with tenancy.user_context(uid):
+            out = []
+            for _ in range(5):
+                async with maker() as s:
+                    out.append((await s.execute(
+                        select(_Item.user_id).distinct())).scalars().all())
+                await asyncio.sleep(0)
+            return out
+
+    results = await asyncio.gather(worker(1), worker(2), worker(1), worker(2))
+    for uid, res in zip((1, 2, 1, 2), results):
+        assert all(r == [uid] for r in res), (uid, res)
