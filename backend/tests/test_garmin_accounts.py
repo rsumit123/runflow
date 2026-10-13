@@ -686,3 +686,26 @@ async def test_rotated_tokens_are_saved_even_when_the_call_fails(monkeypatch):
         with pytest.raises(RuntimeError, match="boom"):
             await garmin_auth.run(g, "get_activities", 0, 1)
     assert (await _status(database, 2)).data == {"tokens": "R" * 600}
+
+
+# ---- canary: refresh_outcome depends on garminconnect's failure message -------
+
+@pytest.mark.parametrize("status,expected", [(400, "rejected"), (401, "rejected"),
+                                             (403, "rejected"), (429, "unavailable"),
+                                             (503, "unavailable")])
+def test_canary_refresh_outcome_matches_the_real_library_message(monkeypatch, status, expected):
+    """If garminconnect changes the text of Client._refresh_di_token's failure, a
+    revoked token would read as 'unavailable' (503 forever, no reconnect prompt).
+    This runs the REAL method, so a library bump fails here instead."""
+    import garmin_auth
+
+    class Failing:
+        ok, text = False, "invalid_grant"
+
+        def __init__(self):
+            self.status_code = status
+    monkeypatch.setattr(garminconnect.client.Client, "_http_post",
+                        lambda self, url, **kw: Failing())
+    g = garminconnect.Garmin()
+    g.client.di_refresh_token, g.client.di_client_id = "r" * 50, "cid"
+    assert garmin_auth.refresh_outcome(g) == expected
