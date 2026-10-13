@@ -151,3 +151,7 @@ IDEAS.md          feature backlog
 Built for one runner, which shapes the design: SQLite rather than Postgres,
 no multi-user model, and defaults tuned to my own physiology. The coaching logic
 is general; the thresholds are not.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
