@@ -78,6 +78,14 @@ async def test_query_with_no_user_raises():
             await s.execute(select(_Item))
 
 
+async def test_an_aggregate_with_no_user_raises_before_running():
+    """A COUNT loads no rows, so only the pre-query check can refuse it."""
+    maker = await _db()
+    async with maker() as s:
+        with pytest.raises(NoUserContext):
+            await s.execute(select(func.count(_Item.id)))
+
+
 async def test_session_get_for_another_users_row_returns_none():
     maker = await _db()
     with tenancy.user_context(2):
