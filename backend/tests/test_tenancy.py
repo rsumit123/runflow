@@ -8,9 +8,10 @@ import pytest
 import asyncio
 
 from sqlalchemy import (Column, ForeignKey, Integer, String, delete, exists, func, insert,
-                        literal_column, select, text, union, update)
+                        literal_column, select, table, text, union, update)
+from sqlalchemy import column as sa_column
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, joinedload, relationship, selectinload
 
 import tenancy
 from tenancy import CrossTenantAccess, NoUserContext, TenantMixin
@@ -25,12 +26,14 @@ class _Base(DeclarativeBase):
 class _User(_Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
+    items = relationship("_Item")
 
 
 class _Item(TenantMixin, _Base):
     __tablename__ = "items"
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String)
+    children = relationship("_Child", back_populates="item")
 
 
 class _Child(TenantMixin, _Base):
@@ -38,6 +41,7 @@ class _Child(TenantMixin, _Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     item_id = Column(Integer, ForeignKey("items.id"))
     label = Column(String)
+    item = relationship("_Item", back_populates="children")
 
 
 class _Note(_Base):
@@ -409,3 +413,91 @@ async def test_concurrent_workers_each_see_only_their_own_rows():
     results = await asyncio.gather(worker(1), worker(2), worker(1), worker(2))
     for uid, res in zip((1, 2, 1, 2), results):
         assert all(r == [uid] for r in res), (uid, res)
+
+
+# ---- eager loads must keep working, and stay scoped ----
+
+async def test_selectinload_one_to_many_from_a_tenant_parent():
+    maker = await _db()
+    with tenancy.user_context(2):
+        async with maker() as s:
+            items = (await s.execute(
+                select(_Item).options(selectinload(_Item.children)))).scalars().all()
+            assert [(i.name, [c.label for c in i.children]) for i in items] == [
+                ("two-a", ["c2"])]
+
+
+async def test_selectinload_many_to_one():
+    maker = await _db()
+    with tenancy.user_context(2):
+        async with maker() as s:
+            kids = (await s.execute(
+                select(_Child).options(selectinload(_Child.item)))).scalars().all()
+            assert [(c.label, c.item.name) for c in kids] == [("c2", "two-a")]
+
+
+async def test_selectinload_from_a_non_tenant_parent_is_scoped():
+    maker = await _db()
+    with tenancy.user_context(2):
+        async with maker() as s:
+            users = (await s.execute(
+                select(_User).where(_User.id == 2)
+                .options(selectinload(_User.items)))).scalars().all()
+            assert [[i.name for i in u.items] for u in users] == [["two-a"]]
+    with tenancy.user_context(2):
+        async with maker() as s:  # asking for user 1's row still gets only user 2's items
+            users = (await s.execute(
+                select(_User).options(selectinload(_User.items)))).scalars().all()
+            assert sorted(i.name for u in users for i in u.items) == ["two-a"]
+
+
+async def test_selectinload_with_no_user_raises():
+    maker = await _db()
+    async with maker() as s:
+        with pytest.raises(NoUserContext):
+            await s.execute(select(_Item).options(selectinload(_Item.children)))
+
+
+async def test_joinedload_one_to_many_is_scoped():
+    maker = await _db()
+    with tenancy.user_context(2):
+        async with maker() as s:
+            items = (await s.execute(
+                select(_Item).options(joinedload(_Item.children)))).unique().scalars().all()
+            assert [(i.name, [c.label for c in i.children]) for i in items] == [
+                ("two-a", ["c2"])]
+
+
+# ---- lightweight sqlalchemy.table() is a Core reference too ----
+
+_LIGHT = lambda: table("items", sa_column("name"))  # noqa: E731
+
+
+async def _refused_and_unchanged(stmt):
+    maker = await _db()
+    for ctx in (tenancy.user_context(2), None):
+        async with maker() as s:
+            if ctx is None:
+                with pytest.raises(NoUserContext):
+                    await s.execute(stmt)
+            else:
+                with ctx:
+                    with pytest.raises(CrossTenantAccess):
+                        await s.execute(stmt)
+    assert await _all_items() == {10: "one-a", 11: "one-b", 20: "two-a"}
+
+
+async def test_lightweight_table_select_is_refused():
+    await _refused_and_unchanged(select(sa_column("name")).select_from(_LIGHT()))
+
+
+async def test_lightweight_table_count_is_refused():
+    await _refused_and_unchanged(select(func.count()).select_from(_LIGHT()))
+
+
+async def test_lightweight_table_update_is_refused():
+    await _refused_and_unchanged(update(_LIGHT()).values(name="x"))
+
+
+async def test_lightweight_table_delete_is_refused():
+    await _refused_and_unchanged(delete(table("items")))

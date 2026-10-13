@@ -13,6 +13,17 @@ With no user in context, touching a tenant table raises. Nothing ever falls
 back to a default user. The only way to cross users is `system_scope()`, which
 is meant to be rare and easy to grep for.
 
+Known limits
+------------
+`text()` in any form (`session.execute(text(...))`, `select(text(...))`,
+`literal_column(...).select_from(text(...))`, `exec_driver_sql`) cannot be seen
+by this module: it never learns which tables the SQL names. Request code is
+kept free of these by a grep test (Task 4).
+
+`exists()`, and some update/delete statements with subqueries on tenant
+tables, are deliberately refused rather than scoped. Write `IN (...)` or
+load-and-modify instead.
+
 Kept separate from `database.py` on purpose: tests reload `database`, and a
 reload would replace the ContextVar and lose these listeners. Never reload
 this module.
@@ -23,10 +34,10 @@ import contextvars
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import Column, ForeignKey, Integer, Table, event, inspect as sa_inspect
+from sqlalchemy import Column, ForeignKey, Integer, event, inspect as sa_inspect
 from sqlalchemy.orm import Session, declared_attr, with_loader_criteria
 from sqlalchemy.sql import visitors
-from sqlalchemy.sql.selectable import Exists
+from sqlalchemy.sql.selectable import Exists, TableClause
 from sqlalchemy.sql.util import find_tables
 
 _current_user: contextvars.ContextVar[int | None] = contextvars.ContextVar(
@@ -115,7 +126,8 @@ def _tenant_tables_in(stmt, tenant_names: set[str]) -> set[str]:
     CTEs, unions, select_from, CRUD targets), not just by its top-level mapper."""
     found = find_tables(stmt, check_columns=True, include_aliases=True,
                         include_joins=True, include_selects=True, include_crud=True)
-    return {t.name for t in found if isinstance(t, Table)} & tenant_names
+    # TableClause, not Table: sqlalchemy.table(...) is a TableClause, and Table subclasses it.
+    return {t.name for t in found if isinstance(t, TableClause)} & tenant_names
 
 
 def _entity_table_names(element) -> set[str]:
@@ -141,7 +153,7 @@ def _uses_core_reference(stmt, tenant_names: set[str]) -> bool:
         annotated = "parententity" in getattr(el, "_annotations", {})
         if annotated:
             orm_tables |= _entity_table_names(el)
-        elif isinstance(el, Table):
+        elif isinstance(el, TableClause):
             if el.name in tenant_names:
                 raw_tables.add(el.name)
         elif isinstance(el, Column):
@@ -199,7 +211,12 @@ def _scope_to_current_user(state) -> None:
     if state.is_insert:
         raise CrossTenantAccess(
             "bulk insert() into a per-user table is not allowed; use session.add")
-    if _uses_core_reference(state.statement, names) or _has_tenant_exists(state.statement, names):
+    # Relationship loaders (selectinload, lazy loads) build their own statements
+    # with unannotated foreign-key columns, which would be mistaken for table.c
+    # access. They keep the filter and the no-user check; only this
+    # classification is skipped. The load backstop covers what they return.
+    core = not state.is_relationship_load and _uses_core_reference(state.statement, names)
+    if core or _has_tenant_exists(state.statement, names):
         raise CrossTenantAccess(
             "statement reaches a per-user table in a way that cannot be scoped "
             "(Core table/column reference or EXISTS); use the ORM entity")
