@@ -171,6 +171,17 @@ function Dashboard() {
     );
   }
 
+  if (!loading && total === 0 && activities.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 16px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>No runs yet</h1>
+        <p style={{ color: '#93a1b1' }}>
+          Connect Strava or Garmin in <Link to="/settings">Settings</Link> to import your runs.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Header */}

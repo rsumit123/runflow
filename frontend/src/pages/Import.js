@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../auth/AuthContext';
 
 const pageTitle = {
   fontSize: '28px',
@@ -56,14 +58,6 @@ const secondaryButton = {
   backgroundColor: '#111820',
   color: '#e8edf2',
   border: '1px solid #333',
-};
-
-const connectButton = {
-  ...buttonBase,
-  backgroundColor: '#ff5a1f',
-  color: '#ffffff',
-  fontSize: '15px',
-  padding: '14px 32px',
 };
 
 const disabledButton = {
@@ -137,6 +131,7 @@ const progressBarFill = (pct) => ({
 });
 
 function Import() {
+  const { user } = useAuth();
   const [importStatus, setImportStatus] = useState(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importJobId, setImportJobId] = useState(null);
@@ -144,8 +139,6 @@ function Import() {
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncLoading, setSyncLoading] = useState(false);
   const [garminLoading, setGarminLoading] = useState(false);
-  const [authUrl, setAuthUrl] = useState(null);
-  const [authLoading, setAuthLoading] = useState(false);
 
   // Bulk import state
   const [bulkDir, setBulkDir] = useState('');
@@ -246,22 +239,6 @@ function Import() {
       if (bulkPollRef.current) clearInterval(bulkPollRef.current);
     };
   }, [bulkJobId]);
-
-  const handleConnect = async () => {
-    setAuthLoading(true);
-    try {
-      const res = await api.get('/auth/url');
-      const url = res.data.url || res.data;
-      if (typeof url === 'string' && url.startsWith('http')) {
-        window.location.href = url;
-      } else {
-        setAuthUrl(JSON.stringify(res.data));
-      }
-    } catch (err) {
-      setAuthUrl('Error: ' + (err.response?.data?.detail || 'Failed to get auth URL'));
-    }
-    setAuthLoading(false);
-  };
 
   const handleImportAll = async () => {
     setImportLoading(true);
@@ -376,30 +353,14 @@ function Import() {
   return (
     <div>
       <h1 style={pageTitle}>Import Activities</h1>
-      <p style={subtitle}>Connect your Strava account and import your running activities.</p>
+      <p style={subtitle}>Import your running activities.</p>
+
+      <p style={{ ...cardDesc, marginBottom: '20px' }}>
+        <Link to="/settings">Connect Strava or Garmin in Settings.</Link>
+      </p>
 
       <div style={cardStyle}>
-        <h2 style={cardTitle}>1. Connect to Strava</h2>
-        <p style={cardDesc}>
-          Authorize this app to access your Strava data. You'll be redirected to Strava to grant
-          permission.
-        </p>
-        <button
-          style={authLoading ? disabledButton : connectButton}
-          onClick={handleConnect}
-          disabled={authLoading}
-        >
-          {authLoading ? 'Connecting...' : 'Connect with Strava'}
-        </button>
-        {authUrl && (
-          <div style={{ ...statusBox, backgroundColor: '#111820', color: '#93a1b1', marginTop: '12px' }}>
-            {authUrl}
-          </div>
-        )}
-      </div>
-
-      <div style={cardStyle}>
-        <h2 style={cardTitle}>2. Import All Activities (API)</h2>
+        <h2 style={cardTitle}>1. Import All Activities (API)</h2>
         <p style={cardDesc}>
           Fetch and store all your running activities from Strava via the API. This runs in the
           background and may take a while if you have many activities.
@@ -440,7 +401,7 @@ function Import() {
       </div>
 
       <div style={cardStyle}>
-        <h2 style={cardTitle}>3. Sync New Activities</h2>
+        <h2 style={cardTitle}>2. Sync New Activities</h2>
         <p style={cardDesc}>
           Fetch only new activities since your last import. Faster than a full import.
         </p>
@@ -478,8 +439,9 @@ function Import() {
         )}
       </div>
 
+      {user && user.is_admin && (
       <div style={cardStyle}>
-        <h2 style={cardTitle}>4. Bulk Import from Strava Export</h2>
+        <h2 style={cardTitle}>3. Bulk Import from Strava Export</h2>
         <p style={cardDesc}>
           Import activities from a Strava data export archive. Go to Strava Settings &rarr;
           My Account &rarr; "Download or Delete Your Account" &rarr; "Request Your Archive".
@@ -520,6 +482,7 @@ function Import() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

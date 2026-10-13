@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import ActivityDetail from './pages/ActivityDetail';
 import Import from './pages/Import';
@@ -9,6 +9,11 @@ import Training from './pages/Training';
 import PlanWorkoutDetail from './pages/PlanWorkoutDetail';
 import RoutesPage from './pages/Routes';
 import Goals from './pages/Goals';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+import Settings from './pages/Settings';
+import { RequireAuth, useAuth } from './auth/AuthContext';
+import { GarminWarningBanner } from './garminWarning';
 
 const navLinks = [
   { path: '/', label: 'Dashboard' },
@@ -18,11 +23,21 @@ const navLinks = [
   { path: '/routes', label: 'Routes' },
   { path: '/phases', label: 'Phases' },
   { path: '/import', label: 'Import' },
+  { path: '/settings', label: 'Settings' },
 ];
 
 function App() {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const onAuthPage = ['/login', '/signup'].includes(location.pathname);
+
+  const signOut = async () => {
+    setMenuOpen(false);
+    await logout();
+    navigate('/login');
+  };
 
   // Close menu on navigation
   useEffect(() => {
@@ -33,7 +48,7 @@ function App() {
 
   return (
     <div>
-      <nav style={{
+      {!onAuthPage && <nav style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -63,6 +78,15 @@ function App() {
               {label}
             </Link>
           ))}
+          {user && (
+            <span style={{ display: 'flex', gap: '12px', alignItems: 'center', marginLeft: '8px' }}>
+              <span style={{ color: '#93a1b1', fontSize: '13px' }}>{user.email}</span>
+              <button onClick={signOut} style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                color: '#93a1b1', fontSize: '14px', textDecoration: 'underline',
+              }}>Sign out</button>
+            </span>
+          )}
         </div>
 
         {/* Mobile hamburger */}
@@ -120,25 +144,37 @@ function App() {
                 {label}
               </Link>
             ))}
+            {user && (
+              <button onClick={signOut} style={{
+                display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none',
+                padding: '14px 20px', color: '#e8edf2', fontSize: '15px', cursor: 'pointer',
+              }}>
+                Sign out <span style={{ color: '#93a1b1', fontSize: '13px', wordBreak: 'break-all' }}>({user.email})</span>
+              </button>
+            )}
           </div>
         )}
-      </nav>
+      </nav>}
 
+      <GarminWarningBanner />
       <div style={{
         maxWidth: '1100px',
         margin: '0 auto',
         padding: '20px 12px',
       }}>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/activity/:id" element={<ActivityDetail />} />
-          <Route path="/stats" element={<Stats />} />
-          <Route path="/training" element={<Training />} />
-          <Route path="/plan/workout/:id" element={<PlanWorkoutDetail />} />
-          <Route path="/goals" element={<Goals />} />
-          <Route path="/routes" element={<RoutesPage />} />
-          <Route path="/phases" element={<Phases />} />
-          <Route path="/import" element={<Import />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+          <Route path="/" element={<RequireAuth><Dashboard /></RequireAuth>} />
+          <Route path="/activity/:id" element={<RequireAuth><ActivityDetail /></RequireAuth>} />
+          <Route path="/stats" element={<RequireAuth><Stats /></RequireAuth>} />
+          <Route path="/training" element={<RequireAuth><Training /></RequireAuth>} />
+          <Route path="/plan/workout/:id" element={<RequireAuth><PlanWorkoutDetail /></RequireAuth>} />
+          <Route path="/goals" element={<RequireAuth><Goals /></RequireAuth>} />
+          <Route path="/routes" element={<RequireAuth><RoutesPage /></RequireAuth>} />
+          <Route path="/phases" element={<RequireAuth><Phases /></RequireAuth>} />
+          <Route path="/import" element={<RequireAuth><Import /></RequireAuth>} />
         </Routes>
       </div>
     </div>
