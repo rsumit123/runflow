@@ -522,6 +522,13 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
     # Streams
     try:
         streams_resp = await strava.get_activity_streams(act.id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            # Strava has no stream data for this run (e.g. a manual entry): not a failure.
+            streams_resp = []
+        else:
+            logger.warning("Failed to fetch streams for activity %s: %s", act.id, exc)
+            streams_resp = None
     except Exception as exc:
         logger.warning("Failed to fetch streams for activity %s: %s", act.id, exc)
         streams_resp = None  # failed: leave existing streams and the detail flag alone

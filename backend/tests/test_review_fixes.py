@@ -241,34 +241,60 @@ async def test_client_for_during_a_refresh_write_returns_the_same_live_client(mo
     assert await strava_accounts.client_for(2) is c1
 
 
+def _status_error(code):
+    import httpx
+    req = httpx.Request("GET", "https://strava.test/streams")
+    return httpx.HTTPStatusError("boom", request=req, response=httpx.Response(code, request=req))
+
+
 class FailingStreams:
     refresh_token = "RT"
+    error = RuntimeError("strava hiccup")
 
     async def get_activity_detail(self, aid):
         return {"splits_metric": []}
 
     async def get_activity_streams(self, aid):
-        raise RuntimeError("strava hiccup")
+        raise self.error
 
     async def close(self):
         pass
 
 
 @pytest.mark.parametrize("detailed", [True, False])
-async def test_a_failed_streams_fetch_keeps_existing_streams(monkeypatch, detailed):
-    main, database = await setup_app(monkeypatch, "rv10%s" % detailed)
+@pytest.mark.parametrize("error", ["generic", "500", "conn"])
+async def test_a_failed_streams_fetch_keeps_existing_streams(monkeypatch, detailed, error):
+    import httpx
+    err = {"generic": RuntimeError("strava hiccup"), "500": _status_error(500),
+           "conn": httpx.ConnectError("down")}[error]
+    n, act = await _reimport(monkeypatch, "rv10%s%s" % (detailed, error), err, detailed)
+    assert n == 1
+    assert bool(act.has_detailed_data) is detailed
+
+
+async def test_a_404_for_streams_means_no_data_not_a_failed_fetch(monkeypatch):
+    n, act = await _reimport(monkeypatch, "rv11", _status_error(404), False)
+    assert n == 0 and act.has_detailed_data is True
+
+
+async def _reimport(monkeypatch, tag, error, detailed):
+    main, database = await setup_app(monkeypatch, tag)
     import strava_accounts
     from datetime import datetime
     from sqlalchemy import select, func
     from models import Activity, Stream
     strava_accounts._clients.clear()
-    strava_accounts._clients[2] = FailingStreams()
+    fake = FailingStreams()
+    fake.error = error
+    strava_accounts._clients[2] = fake
     await _store_strava(database)
     with tenancy.user_context(2):
         async with database.async_session() as s:
             s.add(Activity(id=5001, name="r", sport_type="Run", distance=5000.0,
                            start_date=datetime(2026, 1, 1), has_detailed_data=detailed))
-            s.add(Stream(activity_id=5001, stream_type="time", data=[0, 1, 2]))
+            if detailed or error is not None and getattr(error, "response", None) is None \
+                    or getattr(getattr(error, "response", None), "status_code", 0) != 404:
+                s.add(Stream(activity_id=5001, stream_type="time", data=[0, 1, 2]))
             await s.commit()
         async with database.async_session() as s:
             act = await s.get(Activity, 5001)
@@ -277,6 +303,4 @@ async def test_a_failed_streams_fetch_keeps_existing_streams(monkeypatch, detail
         async with database.async_session() as s:
             n = (await s.execute(select(func.count(Stream.id)).where(
                 Stream.activity_id == 5001))).scalar()
-            act = await s.get(Activity, 5001)
-            assert n == 1
-            assert bool(act.has_detailed_data) is detailed
+            return n, await s.get(Activity, 5001)
