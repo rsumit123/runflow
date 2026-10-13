@@ -841,8 +841,16 @@ async def _try_remove_from_watch(w: PlannedWorkout) -> None:
     except garmin_auth.GarminAccessError:
         raise
     except Exception as exc:  # noqa: BLE001
-        if "API Error 404" not in str(exc):
+        status = garmin_auth.error_status(exc)
+        # Garmin answered with a client error other than "slow down" (429) or "your
+        # login is bad" (401): the id is dead to us (404 gone; 403/400 e.g. it
+        # belongs to another Garmin account after a reconnect). Retrying can never
+        # succeed, and keeping it would block every re-push forever.
+        if status is None or not (400 <= status < 500) or status in (401, 429):
             raise
+        if status != 404:
+            logger.warning("Garmin refused to remove workout %s (HTTP %s); forgetting the id",
+                           w.garmin_workout_id, status)
     w.garmin_workout_id = None
 
 
@@ -851,14 +859,18 @@ async def _remove_from_watch(w: PlannedWorkout) -> Optional[str]:
     when the id is gone, else a warning for the response (the id is kept)."""
     try:
         await _try_remove_from_watch(w)
-    except garmin_auth.GarminNotConnected:
-        return "Garmin isn't connected; the old session is still on your watch."
-    except garmin_auth.GarminUnavailable:
-        return "Garmin is unreachable right now; the old session is still on your watch."
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not remove Garmin workout %s: %s", w.garmin_workout_id, exc)
-        return "Garmin could not remove the old session; it may still be on your watch."
+        return _watch_warning(exc, w)
     return None
+
+
+def _watch_warning(exc: Exception, w: PlannedWorkout) -> str:
+    if isinstance(exc, garmin_auth.GarminNotConnected):
+        return "Garmin isn't connected; the old session is still on your watch."
+    if isinstance(exc, garmin_auth.GarminUnavailable):
+        return "Garmin is unreachable right now; the old session is still on your watch."
+    logger.warning("Could not remove Garmin workout %s: %s", w.garmin_workout_id, exc)
+    return "Garmin could not remove the old session; it may still be on your watch."
 
 
 async def _unschedule_plan(session: AsyncSession, plan: Plan,
@@ -4145,15 +4157,25 @@ async def delete_planned_workout(workout_id: int,
         raise HTTPException(status_code=404, detail="Workout not found")
     if w.date and w.date.date() < datetime.utcnow().date():
         raise HTTPException(status_code=400, detail="Can't delete a past workout.")
+    warning = None
     if w.garmin_workout_id:
-        warn = await _remove_from_watch(w)
-        if warn:
+        try:
+            await _try_remove_from_watch(w)
+        except garmin_auth.GarminNotConnected:
+            # Nothing can clean the watch any more, so keeping the row would only
+            # strand the user (and MCP, which uses this path).
+            warning = ("Garmin isn't connected, so this session may still be on your "
+                       "watch. Remove it there.")
+        except Exception as exc:  # noqa: BLE001 - unreachable or failing: keep the id, retry later
             # Deleting the row would throw away the only id that can take the
             # session off the watch. Leave the workout in the plan until it can go.
-            return {"deleted": None, "garmin_warning": warn}
+            return {"deleted": None, "garmin_warning": _watch_warning(exc, w)}
     await session.delete(w)
     await session.commit()
-    return {"deleted": workout_id}
+    out = {"deleted": workout_id}
+    if warning:
+        out["garmin_warning"] = warning
+    return out
 
 
 @app.delete("/api/plan/workout/{workout_id}/push")

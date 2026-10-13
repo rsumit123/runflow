@@ -30,6 +30,13 @@ async def _put_on_watch(database, ids, gid=555, structure=None, status=None):
             await s.commit()
 
 
+async def _exists(database, ids):
+    from models import PlannedWorkout
+    with tenancy.user_context(2):
+        async with database.async_session() as s:
+            return await s.get(PlannedWorkout, ids["workout"]) is not None
+
+
 async def _gid(database, ids):
     from models import PlannedWorkout
     with tenancy.user_context(2):
@@ -38,16 +45,78 @@ async def _gid(database, ids):
             return None if w is None else w.garmin_workout_id
 
 
-async def test_deleting_a_workout_without_garmin_keeps_it_and_says_why(monkeypatch):
+async def test_deleting_a_workout_while_garmin_is_not_connected_still_deletes_it(monkeypatch):
+    """Nothing can clean the watch now, so keeping the row would strand the user."""
     main, database = await setup_app(monkeypatch, "w1")
     ids = await seed_user_b(database)
     await _put_on_watch(database, ids)
     cookie = await session_cookie(database, 2)
     async with client(main, cookie) as c:
         r = await c.delete(f"/api/plan/workout/{ids['workout']}")
-    assert r.status_code == 200
-    assert "garmin" in r.json()["garmin_warning"].lower()
-    assert await _gid(database, ids) == 555      # row and id both survive
+    assert r.status_code == 200 and r.json()["deleted"] == ids["workout"]
+    assert r.json()["garmin_warning"] == (
+        "Garmin isn't connected, so this session may still be on your watch. "
+        "Remove it there.")
+    assert await _gid(database, ids) is None and await _exists(database, ids) is False
+
+
+async def test_deleting_a_workout_while_garmin_is_unreachable_keeps_it(monkeypatch):
+    main, database = await setup_app(monkeypatch, "w1b")
+    ids = await seed_user_b(database)
+    await _put_on_watch(database, ids)
+    import garmin_auth
+
+    async def down(_id):
+        raise garmin_auth.GarminUnavailable("down")
+    monkeypatch.setattr(main.garmin, "remove_workout", down)
+    cookie = await session_cookie(database, 2)
+    async with client(main, cookie) as c:
+        r = await c.delete(f"/api/plan/workout/{ids['workout']}")
+    assert r.status_code == 200 and r.json()["deleted"] is None
+    assert "unreachable" in r.json()["garmin_warning"].lower()
+    assert await _gid(database, ids) == 555 and await _exists(database, ids)
+
+
+async def test_a_removal_garmin_answers_403_clears_the_id_and_a_repush_proceeds(monkeypatch):
+    """e.g. the id belongs to a different Garmin account after a reconnect."""
+    main, database = await setup_app(monkeypatch, "w1c")
+    ids = await seed_user_b(database)
+    await _put_on_watch(database, ids, structure=STEPS)
+    from garminconnect import GarminConnectConnectionError
+    from models import PlannedWorkout
+
+    async def forbidden(_id):
+        raise GarminConnectConnectionError("Activities client error (403): API Error 403 - nope")
+    pushed = []
+
+    async def push(name, steps, date):
+        pushed.append(date)
+        return {"workout_id": 777}
+    monkeypatch.setattr(main.garmin, "remove_workout", forbidden)
+    monkeypatch.setattr(main.garmin, "push_workout", push)
+    with tenancy.user_context(2):
+        async with database.async_session() as s:
+            w = await s.get(PlannedWorkout, ids["workout"])
+            await main._garmin_push(w)
+            assert w.garmin_workout_id == 777 and len(pushed) == 1
+
+
+async def test_a_removal_answered_429_or_401_is_not_treated_as_gone(monkeypatch):
+    main, database = await setup_app(monkeypatch, "w1d")
+    ids = await seed_user_b(database)
+    await _put_on_watch(database, ids)
+    from garminconnect import GarminConnectConnectionError
+    from models import PlannedWorkout
+
+    async def limited(_id):
+        raise GarminConnectConnectionError("API Error 429 - slow down")
+    monkeypatch.setattr(main.garmin, "remove_workout", limited)
+    with tenancy.user_context(2):
+        async with database.async_session() as s:
+            w = await s.get(PlannedWorkout, ids["workout"])
+            with pytest.raises(GarminConnectConnectionError):
+                await main._try_remove_from_watch(w)
+            assert w.garmin_workout_id == 555
 
 
 async def test_retiring_a_plan_without_garmin_keeps_the_ids(monkeypatch):

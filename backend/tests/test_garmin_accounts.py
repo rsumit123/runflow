@@ -20,6 +20,7 @@ pytestmark = pytest.mark.no_user
 
 # Captured at import, before the autouse network guard replaces it.
 REAL_GARMIN_LOGIN = garminconnect.Garmin.login
+REAL_REFRESH_SESSION = garminconnect.client.Client._refresh_session
 
 
 def rejected(msg="401"):
@@ -56,8 +57,18 @@ class FakeClient:
     def __init__(self, tokens="T" * 600):
         self.tokens = tokens
 
+    refresh_error = GarminConnectAuthenticationError(
+        "DI token refresh failed: 401 invalid_grant")   # what Client._refresh_di_token raises
+    refreshed = 0
+
     def dumps(self):
         return self.tokens
+
+    def _refresh_di_token(self):
+        if self.refresh_error is not None:
+            raise self.refresh_error
+        self.refreshed += 1
+        self.tokens = "F" * 600
 
 
 class FakeGarmin:
@@ -367,6 +378,129 @@ async def _real_app(monkeypatch, tag):
     return main, database, garmin_auth
 
 
+class HttpResp:
+    """What Client._http_post returns: .ok / .status_code / .text / .json()."""
+    def __init__(self, code, body=None):
+        self.status_code, self.ok, self.text, self._b = code, code < 400, "", body or {}
+
+    def json(self):
+        return self._b
+
+
+def _refresh_endpoint(monkeypatch, answer):
+    """Stub the DI refresh POST. answer(n) -> HttpResp (n counts calls from 1) or raises."""
+    calls = {"n": 0}
+
+    def post(self, url, **kw):
+        calls["n"] += 1
+        return answer(calls["n"])
+    monkeypatch.setattr(garminconnect.client.Client, "_http_post", post)
+    return calls
+
+
+def _api(monkeypatch, good_when):
+    """The API session: 401 unless good_when(bearer token) says the token works."""
+    class Sess:
+        def request(self, method, url, headers=None, **k):
+            token = (headers or {}).get("Authorization", "").replace("Bearer ", "")
+            if good_when(token):
+                r = HttpResp(200, {"displayName": "u", "fullName": "f",
+                                   "userData": {"measurementSystem": "metric"}})
+                r.status_code = 200
+                return r
+            r = HttpResp(401)
+            r.text = "Unauthorized"
+            return r
+    C = garminconnect.client.Client
+    orig = C.__init__
+
+    def init(self, *a, **k):
+        orig(self, *a, **k)
+        self._api_session = Sess()
+    monkeypatch.setattr(C, "__init__", init)
+
+
+async def test_expired_token_and_a_refresh_outage_is_not_a_revocation(monkeypatch):
+    main, database, garmin_auth = await _real_app(monkeypatch, "g40")
+    monkeypatch.setattr(garminconnect.client.Client, "_refresh_session", REAL_REFRESH_SESSION)
+    await _seed(database, 2, _real_tokens())
+    _api(monkeypatch, lambda t: False)                       # access token expired
+    _refresh_endpoint(monkeypatch, lambda n: HttpResp(503))  # ...and the refresh endpoint is down
+    with tenancy.user_context(2):
+        with pytest.raises(garmin_auth.GarminUnavailable):
+            await garmin_auth.get_garmin()
+    assert (await _status(database, 2)).status == "ok"
+
+
+async def test_a_refresh_endpoint_429_or_a_connection_error_is_also_an_outage(monkeypatch):
+    main, database, garmin_auth = await _real_app(monkeypatch, "g41")
+    monkeypatch.setattr(garminconnect.client.Client, "_refresh_session", REAL_REFRESH_SESSION)
+    await _seed(database, 2, _real_tokens())
+    _api(monkeypatch, lambda t: False)
+    for answer in (lambda n: HttpResp(429), lambda n: (_ for _ in ()).throw(requests.ConnectionError("x"))):
+        _refresh_endpoint(monkeypatch, answer)
+        with tenancy.user_context(2):
+            with pytest.raises(garmin_auth.GarminUnavailable):
+                await garmin_auth.get_garmin()
+        assert (await _status(database, 2)).status == "ok"
+
+
+async def test_expired_token_and_a_refused_refresh_needs_a_reconnect(monkeypatch):
+    main, database, garmin_auth = await _real_app(monkeypatch, "g42")
+    monkeypatch.setattr(garminconnect.client.Client, "_refresh_session", REAL_REFRESH_SESSION)
+    await _seed(database, 2, _real_tokens())
+    _api(monkeypatch, lambda t: False)
+    _refresh_endpoint(monkeypatch, lambda n: HttpResp(401))
+    with tenancy.user_context(2):
+        with pytest.raises(garmin_auth.GarminNotConnected):
+            await garmin_auth.get_garmin()
+    assert (await _status(database, 2)).status == "needs_reconnect"
+
+
+async def test_expired_token_and_a_working_refresh_connects_and_saves_the_new_tokens(monkeypatch):
+    main, database, garmin_auth = await _real_app(monkeypatch, "g43")
+    monkeypatch.setattr(garminconnect.client.Client, "_refresh_session", REAL_REFRESH_SESSION)
+    await _seed(database, 2, _real_tokens())
+    new = "n" * 1500
+    _api(monkeypatch, lambda t: t == new)
+    # The library's own refresh (inside its API call, errors swallowed) is down for the
+    # three profile attempts; ours, made afterwards to find out why, succeeds.
+    _refresh_endpoint(monkeypatch, lambda n: HttpResp(503) if n <= 3 else HttpResp(
+        200, {"access_token": new, "refresh_token": "rotated-" + "r" * 600}))
+    with tenancy.user_context(2):
+        g = await garmin_auth.get_garmin()
+    assert g.client.di_token == new
+    cred = await _status(database, 2)
+    assert cred.status == "ok" and "rotated-" in json.loads(cred.data["tokens"])["di_refresh_token"]
+
+
+async def test_run_classifies_a_401_by_what_the_refresh_endpoint_says(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g44")
+    import garmin_auth
+    await _seed(database, 2, "B" * 600)
+    with tenancy.user_context(2):
+        g = await garmin_auth.get_garmin()
+        def api(*a):
+            raise rejected()
+        g.get_activities = api
+        g.client.refresh_error = GarminConnectAuthenticationError("DI token refresh failed: 503 x")
+        with pytest.raises(garmin_auth.GarminUnavailable):
+            await garmin_auth.run(g, "get_activities", 0, 1)
+        assert (await _status(database, 2)).status == "ok"
+        # refresh works, the retried call works: the caller never notices
+        calls = []
+        def flaky(*a):
+            calls.append(1)
+            if len(calls) == 1:
+                raise rejected()
+            return ["activity"]
+        g.get_activities = flaky
+        g.client.refresh_error = None
+        assert await garmin_auth.run(g, "get_activities", 0, 1) == ["activity"]
+        assert len(calls) == 2 and g.client.refreshed == 1
+    assert (await _status(database, 2)).data == {"tokens": "F" * 600}   # rotated and saved
+
+
 async def test_a_garmin_outage_does_not_disconnect_the_user(monkeypatch):
     main, database, garmin_auth = await _real_app(monkeypatch, "g20")
     assert len(_real_tokens()) > 512
@@ -397,6 +531,7 @@ async def test_a_genuine_401_from_garmin_does_need_a_reconnect(monkeypatch):
         r._content = b'{"message": "Unauthorized"}'
         return r
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", unauthorized)
+    _refresh_endpoint(monkeypatch, lambda n: HttpResp(401))   # revoked: refresh refused too
     with tenancy.user_context(2):
         with pytest.raises(garmin_auth.GarminNotConnected):
             await garmin_auth.get_garmin()

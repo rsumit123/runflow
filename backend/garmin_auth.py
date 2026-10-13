@@ -188,9 +188,62 @@ def _lock(uid: int) -> asyncio.Lock:
     return _client_locks.setdefault(uid, asyncio.Lock())
 
 
+class _TokensRejected(Exception):
+    """Garmin's token endpoint refused these tokens: only a new sign-in helps."""
+
+
+def refresh_outcome(g) -> str:
+    """Ask Garmin's refresh endpoint itself: 'ok', 'rejected' or 'unavailable'.
+
+    The library calls Client._refresh_di_token on a 401 but swallows every failure
+    at debug level (_refresh_session), so "access token expired and the refresh
+    endpoint is down" looks exactly like "token revoked". Calling it directly gives
+    the real answer. Client._refresh_di_token signals:
+      - no refresh token held:      GarminConnectAuthenticationError("No DI refresh token available")
+      - endpoint answered not-ok:   GarminConnectAuthenticationError(f"DI token refresh failed: {status} ...")
+      - transport failure:          the raw requests/curl_cffi exception
+      - success:                    returns, tokens updated in place
+    Only 400/401/403 (invalid_grant and friends) mean the refresh token is dead;
+    429, 5xx and connection errors say nothing about it.
+    """
+    try:
+        g.client._refresh_di_token()
+        return "ok"
+    except GarminConnectAuthenticationError as exc:
+        msg = str(exc)
+        if "No DI refresh token available" in msg:
+            return "rejected"
+        m = re.search(r"DI token refresh failed: (\d{3})", msg)
+        if m and m.group(1) in ("400", "401", "403"):
+            return "rejected"
+        return "unavailable"
+    except Exception:  # noqa: BLE001
+        return "unavailable"
+
+
 def _restore(tokens: str) -> Garmin:
     g = Garmin()
-    g.login(tokens)
+    try:
+        g.login(tokens)
+        return g
+    except GarminConnectAuthenticationError as exc:
+        if "Username and password are required" in str(exc):
+            raise _TokensRejected() from None      # tokens cannot even be parsed
+        if not _definitive_rejection(exc):
+            raise                                  # no HTTP 401/403 behind it: an outage
+    # The API answered 401/403. That alone does not say the refresh token is dead.
+    outcome = refresh_outcome(g)
+    if outcome == "rejected":
+        raise _TokensRejected()
+    if outcome == "unavailable":
+        raise GarminUnavailable("Garmin is unreachable right now")
+    # Refreshed: the access token had merely expired. Load the profile once more.
+    try:
+        g._load_profile_and_settings()
+    except GarminConnectAuthenticationError as exc:
+        if _definitive_rejection(exc):
+            raise _TokensRejected() from None
+        raise
     return g
 
 
@@ -220,11 +273,11 @@ async def get_garmin() -> Garmin:
             raise GarminNotConnected("stored Garmin tokens are malformed")
         try:
             g = await asyncio.to_thread(_restore, tokens)
+        except _TokensRejected:
+            logger.warning("Garmin tokens rejected for user %s", uid)
+            await _mark_needs_reconnect(uid, tokens)
+            raise GarminNotConnected("Garmin needs reconnecting") from None
         except Exception as exc:  # noqa: BLE001
-            if isinstance(exc, GarminConnectAuthenticationError) and _definitive_rejection(exc):
-                logger.warning("Garmin tokens rejected for user %s", uid)
-                await _mark_needs_reconnect(uid, tokens)
-                raise GarminNotConnected("Garmin needs reconnecting") from None
             # Outage, rate limit, or anything we cannot prove is a rejection: the
             # stored connection stays as it is, and the user retries shortly.
             logger.warning("Garmin unavailable for user %s: %s", uid, type(exc).__name__)
@@ -285,21 +338,33 @@ async def _reject(uid: int, g: Garmin) -> None:
 async def run(g: Garmin, name: str, *args):
     """Call a (blocking) client method off the event loop for the user in context.
 
-    Writes back tokens the library rotated (even if the call then fails), and
-    turns a definitive rejection into needs_reconnect plus GarminNotConnected.
+    Writes back tokens the library rotated (even if the call then fails). A 401 is
+    classified by asking the refresh endpoint why: refused means needs_reconnect +
+    GarminNotConnected, working means the call is retried once, anything else is
+    GarminUnavailable and the stored connection is left alone.
     """
     uid = tenancy.current_user_id()
     try:
-        return await asyncio.to_thread(getattr(g, name), *args)
-    except (GarminConnectAuthenticationError, GarminConnectConnectionError) as exc:
-        if _definitive_rejection(exc, codes="401"):
+        try:
+            return await asyncio.to_thread(getattr(g, name), *args)
+        except (GarminConnectAuthenticationError, GarminConnectConnectionError) as exc:
+            if not _definitive_rejection(exc, codes="401"):
+                if isinstance(exc, GarminConnectAuthenticationError):
+                    raise GarminUnavailable("Garmin is unreachable right now") from None
+                raise
+            outcome = await asyncio.to_thread(refresh_outcome, g)
+            if outcome == "unavailable":
+                raise GarminUnavailable("Garmin is unreachable right now") from None
+            if outcome == "ok":
+                try:
+                    return await asyncio.to_thread(getattr(g, name), *args)
+                except (GarminConnectAuthenticationError, GarminConnectConnectionError) as exc2:
+                    if not _definitive_rejection(exc2, codes="401"):
+                        raise
             logger.warning("Garmin rejected the tokens of user %s", uid)
             if uid is not None:
                 await _reject(uid, g)
             raise GarminNotConnected("Garmin needs reconnecting") from None
-        if isinstance(exc, GarminConnectAuthenticationError):
-            raise GarminUnavailable("Garmin is unreachable right now") from None
-        raise
     finally:
         if uid is not None and _clients.get(uid) is g:
             try:
@@ -398,3 +463,15 @@ async def disconnect(user_id: int) -> None:
         _clients.pop(user_id, None)
         _saved_tokens.pop(user_id, None)
     _drop_pending(user_id)
+
+
+def error_status(exc: BaseException) -> int | None:
+    """The HTTP status Garmin answered with, from an exception or its chain."""
+    for e in _chain(exc):
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if isinstance(status, int):
+            return status
+        m = re.search(r"API Error (\d{3})\b", str(e))
+        if m:
+            return int(m.group(1))
+    return None
