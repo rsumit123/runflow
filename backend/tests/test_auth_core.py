@@ -198,3 +198,28 @@ async def test_credentials_refuse_to_work_without_a_key(monkeypatch):
     async with database.async_session() as s:
         with pytest.raises(RuntimeError, match="CREDENTIALS_KEY"):
             await credentials.put(s, 7, "strava", {"x": 1})
+
+
+async def test_unknown_email_still_costs_a_password_check(monkeypatch):
+    """Without the dummy check, an unknown email answers measurably faster than
+    a wrong password, and timing reveals who has an account."""
+    database = await _fresh(monkeypatch, "a7")
+    import auth
+    async with database.async_session() as s:
+        await auth.create_user(s, "real@b.co", "a long password")
+        await s.commit()
+    calls = []
+    real = auth.verify_password
+    monkeypatch.setattr(auth, "verify_password",
+                        lambda pw, h: calls.append(h) or real(pw, h))
+    async with database.async_session() as s:
+        assert await auth.authenticate(s, "ghost@b.co", "a long password") is None
+        assert await auth.authenticate(s, "real@b.co", "wrong password!!") is None
+    assert len(calls) == 2  # one bcrypt check per attempt, whether or not the email exists
+
+
+async def test_malformed_email_is_just_a_failed_login(monkeypatch):
+    database = await _fresh(monkeypatch, "a8")
+    import auth
+    async with database.async_session() as s:
+        assert await auth.authenticate(s, "not-an-email", "a long password") is None
