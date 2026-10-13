@@ -19,6 +19,16 @@ STRAVA_REDIRECT_URI = os.getenv("STRAVA_REDIRECT_URI",
                                 "http://localhost:8000/api/strava/callback")
 
 # Webhook
+def _int_env(name: str) -> int | None:
+    try:
+        return int(os.getenv(name, "").strip())
+    except ValueError:
+        return None
+
+
+# The id Strava returns when the webhook subscription is created. When set, events
+# that carry a different subscription_id are ignored. Empty means unchecked.
+STRAVA_SUBSCRIPTION_ID = _int_env("STRAVA_SUBSCRIPTION_ID")
 STRAVA_WEBHOOK_VERIFY_TOKEN = os.getenv("strava_webhook_verify_token", "runflow_webhook_2024")
 
 

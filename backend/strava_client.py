@@ -11,11 +11,15 @@ logger = logging.getLogger(__name__)
 STREAM_TYPES = ["latlng", "altitude", "distance", "time", "velocity_smooth"]
 
 
+class StravaNotConnected(RuntimeError):
+    """The user has no usable Strava connection (never linked, or Strava revoked it)."""
+
+
 class StravaClient:
     """Async Strava API client with automatic token refresh and rate-limit handling."""
 
     def __init__(self, access_token: str = "", refresh_token: str = "",
-                 on_refresh=None) -> None:
+                 on_refresh=None, on_invalid=None) -> None:
         self.access_token: str = access_token
         self.refresh_token: str = refresh_token
         self.client_id: str = config.STRAVA_CLIENT_ID
@@ -25,6 +29,9 @@ class StravaClient:
         # Called with {access_token, refresh_token, expires_at} after a refresh,
         # so the owning user's stored credentials stay current.
         self._on_refresh = on_refresh
+        # Called once when Strava rejects the refresh token (the grant is gone).
+        self._on_invalid = on_invalid
+        self._refresh_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -42,27 +49,42 @@ class StravaClient:
     # Token refresh
     # ------------------------------------------------------------------
     async def refresh_access_token(self) -> str:
-        """Use the refresh token to obtain a new access token."""
-        client = await self._get_client()
-        resp = await client.post(
-            config.STRAVA_TOKEN_URL,
-            data={
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "grant_type": "refresh_token",
-                "refresh_token": self.refresh_token,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        self.access_token = data["access_token"]
-        self.refresh_token = data["refresh_token"]
-        if self._on_refresh is not None:
-            await self._on_refresh({"access_token": self.access_token,
-                                    "refresh_token": self.refresh_token,
-                                    "expires_at": data.get("expires_at")})
-        logger.info("Strava access token refreshed successfully.")
-        return self.access_token
+        """Use the refresh token to obtain a new access token.
+
+        Strava rotates refresh tokens, so two refreshes racing would burn the
+        token one of them still needs. They are serialised, and a caller that
+        waited finds the token already renewed and skips its own refresh.
+        """
+        seen = self.access_token
+        async with self._refresh_lock:
+            if self.access_token != seen:
+                return self.access_token
+            client = await self._get_client()
+            resp = await client.post(
+                config.STRAVA_TOKEN_URL,
+                data={
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token,
+                },
+            )
+            if resp.status_code in (400, 401):
+                # The grant was revoked or the refresh token is dead.
+                logger.warning("Strava rejected the refresh token (%s).", resp.status_code)
+                if self._on_invalid is not None:
+                    await self._on_invalid()
+                raise StravaNotConnected("Strava is not connected")
+            resp.raise_for_status()
+            data = resp.json()
+            self.access_token = data["access_token"]
+            self.refresh_token = data["refresh_token"]
+            if self._on_refresh is not None:
+                await self._on_refresh({"access_token": self.access_token,
+                                        "refresh_token": self.refresh_token,
+                                        "expires_at": data.get("expires_at")})
+            logger.info("Strava access token refreshed successfully.")
+            return self.access_token
 
     # ------------------------------------------------------------------
     # Core request helper with 401 retry and rate-limit back-off
@@ -124,6 +146,10 @@ class StravaClient:
         if before is not None:
             params["before"] = before
         return await self._request("GET", "/athlete/activities", params=params)
+
+    async def get_athlete(self) -> dict[str, Any]:
+        """The authenticated athlete; a cheap call that proves the grant still works."""
+        return await self._request("GET", "/athlete")
 
     async def get_activity_detail(self, activity_id: int) -> dict[str, Any]:
         """Get a detailed activity by ID (includes splits_metric etc.)."""

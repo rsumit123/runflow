@@ -14,6 +14,7 @@ from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+import auth
 import auth_routes
 import config
 import credentials
@@ -2194,31 +2195,55 @@ async def delete_goal(goal_id: int, session: AsyncSession = Depends(get_session)
 @app.get("/api/strava/connect")
 async def strava_connect():
     """Send the logged-in user to Strava to grant access."""
-    return RedirectResponse(strava_accounts.authorize_url(tenancy.current_user_id()),
+    # The nonce is signed into the state AND set as a cookie, so the callback only
+    # accepts a state that this same browser asked for. Otherwise an attacker could
+    # hand a victim their own authorize URL and have the victim's Strava linked
+    # to the attacker's account.
+    nonce = strava_accounts.new_nonce()
+    resp = RedirectResponse(strava_accounts.authorize_url(tenancy.current_user_id(), nonce),
                             status_code=302)
+    resp.set_cookie(strava_accounts.NONCE_COOKIE, nonce, max_age=strava_accounts.STATE_TTL_SEC,
+                    httponly=True, secure=config.SESSION_COOKIE_SECURE, samesite="lax",
+                    path="/api/strava")
+    return resp
 
 
 @app.get("/api/strava/callback")
-async def strava_callback(code: str | None = None, state: str | None = None,
-                          error: str | None = None):
-    """Strava's redirect. Public: the user comes from the signed state, not a cookie."""
+async def strava_callback(request: Request, code: str | None = None,
+                          state: str | None = None, error: str | None = None):
+    """Strava's redirect. Public, so it proves who is linking by itself: the signed
+    state names a user, the nonce cookie proves this browser started the flow, and
+    the login cookie must be that same user. The nonce cookie is single use."""
     back = f"{config.FRONTEND_URL}/settings"
-    uid = strava_accounts.verify_state(state or "")
-    if uid is None:
-        return RedirectResponse(f"{back}?strava=error&reason=state", status_code=302)
+
+    def done(query: str) -> RedirectResponse:
+        resp = RedirectResponse(f"{back}?{query}", status_code=302)
+        resp.delete_cookie(strava_accounts.NONCE_COOKIE, path="/api/strava",
+                           httponly=True, secure=config.SESSION_COOKIE_SECURE, samesite="lax")
+        return resp
+
+    parsed = strava_accounts.parse_state(state or "")
+    if parsed is None:
+        return done("strava=error&reason=state")
+    uid, nonce = parsed
+    if not strava_accounts.nonce_matches(request.cookies.get(strava_accounts.NONCE_COOKIE), nonce):
+        return done("strava=error&reason=state")
+    async with async_session() as s:
+        session_uid = await auth.resolve_session(
+            s, request.cookies.get(config.SESSION_COOKIE_NAME))
+    if session_uid != uid:
+        return done("strava=error&reason=state")
     if error or not code:
-        return RedirectResponse(f"{back}?strava=error&reason=denied", status_code=302)
+        return done("strava=error&reason=denied")
     try:
         data = await strava_accounts.exchange_code(code)
-    except strava_accounts.StravaConnectError as exc:
-        return RedirectResponse(f"{back}?strava=error&reason={exc.reason}", status_code=302)
-    try:
         await strava_accounts.save_tokens(uid, data)
+    except strava_accounts.StravaConnectError as exc:
+        return done(f"strava=error&reason={exc.reason}")
     except credentials.AlreadyLinked:
         # One Strava athlete maps to one RunFlow user, or webhooks are ambiguous.
-        return RedirectResponse(f"{back}?strava=error&reason=already_linked",
-                                status_code=302)
-    return RedirectResponse(f"{back}?strava=connected", status_code=302)
+        return done("strava=error&reason=already_linked")
+    return done("strava=connected")
 
 
 @app.post("/api/strava/disconnect")
@@ -2244,76 +2269,114 @@ async def webhook_verify(
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
+# Imports queued from webhooks, per user. Anyone can POST an event, so each user's
+# in-flight imports are capped and a repeat of one already queued is dropped.
+WEBHOOK_MAX_PENDING_PER_USER = 10
+_webhook_pending: dict[int, set[int]] = {}
+
+
+def _clip(value: Any) -> str:
+    return str(value)[:40]
+
+
 @app.post("/api/webhook")
 async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
     """
     Receive Strava webhook events.
     Strava sends: { aspect_type, event_time, object_id, object_type, owner_id, subscription_id }
+
+    This endpoint is public and every field is attacker-controlled, so nothing in
+    an event is acted on without a check.
     """
     try:
         body = await request.json()
     except Exception:
         return {"status": "ok"}
+    if not isinstance(body, dict):
+        return {"status": "ok"}
+
+    expected_sub = config.STRAVA_SUBSCRIPTION_ID
+    if expected_sub is not None and body.get("subscription_id") != expected_sub:
+        logger.info("Webhook: ignored event for subscription %s", _clip(body.get("subscription_id")))
+        return {"status": "ok"}
 
     object_type = body.get("object_type")
     aspect_type = body.get("aspect_type")
     activity_id = body.get("object_id")
-
-    logger.info("Webhook received: type=%s, aspect=%s, id=%s", object_type, aspect_type, activity_id)
-
     owner_id = body.get("owner_id")
+
+    logger.info("Webhook received: type=%s, aspect=%s, id=%s",
+                _clip(object_type), _clip(aspect_type), _clip(activity_id))
+
     if (object_type == "athlete" and aspect_type == "update"
             and str((body.get("updates") or {}).get("authorized")).lower() == "false"):
         async with async_session() as s:
             uid = await credentials.user_for_external(s, "strava", owner_id)
-        if uid is not None:
+        if uid is None:
+            return {"status": "ok"}
+        # The event alone proves nothing (the athlete id is public): ask Strava.
+        if await strava_accounts.token_revoked(uid):
             await strava_accounts.forget(uid)
             logger.info("Strava deauthorized for user %s", uid)
+        else:
+            logger.warning("Webhook: deauthorize for user %s but Strava still accepts "
+                           "the token; ignored", uid)
         return {"status": "ok"}
 
     # Only process activity creates/updates
     if object_type != "activity" or aspect_type not in ("create", "update"):
         return {"status": "ok"}
 
-    if not activity_id:
+    # object_id goes into a Strava URL path: only a positive integer may.
+    if not isinstance(activity_id, int) or isinstance(activity_id, bool) or activity_id <= 0:
         return {"status": "ok"}
 
     async with async_session() as s:
         uid = await credentials.user_for_external(s, "strava", owner_id)
     if uid is None:
-        logger.info("Webhook: no user for Strava athlete %s; ignored", owner_id)
+        logger.info("Webhook: no user for Strava athlete %s; ignored", _clip(owner_id))
         return {"status": "ok"}
+
+    pending = _webhook_pending.setdefault(uid, set())
+    if activity_id in pending:
+        return {"status": "ok"}
+    if len(pending) >= WEBHOOK_MAX_PENDING_PER_USER:
+        logger.warning("Webhook: user %s already has %d imports queued; event ignored",
+                       uid, len(pending))
+        return {"status": "ok"}
+    pending.add(activity_id)
 
     # Process in background, as that user
     background_tasks.add_task(_webhook_import_activity, activity_id, uid)
-
     return {"status": "ok"}
 
 
 async def _webhook_import_activity(activity_id: int, user_id: int):
     """Background task: fetch and import a single activity from webhook."""
-    with tenancy.user_context(user_id):
-        import asyncio
-        # Wait a bit for Strava to finish processing streams
-        await asyncio.sleep(30)
-        try:
-            async with async_session() as session:
-                # Fetch activity from Strava API
-                act_data = await strava.get_activity_detail(activity_id)
+    try:
+        with tenancy.user_context(user_id):
+            # Wait a bit for Strava to finish processing streams
+            await _asyncio.sleep(30)
+            try:
+                async with async_session() as session:
+                    # Fetch activity from Strava API
+                    act_data = await strava.get_activity_detail(activity_id)
 
-                sport = act_data.get("sport_type") or act_data.get("type") or ""
-                if not _is_running(sport):
-                    logger.info("Webhook: skipping non-running activity %s (type=%s)", activity_id, sport)
-                    return
+                    sport = act_data.get("sport_type") or act_data.get("type") or ""
+                    if not _is_running(sport):
+                        logger.info("Webhook: skipping non-running activity %s (type=%s)", activity_id, sport)
+                        return
 
-                # Upsert activity
-                act = await _upsert_activity_summary(session, act_data)
-                await _import_detail_and_streams(session, act)
-                await session.commit()
+                    # Upsert activity
+                    act = await _upsert_activity_summary(session, act_data)
+                    await _import_detail_and_streams(session, act)
+                    await session.commit()
 
-                logger.info("Webhook: imported activity %s (%s)", activity_id, act.name)
-        except Exception as exc:
-            logger.error("Webhook: failed to import activity %s: %s", activity_id, exc)
+                    logger.info("Webhook: imported activity %s (%s)", activity_id, act.name)
+            except Exception as exc:
+                logger.error("Webhook: failed to import activity %s: %s", activity_id, exc)
+    finally:
+        _webhook_pending.get(user_id, set()).discard(activity_id)
 
 
 @app.get("/api/phases")
