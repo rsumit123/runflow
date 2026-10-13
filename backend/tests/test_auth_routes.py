@@ -230,3 +230,28 @@ async def test_the_apps_own_lifespan_runs_and_starts_the_mcp_manager(monkeypatch
     assert status == 200, text
     payload = next((l[5:].strip() for l in text.splitlines() if l.startswith("data:")), text)
     assert "result" in json.loads(payload), text
+
+
+async def test_api_responses_are_no_store_and_vary_on_cookie(monkeypatch):
+    """A signed-out browser must not replay personal data from its cache."""
+    main, database = await setup_app(monkeypatch, "r15")
+    cookie = await session_cookie(database, 1)
+
+    def check(r):
+        assert r.headers["cache-control"] == "no-store", r.headers
+        assert "cookie" in r.headers["vary"].lower(), r.headers
+
+    async with client(main, cookie) as c:
+        r = await c.get("/api/activities")
+        assert r.status_code == 200
+        check(r)
+    async with client(main) as c:
+        r = await c.get("/api/activities")
+        assert r.status_code == 401
+        check(r)
+        check(await c.post("/api/auth/login", json={"email": "a@example.com",
+                                                    "password": "wrong password!"}))
+    async with client(main, origin="https://evil.example") as c:
+        r = await c.post("/api/auth/logout")
+        assert r.status_code == 403
+        check(r)

@@ -67,6 +67,26 @@ async def _send_json(send, status: int, body: dict) -> None:
     await send({"type": "http.response.body", "body": payload})
 
 
+def _no_store(send):
+    """Wrap send so every /api response says it must not be cached and varies by
+    cookie: a signed-out browser must not replay personal data from its HTTP
+    cache or bfcache. Headers the route already set are not duplicated."""
+    async def wrapped(message):
+        if message["type"] == "http.response.start":
+            headers = list(message.get("headers") or [])
+            names = {k.lower(): i for i, (k, _v) in enumerate(headers)}
+            if b"cache-control" not in names:
+                headers.append((b"cache-control", b"no-store"))
+            if b"vary" not in names:
+                headers.append((b"vary", b"Cookie"))
+            elif b"cookie" not in headers[names[b"vary"]][1].lower():
+                k, v = headers[names[b"vary"]]
+                headers[names[b"vary"]] = (k, v + b", Cookie")
+            message = {**message, "headers": headers}
+        await send(message)
+    return wrapped
+
+
 class AuthMiddleware:
     """Resolve the session cookie and run the request as that user.
 
@@ -91,6 +111,7 @@ class AuthMiddleware:
             return await send({"type": "websocket.close", "code": 1008})
         if scope["type"] != "http" or not route_path.startswith("/api/"):
             return await self.app(scope, receive, send)
+        send = _no_store(send)
         method = scope["method"]
         if method == "OPTIONS":
             return await self.app(scope, receive, send)
