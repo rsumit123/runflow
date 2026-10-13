@@ -45,6 +45,16 @@ what actually happened.
   stale prescription
 - Readiness from Garmin's recovery metrics, and heat-adjusted pace targets
 
+**Accounts**
+
+- Sign-up is invite-only. The owner creates an invite code from the server shell
+  (`admin.py create-invite`) or Settings, and a new user signs up with it.
+- Login is email and password, with a session cookie.
+- Each user connects their own Strava and Garmin in Settings. Their tokens are
+  stored encrypted, and every query is scoped to the signed-in user.
+- Each user gets their own connector URL for the Claude app, which can be
+  rotated from Settings.
+
 **Claude connector (MCP)**
 
 RunFlow runs an [MCP](https://modelcontextprotocol.io) server, so the whole
@@ -124,10 +134,23 @@ Copy `.env.example` to `.env` in the repository root and fill it in.
 | Variable | Purpose |
 |---|---|
 | `DB_PATH` | SQLite file location |
-| `strava_client_id`, `strava_client_secret` | Strava import and webhook |
-| `GARMIN_TOKENSTORE` | Path to the saved Garmin OAuth token store — see [GARMIN.md](GARMIN.md) |
-| `OPENROUTER_API_KEY` | Per-run chat and narrative insights |
-| `MCP_SECRET` | Mounts the MCP connector. Unset means it is not mounted at all. |
+| `strava_client_id`, `strava_client_secret` | The Strava app used for every user's connection |
+| `STRAVA_REDIRECT_URI` | Strava OAuth callback; must be on the app's Authorization Callback Domain |
+| `strava_webhook_verify_token` | Token Strava echoes when the webhook is verified |
+| `STRAVA_SUBSCRIPTION_ID` | Webhook events from any other subscription are ignored. Empty skips the check. |
+| `CREDENTIALS_KEY` | Fernet key that encrypts stored Strava and Garmin tokens |
+| `SESSION_STATE_SECRET` | Signs the OAuth `state` of the Strava connect flow |
+| `SESSION_COOKIE_SECURE` | `1` (default) for HTTPS; `0` for local http development only |
+| `FRONTEND_URL` | Where the browser app lives |
+| `PUBLIC_API_URL` | This API's public base URL |
+| `GARMIN_TOKENSTORE` | Legacy Garmin token directory, read once by the migration — see [GARMIN.md](GARMIN.md) |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Per-run chat and narrative insights |
+| `MCP_SECRET` | Legacy single connector secret, read once by the migration |
+| `ENV_PATH` | Alternative path to the `.env` file (optional) |
+
+For local development set `SESSION_COOKIE_SECURE=0`, since the cookie is
+otherwise Secure and a browser will not send it over plain http. Create the
+first user with `python admin.py` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
 ## Repository layout
 
@@ -148,9 +171,10 @@ IDEAS.md          feature backlog
 
 ## Notes
 
-Built for one runner, which shapes the design: SQLite rather than Postgres,
-no multi-user model, and defaults tuned to my own physiology. The coaching logic
-is general; the thresholds are not.
+Built for a handful of runners rather than a crowd, which shapes the design:
+SQLite rather than Postgres, invite-only accounts in one shared database, and
+defaults tuned to my own physiology. The coaching logic is general; the
+thresholds are not.
 
 ## License
 
