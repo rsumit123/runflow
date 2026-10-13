@@ -13,7 +13,7 @@
 - [x] Interval Analysis - User-defined rep count + distance analysis
 - [x] Run Analysis - Percentiles, PR detection, phase comparison
 - [x] Run Insights - Route-aware narrative with segment-by-segment comparison to recent runs
-- [x] MCP Connector - RunFlow as a Claude app custom connector (15 tools; reads + Garmin sync + run notes)
+- [x] MCP Connector - RunFlow as a Claude app custom connector (24 tools; reads, Garmin sync, run notes, plan and watch writes)
 - [x] MCP Coaching Reads - review_run, get_fitness_model, get_training_block, get_plan_status; plus `GET /api/fitness-model`
 - [x] MCP Coaching Writes - plan creation, workout moves, watch pushes, suggestion and calibration apply (plan 2 of 2)
 - [x] Suggestion apply kept the watch in step - applying a suggestion changed the plan but never re-pushed; a stale structure now unschedules instead

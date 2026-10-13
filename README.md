@@ -14,8 +14,8 @@ watch, and then tells me whether I actually followed it.
 
 Every running app I tried would tell me *what* I did — distance, pace, a heart
 rate graph — and then stop. None of them would tell me what to do tomorrow, and
-none of them knew that my "easy" runs were being run at 90% of max heart rate,
-which is the reason I kept getting injured.
+none of them noticed that my "easy" runs were being run at close to 90% of max
+heart rate — which is not easy running, and not much use as base training.
 
 So RunFlow is built around the part those apps leave out: a model of my current
 fitness, a plan derived from it, and an honest comparison between the plan and
@@ -37,7 +37,7 @@ what actually happened.
 
 - A fitness model: easy pace, threshold pace, heart rate ceilings, acute and
   chronic load, and acute:chronic workload ratio
-- Plan generation for 5 k through half marathon, plus a separate sprint engine
+- Plan generation for a 5 k goal, with a separate engine for 100 m sprint blocks
 - Workout push to Garmin — the plan appears on the watch as a structured workout
 - Plan adherence: planned versus completed, with a grader that flags easy runs
   run hard
