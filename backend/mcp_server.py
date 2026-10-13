@@ -548,6 +548,14 @@ async def sync_garmin() -> str:
     )
 
 
+# call_api hands the model whatever these routes return, and the model also reads
+# untrusted text (run notes, imported names). A prompt injection there must not be
+# able to read invite codes, account details, connector state or provider
+# credentials, so these prefixes are never callable through it.
+CALL_API_DENY = ("/api/admin", "/api/auth", "/api/connector", "/api/strava",
+                 "/api/garmin", "/api/webhook")
+
+
 def _get_route_index() -> list[str]:
     """Every registered GET path under /api, read from the app's own route table.
 
@@ -558,7 +566,8 @@ def _get_route_index() -> list[str]:
     for r in _main.app.routes:
         methods = getattr(r, "methods", None) or set()
         path = getattr(r, "path", "")
-        if "GET" in methods and path.startswith("/api"):
+        if ("GET" in methods and path.startswith("/api")
+                and not path.startswith(CALL_API_DENY)):
             paths.add(path)
     return sorted(paths)
 

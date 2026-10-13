@@ -118,7 +118,8 @@ async def test_auto_sync_runs_each_user_in_their_own_context(monkeypatch):
     monkeypatch.setattr(main, "_auto_sync_once", fake_once)
     await main._auto_sync_pass()
     assert seen == [(1, True, 1), (2, False, 2)]  # user 1's failure did not stop user 2
-    assert "garmin down" in main._last_auto_sync[1]["error"]
+    # only the exception type is stored, never its text
+    assert main._last_auto_sync[1]["error"] == "RuntimeError"
 
 
 async def test_sync_status_is_per_user(monkeypatch):

@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -94,61 +95,146 @@ AUTO_SYNC_INTERVAL_SEC = 2 * 60 * 60
 _last_auto_sync: dict[int, dict[str, Any]] = {}
 
 
+AUTO_SYNC_USER_TIMEOUT_SEC = 600
+_RECONNECT_NOTE = {"garmin": "Reconnect Garmin in Settings",
+                   "strava": "Reconnect Strava in Settings"}
+
+
 async def _auto_sync_once(user_id: int, has_garmin: bool) -> None:
     """One pass for the user in context: new runs and recovery from Garmin when
     connected, then the weather catch-up for everyone.
 
     The weather catch-up matters because the archive lags the run by a few days.
     Without a scheduled retry a fresh run keeps null conditions forever, and
-    every pace comparison silently loses its heat normalisation.
+    every pace comparison silently loses its heat normalisation. It has its own
+    try block so a Garmin failure cannot skip it.
     """
     imported = 0
+    garmin_exc: BaseException | None = None
     if has_garmin:
+        try:
+            async with async_session() as session:
+                res = await import_garmin_sync(session)
+            imported = res.get("imported", 0)
+            async with async_session() as session:
+                await _wellness(session, datetime.utcnow().date().isoformat(), refresh=True)
+        except Exception as exc:  # noqa: BLE001 - re-raised after the weather catch-up
+            garmin_exc = exc
+    wx: dict = {}
+    try:
         async with async_session() as session:
-            res = await import_garmin_sync(session)
-        imported = res.get("imported", 0)
-        async with async_session() as session:
-            await _wellness(session, datetime.utcnow().date().isoformat(), refresh=True)
-    async with async_session() as session:
-        wx = await _backfill_weather(session)
-    _last_auto_sync[user_id] = {"at": datetime.utcnow().isoformat(), "imported": imported,
-                                "weather_updated": wx.get("updated", 0), "error": None}
+            wx = await _backfill_weather(session)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Weather backfill failed for user %s: %s", user_id, type(exc).__name__)
+        if garmin_exc is None:
+            raise
+    if garmin_exc is not None:
+        raise garmin_exc
+    status = {"at": datetime.utcnow().isoformat(), "imported": imported,
+              "weather_updated": wx.get("updated", 0), "error": None}
+    if not has_garmin:
+        status["note"] = "Runs arrive via the Strava webhook; nothing is pulled here."
+    _last_auto_sync[user_id] = status
     if imported:
         logger.info("Auto-sync imported %s new run(s) for user %s", imported, user_id)
 
 
+def _safe_error(exc: BaseException) -> str:
+    """What the status endpoint may show: fixed text only, never arbitrary str(exc)."""
+    if isinstance(exc, garmin_auth.GarminAccessError):
+        return str(exc)[:200]
+    return type(exc).__name__
+
+
 async def _auto_sync_pass() -> None:
-    """Every connected user, each in their own context. One failure never stops the rest."""
+    """Every connected user, each in their own context. One failure never stops the rest.
+
+    Users whose Garmin or Strava needs reconnecting are visited too, for the
+    weather backfill only, and told to reconnect.
+    """
+    from models import Credential
     async with async_session() as s:
-        garmin_users = set(await credentials.users_with(s, "garmin"))
-        strava_users = set(await credentials.users_with(s, "strava"))
-    for uid in sorted(garmin_users | strava_users):
+        rows = (await s.execute(select(Credential.user_id, Credential.provider,
+                                       Credential.status))).all()
+    garmin_users = {u for u, p, st in rows if p == "garmin" and st == "ok"}
+    reconnect: dict[int, str] = {}
+    for u, p, st in sorted(rows, key=lambda r: (r[0], r[1] != "garmin")):
+        if st != "ok":
+            reconnect.setdefault(u, p)
+    for uid in sorted({u for u, _, _ in rows}):
         with tenancy.user_context(uid):
             try:
-                await _auto_sync_once(uid, uid in garmin_users)
+                await _asyncio.wait_for(_auto_sync_once(uid, uid in garmin_users),
+                                        timeout=AUTO_SYNC_USER_TIMEOUT_SEC)
+            except _asyncio.TimeoutError:
+                logger.warning("Auto-sync for user %s timed out", uid)
+                _last_auto_sync[uid] = {"at": datetime.utcnow().isoformat(), "imported": 0,
+                                        "error": "Sync took too long; it will continue next pass"}
             except Exception as exc:  # noqa: BLE001 - a failed sync must never kill the loop
-                logger.warning("Auto-sync failed for user %s: %s", uid, exc)
+                logger.warning("Auto-sync failed for user %s: %s", uid, type(exc).__name__)
                 _last_auto_sync[uid] = {"at": datetime.utcnow().isoformat(),
-                                        "imported": 0, "error": str(exc)[:200]}
+                                        "imported": 0, "error": _safe_error(exc)}
+            if uid in reconnect:
+                prev = _last_auto_sync.get(uid) or {"at": datetime.utcnow().isoformat(),
+                                                    "imported": 0}
+                _last_auto_sync[uid] = {**prev, "error": _RECONNECT_NOTE[reconnect[uid]]}
+                _last_auto_sync[uid].pop("note", None)
             if uid in garmin_users:
                 try:
                     await garmin_auth.save_if_rotated(uid)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Saving rotated Garmin tokens failed for user %s: %s",
-                                   uid, exc)
+                                   uid, type(exc).__name__)
+
+
+def _sleep_for(elapsed: float) -> float:
+    """Passes start on a fixed schedule: sleep the rest of the interval."""
+    return max(0, AUTO_SYNC_INTERVAL_SEC - elapsed)
 
 
 async def _auto_sync_loop() -> None:
     while True:
+        started = time.monotonic()
         try:
             await _auto_sync_pass()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Auto-sync pass failed: %s", exc)
-        await _asyncio.sleep(AUTO_SYNC_INTERVAL_SEC)
+            logger.warning("Auto-sync pass failed: %s", type(exc).__name__)
+        await _asyncio.sleep(_sleep_for(time.monotonic() - started))
+
+
+def _warn_on_dev_public_url() -> None:
+    if config.SESSION_COOKIE_SECURE and config.PUBLIC_API_URL.startswith("http://localhost"):
+        logger.warning("PUBLIC_API_URL is %s but cookies are Secure: connector URLs shown "
+                       "to users will be wrong. Set PUBLIC_API_URL to the public API origin.",
+                       config.PUBLIC_API_URL)
+
+
+class _RedactConnectorToken(logging.Filter):
+    """The connector token is the credential and sits in the URL path."""
+    _pat = re.compile(r"/mcp/[^/\s\"?]+")
+
+    def filter(self, record):
+        def clean(v):
+            return self._pat.sub("/mcp/<redacted>", v) if isinstance(v, str) else v
+        record.msg = clean(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(clean(a) for a in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: clean(v) for k, v in record.args.items()}
+        return True
+
+
+_access_log = logging.getLogger("uvicorn.access")
+for _f in [f for f in _access_log.filters if getattr(f, "_runflow_redact", False)]:
+    _access_log.removeFilter(_f)
+_redact = _RedactConnectorToken()
+_redact._runflow_redact = True
+_access_log.addFilter(_redact)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _warn_on_dev_public_url()
     await init_db()
     task = _asyncio.create_task(_auto_sync_loop())
     # A mounted sub-application's lifespan never runs, so the MCP session
@@ -3182,7 +3268,9 @@ async def import_garmin_sync(session: AsyncSession = Depends(get_session)):
             except Exception as exc:
                 logger.error("Garmin fetch failed at start=%d: %s", start, exc)
                 if start == 0:
-                    raise HTTPException(status_code=502, detail=f"Garmin fetch failed: {exc}")
+                    # Fixed text: the exception can carry URLs with token fragments,
+                    # and this detail is stored and shown to the user.
+                    raise HTTPException(status_code=502, detail="Garmin fetch failed")
                 break
             if not acts:
                 break
