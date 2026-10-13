@@ -12,6 +12,9 @@
     "react-scripts": "5.0.1",
     "recharts": "^3.8.0"
   },
+  "devDependencies": {
+    "typescript": "4.9.5"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",

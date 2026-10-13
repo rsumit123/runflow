@@ -48,7 +48,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -56,9 +56,8 @@ jobs:
         run: npm ci
 
       - name: Build
-        # CI=true makes react-scripts treat lint warnings as errors; this job
-        # checks that the bundle compiles, which is what a deploy needs.
+        # CI is true on Actions, so react-scripts promotes lint warnings to
+        # errors. The build is clean, so leave it strict.
         env:
-          CI: false
           REACT_APP_API_URL: https://runflow-api.skdev.one/api
         run: npm run build
