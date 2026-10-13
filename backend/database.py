@@ -14,6 +14,11 @@ class Base(DeclarativeBase):
     pass
 
 
+# Nullable with NO default, on purpose: rows the multi-user migration has not
+# backfilled get NULL, which the per-user filter never matches, so they stay
+# invisible rather than becoming anyone's. Never give this a default user.
+_USER_ID = "INTEGER REFERENCES users(id)"
+
 _MIGRATIONS = {
     "activities": {
         "source": "TEXT DEFAULT 'strava'",
@@ -33,25 +38,32 @@ _MIGRATIONS = {
         "training_effect_label": "TEXT",
         "training_load": "FLOAT",
         "notes": "TEXT",
+        "user_id": _USER_ID,
     },
     "splits": {
         "average_cadence": "FLOAT",
+        "user_id": _USER_ID,
     },
     "plans": {
         "sprint_target_sec": "FLOAT",
         "calibrations": "JSON",
+        "user_id": _USER_ID,
     },
     "planned_workouts": {
         "structure": "JSON",
         "garmin_workout_id": "BIGINT",
+        "user_id": _USER_ID,
     },
+    **{t: {"user_id": _USER_ID} for t in (
+        "streams", "best_efforts", "chat_messages", "daily_wellness",
+        "route_labels", "goals", "route_merges")},
 }
 
 
 async def init_db() -> None:
     """Create all tables, then add any missing columns (idempotent)."""
     async with engine.begin() as conn:
-        from models import Activity, Split, Stream  # noqa: F401
+        import models  # noqa: F401 - registers every table on Base.metadata
         await conn.run_sync(Base.metadata.create_all)
         for table, cols in _MIGRATIONS.items():
             existing = await conn.exec_driver_sql(f"PRAGMA table_info({table})")

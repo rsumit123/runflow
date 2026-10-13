@@ -3245,7 +3245,9 @@ async def _wellness(session: AsyncSession, day: str,
     Garmin's numbers for a day keep moving until you've slept and worn the watch,
     so `refresh` re-pulls; otherwise one fetch per day is plenty.
     """
-    row = await session.get(DailyWellness, day)
+    row = (await session.execute(
+        select(DailyWellness).where(DailyWellness.date == day)
+    )).scalar_one_or_none()
     if row is not None and not refresh and row.raw:
         return row.raw
 

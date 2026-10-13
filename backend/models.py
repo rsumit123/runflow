@@ -1,11 +1,13 @@
 from sqlalchemy import (
-    Column, BigInteger, Integer, String, Float, Boolean, Text, DateTime, JSON, ForeignKey
+    Column, BigInteger, Integer, String, Float, Boolean, Text, DateTime, JSON, ForeignKey,
+    UniqueConstraint, Index,
 )
 from sqlalchemy.orm import relationship
 from database import Base
+from tenancy import TenantMixin
 
 
-class Activity(Base):
+class Activity(TenantMixin, Base):
     __tablename__ = "activities"
 
     id = Column(BigInteger, primary_key=True, index=True)  # Strava activity ID
@@ -61,7 +63,7 @@ class Activity(Base):
     best_efforts = relationship("BestEffort", back_populates="activity", cascade="all, delete-orphan")
 
 
-class Split(Base):
+class Split(TenantMixin, Base):
     __tablename__ = "splits"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -79,7 +81,7 @@ class Split(Base):
     activity = relationship("Activity", back_populates="splits")
 
 
-class Stream(Base):
+class Stream(TenantMixin, Base):
     __tablename__ = "streams"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -90,7 +92,7 @@ class Stream(Base):
     activity = relationship("Activity", back_populates="streams")
 
 
-class BestEffort(Base):
+class BestEffort(TenantMixin, Base):
     __tablename__ = "best_efforts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -105,7 +107,7 @@ class BestEffort(Base):
     activity = relationship("Activity", back_populates="best_efforts")
 
 
-class ChatMessage(Base):
+class ChatMessage(TenantMixin, Base):
     """A turn in the conversation about a run.
 
     The chat was previously client-side only: the server took a message list,
@@ -122,7 +124,7 @@ class ChatMessage(Base):
     created_at = Column(DateTime, nullable=True)
 
 
-class DailyWellness(Base):
+class DailyWellness(TenantMixin, Base):
     """One row per day of Garmin recovery data.
 
     Cached so a page load doesn't hit Garmin five times, and kept so readiness
@@ -131,6 +133,8 @@ class DailyWellness(Base):
     """
     __tablename__ = "daily_wellness"
 
+    # Keyed per user: two athletes have a wellness row for the same day.
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     date = Column(String, primary_key=True)             # YYYY-MM-DD
     readiness_score = Column(Integer, nullable=True)
     readiness_level = Column(String, nullable=True)     # Garmin's own label
@@ -144,15 +148,18 @@ class DailyWellness(Base):
     fetched_at = Column(DateTime, nullable=True)
 
 
-class RouteLabel(Base):
+class RouteLabel(TenantMixin, Base):
     __tablename__ = "route_labels"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    route_key = Column(String, unique=True, nullable=False, index=True)  # stable key for the route
+    route_key = Column(String, nullable=False, index=True)  # stable key for the route
     name = Column(String, nullable=False)
 
+    __table_args__ = (UniqueConstraint("user_id", "route_key",
+                                       name="uq_route_labels_user_route"),)
 
-class Goal(Base):
+
+class Goal(TenantMixin, Base):
     __tablename__ = "goals"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -166,7 +173,7 @@ class Goal(Base):
     active = Column(Boolean, default=True)
 
 
-class RouteMerge(Base):
+class RouteMerge(TenantMixin, Base):
     __tablename__ = "route_merges"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -174,7 +181,7 @@ class RouteMerge(Base):
     to_key = Column(String, nullable=False)  # route key to merge into
 
 
-class Plan(Base):
+class Plan(TenantMixin, Base):
     __tablename__ = "plans"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -195,7 +202,7 @@ class Plan(Base):
                             cascade="all, delete-orphan")
 
 
-class PlannedWorkout(Base):
+class PlannedWorkout(TenantMixin, Base):
     __tablename__ = "planned_workouts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -216,3 +223,58 @@ class PlannedWorkout(Base):
     garmin_workout_id = Column(BigInteger, nullable=True)  # pushed to the watch
 
     plan = relationship("Plan", back_populates="workouts")
+
+
+# ---------------------------------------------------------------------------
+# Accounts. None of these are TenantMixin: they are looked up by explicit ids
+# and hashes, and the auth layer has to read them before any user is known.
+# ---------------------------------------------------------------------------
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, unique=True, nullable=False, index=True)  # lowercased
+    password_hash = Column(String, nullable=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    token_hash = Column(String, primary_key=True)   # sha256 of the cookie value
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class Invite(Base):
+    __tablename__ = "invites"
+
+    code_hash = Column(String, primary_key=True)    # sha256 of the code
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uses_left = Column(Integer, nullable=False)
+    expires_at = Column(DateTime, nullable=True)    # null = never
+    created_at = Column(DateTime, nullable=False)
+
+
+class ConnectorToken(Base):
+    __tablename__ = "connector_tokens"
+
+    token_hash = Column(String, primary_key=True)   # sha256 of the URL secret
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class Credential(Base):
+    __tablename__ = "credentials"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    provider = Column(String, primary_key=True)     # 'strava' | 'garmin'
+    secret_blob = Column(Text, nullable=False)      # Fernet-encrypted JSON
+    external_id = Column(String, nullable=True)     # Strava athlete id
+    status = Column(String, nullable=False, default="ok")  # ok | needs_reconnect
+    updated_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (Index("ix_credentials_provider_external", "provider", "external_id"),)
