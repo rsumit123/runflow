@@ -656,3 +656,33 @@ async def test_a_stale_clients_refresh_cannot_overwrite_a_reconnect(monkeypatch)
     await old._on_refresh({"access_token": "stale", "refresh_token": "stale-r", "expires_at": 1})
     cred = await _stored(database, 2)
     assert cred.data["refresh_token"] == "NEW-R" and cred.data["access_token"] == "NEW-A"
+
+
+def _expires_now(set_cookie: str) -> bool:
+    low = set_cookie.lower()
+    return "max-age=0" in low or "expires=thu, 01 jan 1970" in low
+
+
+async def test_logout_clears_the_prefixed_cookie_with_secure(monkeypatch):
+    """A __Host- Set-Cookie without Secure is ignored by browsers, so the deletion
+    would silently not happen."""
+    main, database = await setup_app(monkeypatch, "d1")
+    import config
+    cookie = await session_cookie(database, 1)
+    async with client(main, cookie) as c:
+        r = await c.post("/api/auth/logout")
+    sc = r.headers["set-cookie"]
+    low = sc.lower()
+    assert sc.startswith(config.SESSION_COOKIE_NAME + "=") and sc.startswith("__Host-")
+    assert "secure" in low and "path=/" in low and "domain=" not in low
+    assert _expires_now(sc)
+
+
+async def test_the_callback_clears_the_nonce_cookie_with_secure(monkeypatch):
+    main, database = await setup_app(monkeypatch, "d2")
+    r = await _callback(main, database, 2, cookie_nonce=None)  # any outcome clears it
+    sc = r.headers["set-cookie"]
+    low = sc.lower()
+    assert sc.startswith("__Host-strava_oauth=")
+    assert "secure" in low and "path=/" in low and "domain=" not in low
+    assert _expires_now(sc)

@@ -214,7 +214,10 @@ async def logout(request: Request, response: Response):
         for raw in _all_session_cookies(request.headers.get("cookie")):
             await auth.end_session(s, raw)
         await s.commit()
-    response.delete_cookie(config.SESSION_COOKIE_NAME, path="/")
+    # Same attributes as set_cookie: a __Host- cookie's Set-Cookie without Secure is
+    # ignored by browsers, which would leave the cookie in place.
+    response.delete_cookie(config.SESSION_COOKIE_NAME, path="/",
+                           secure=config.SESSION_COOKIE_SECURE, httponly=True, samesite="lax")
     return {"ok": True}
 
 
