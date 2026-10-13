@@ -432,3 +432,21 @@ def test_normalize_email_hardening():
     for bad in ("a b@x.co", "a@b", "a@b@c.co", "a\tb@x.co", "a\x00b@x.co"):
         with pytest.raises(auth.AuthError):
             auth.normalize_email(bad)
+
+
+async def test_racing_link_of_the_same_athlete_is_already_linked(monkeypatch):
+    """Simulate the race: the pre-check sees no owner, but user 7's row is
+    already there by the time the insert runs."""
+    database = await _fresh(monkeypatch, "c5")
+    import credentials
+    async with database.async_session() as s:
+        await credentials.put(s, 7, "strava", {"refresh_token": "SECRET-RT"}, external_id="123")
+        await s.commit()
+    async def no_owner(*a, **k):
+        return None
+    monkeypatch.setattr(credentials, "user_for_external", no_owner)
+    async with database.async_session() as s:
+        with pytest.raises(credentials.AlreadyLinked) as ei:
+            await credentials.put(s, 8, "strava", {"refresh_token": "SECRET-OTHER"},
+                                  external_id="123")
+        assert "SECRET" not in str(ei.value)

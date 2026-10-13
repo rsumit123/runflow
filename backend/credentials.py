@@ -11,6 +11,7 @@ from datetime import datetime
 
 from cryptography.fernet import Fernet
 from sqlalchemy import select, delete as sa_delete
+from sqlalchemy.exc import IntegrityError
 
 import config
 
@@ -48,16 +49,23 @@ async def put(session, user_id: int, provider: str, data: dict,
         owner = await user_for_external(session, provider, external_id)
         if owner is not None and owner != user_id:
             raise AlreadyLinked(f"That {provider} account is already linked to another user.")
-    row = await session.get(Credential, (user_id, provider))
-    if row is None:
-        row = Credential(user_id=user_id, provider=provider)
-        session.add(row)
-    row.secret_blob = blob
-    if external_id is not None:
-        row.external_id = str(external_id)
-    row.status = status
-    row.updated_at = datetime.utcnow()
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            row = await session.get(Credential, (user_id, provider))
+            if row is None:
+                row = Credential(user_id=user_id, provider=provider)
+                session.add(row)
+            row.secret_blob = blob
+            if external_id is not None:
+                row.external_id = str(external_id)
+            row.status = status
+            row.updated_at = datetime.utcnow()
+            await session.flush()
+    except IntegrityError:
+        if external_id is None:
+            raise
+        # Lost a race: another user linked this account after the check above.
+        raise AlreadyLinked(f"That {provider} account is already linked to another user.") from None
 
 
 async def get(session, user_id: int, provider: str) -> Cred | None:
