@@ -53,7 +53,8 @@ async def test_a_stuck_user_times_out_and_the_next_user_still_syncs(monkeypatch)
 async def test_next_pass_is_scheduled_from_its_start(monkeypatch):
     main, _ = await setup_app(monkeypatch, "f1b")
     assert main._sleep_for(100) == main.AUTO_SYNC_INTERVAL_SEC - 100
-    assert main._sleep_for(main.AUTO_SYNC_INTERVAL_SEC + 5) == 0
+    # An overrun still pauses, so passes can never run back to back.
+    assert main._sleep_for(main.AUTO_SYNC_INTERVAL_SEC + 5) == main.AUTO_SYNC_MIN_PAUSE_SEC == 300
 
 
 # --- IMPORTANT 2 -----------------------------------------------------------

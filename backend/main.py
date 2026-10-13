@@ -96,6 +96,7 @@ _last_auto_sync: dict[int, dict[str, Any]] = {}
 
 
 AUTO_SYNC_USER_TIMEOUT_SEC = 600
+AUTO_SYNC_MIN_PAUSE_SEC = 300
 _RECONNECT_NOTE = {"garmin": "Reconnect Garmin in Settings",
                    "strava": "Reconnect Strava in Settings"}
 
@@ -188,8 +189,9 @@ async def _auto_sync_pass() -> None:
 
 
 def _sleep_for(elapsed: float) -> float:
-    """Passes start on a fixed schedule: sleep the rest of the interval."""
-    return max(0, AUTO_SYNC_INTERVAL_SEC - elapsed)
+    """Passes start on a fixed schedule: sleep the rest of the interval, but never
+    less than the minimum pause, so an overrunning pass cannot be followed at once."""
+    return max(AUTO_SYNC_MIN_PAUSE_SEC, AUTO_SYNC_INTERVAL_SEC - elapsed)
 
 
 async def _auto_sync_loop() -> None:
