@@ -124,3 +124,53 @@ async def test_bulk_import_reads_the_server_disk_so_it_is_admin_only(monkeypatch
     async with client(main, b) as c:
         r = await c.post("/api/import/bulk", json={"directory": "/etc"})
     assert r.status_code == 403
+
+
+async def test_duplicate_session_cookies_cannot_outlive_logout(monkeypatch):
+    """The middleware and logout must agree on which cookie counts, and logout
+    must end every session the header names."""
+    main, database = await setup_app(monkeypatch, "r11")
+    valid = await session_cookie(database, 1)
+    dup = {"Cookie": f"rf_session={valid}; rf_session=junk"}
+    async with client(main) as c:
+        assert (await c.post("/api/auth/logout", headers=dup)).status_code == 200
+    async with client(main, valid) as c:
+        assert (await c.get("/api/auth/me")).status_code == 401
+    async with client(main) as c:
+        assert (await c.get("/api/auth/me", headers=dup)).status_code == 401
+
+
+async def test_websocket_scopes_under_api_are_closed(monkeypatch):
+    main, database = await setup_app(monkeypatch, "r12")
+    valid = await session_cookie(database, 1)
+    for headers in ([], [(b"cookie", f"rf_session={valid}".encode())]):
+        scope = {"type": "websocket", "path": "/api/anything", "raw_path": b"/api/anything",
+                 "root_path": "", "scheme": "wss", "query_string": b"", "headers": headers,
+                 "subprotocols": [], "server": ("test", 443), "client": ("1.2.3.4", 1)}
+        sent = []
+        queue = [{"type": "websocket.connect"}]
+
+        async def receive():
+            return queue.pop(0) if queue else {"type": "websocket.disconnect", "code": 1000}
+
+        async def send(msg):
+            sent.append(msg)
+
+        await main.app(scope, receive, send)
+        closes = [m for m in sent if m["type"] == "websocket.close"]
+        assert closes and closes[0]["code"] == 1008, sent
+        assert not any(m["type"] == "websocket.accept" for m in sent)
+
+
+async def test_a_database_error_while_resolving_the_session_is_a_503(monkeypatch):
+    main, database = await setup_app(monkeypatch, "r13")
+    import auth
+    from sqlalchemy.exc import OperationalError
+
+    async def boom(session, raw):
+        raise OperationalError("select", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(auth, "resolve_session", boom)
+    async with client(main, "anything") as c:
+        r = await c.get("/api/activities")
+    assert r.status_code == 503 and r.json() == {"detail": "Service temporarily unavailable"}

@@ -8,6 +8,9 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from starlette._utils import get_route_path
+from starlette.requests import cookie_parser
 
 import auth
 import config
@@ -37,14 +40,23 @@ def _header(scope, name: bytes) -> str | None:
 
 
 def _cookie(scope) -> str | None:
+    """The session cookie, parsed exactly as Starlette's request.cookies does
+    (the last duplicate wins), so the middleware and the handlers can never
+    disagree about which session a request carries."""
     raw = _header(scope, b"cookie")
     if not raw:
         return None
-    for part in raw.split(";"):
+    return cookie_parser(raw).get(config.SESSION_COOKIE_NAME)
+
+
+def _all_session_cookies(raw_header: str | None) -> list[str]:
+    """Every rf_session value the header names, duplicates included."""
+    out = []
+    for part in (raw_header or "").split(";"):
         name, _, value = part.strip().partition("=")
-        if name == config.SESSION_COOKIE_NAME:
-            return value
-    return None
+        if name == config.SESSION_COOKIE_NAME and value:
+            out.append(cookie_parser(f"{name}={value}")[name])
+    return out
 
 
 async def _send_json(send, status: int, body: dict) -> None:
@@ -66,7 +78,14 @@ class AuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope["path"].startswith("/api/"):
+        # Judge the path the router will see: uvicorn puts root_path into
+        # scope["path"], Starlette routes on the path with it stripped.
+        route_path = get_route_path(scope)
+        if scope["type"] == "websocket" and route_path.startswith("/api/"):
+            # No websocket routes exist under /api; refuse rather than guess.
+            await receive()
+            return await send({"type": "websocket.close", "code": 1008})
+        if scope["type"] != "http" or not route_path.startswith("/api/"):
             return await self.app(scope, receive, send)
         method = scope["method"]
         if method == "OPTIONS":
@@ -80,10 +99,13 @@ class AuthMiddleware:
             # real HTTP connection always starts with none, so this cannot be
             # reached from outside.
             return await self.app(scope, receive, send)
-        if (method, scope["path"]) in PUBLIC_ROUTES:
+        if (method, route_path) in PUBLIC_ROUTES:
             return await self.app(scope, receive, send)
-        async with database.async_session() as s:
-            uid = await auth.resolve_session(s, _cookie(scope))
+        try:
+            async with database.async_session() as s:
+                uid = await auth.resolve_session(s, _cookie(scope))
+        except SQLAlchemyError:
+            return await _send_json(send, 503, {"detail": "Service temporarily unavailable"})
         if uid is None:
             return await _send_json(send, 401, {"detail": "Not authenticated"})
         with tenancy.user_context(uid):
@@ -108,6 +130,10 @@ class InviteBody(BaseModel):
 
 
 def _client_ip(request: Request) -> str:
+    # SECURITY: this trusts X-Real-IP, which is only safe if the backend is
+    # reachable through nginx alone (nginx sets it to $remote_addr). The deploy
+    # (Task 11) must bind the container port to 127.0.0.1; published on 0.0.0.0
+    # a client could send its own X-Real-IP and dodge the per-IP login limit.
     # nginx sets X-Real-IP to $remote_addr, overwriting anything the client
     # sent. X-Forwarded-For only appends, so its first entry is client-chosen
     # and would let an attacker dodge the per-IP limit.
@@ -183,7 +209,10 @@ async def login(body: LoginBody, request: Request, response: Response):
 @router.post("/auth/logout")
 async def logout(request: Request, response: Response):
     async with database.async_session() as s:
-        await auth.end_session(s, request.cookies.get(config.SESSION_COOKIE_NAME))
+        # End every session the header names, not just the one the middleware
+        # would pick, so a duplicate cookie cannot keep a session alive.
+        for raw in _all_session_cookies(request.headers.get("cookie")):
+            await auth.end_session(s, raw)
         await s.commit()
     response.delete_cookie(config.SESSION_COOKIE_NAME, path="/")
     return {"ok": True}
