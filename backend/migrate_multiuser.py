@@ -177,40 +177,41 @@ def _write_backup(db_path: str, backup_path: str) -> None:
         os.close(dfd)
 
 
-def _journal_header_is_stale(header: bytes) -> bool:
-    """A rollback journal whose first 28 bytes are all zero (or that is empty) is
-    one SQLite ignores: a killed rebuild leaves such a file behind."""
-    return not any(header[:28])
-
-
 def _resolve_journal(db_path: str) -> None:
-    """A hard-killed run can leave `<db>-journal`. Opening the database read-write
-    makes SQLite roll back a hot journal; a zero-header one is stale and stays."""
+    """Deal with `<db>-journal`, which a hard-killed run can leave behind.
+
+    Decided by LOCK, never by the journal's header: a stale journal carries a random
+    checksum nonce, and a live writer's journal has a zeroed magic until it syncs.
+    If we can take an EXCLUSIVE lock nobody else has the database, so any journal
+    left after SQLite's own hot-journal rollback is stale.
+    """
     journal = Path(db_path + "-journal")
     if not journal.exists():
         return
+    live = (f"{journal} exists and another process has the database open; "
+            "stop the app")
+    con = sqlite3.connect(db_path, timeout=2, isolation_level=None)
     try:
-        con = sqlite3.connect(db_path, timeout=1)
+        try:
+            con.execute("BEGIN EXCLUSIVE")
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e) or "busy" in str(e):
+                raise RuntimeError(live) from e
+            raise
         try:
             ok = con.execute("PRAGMA integrity_check").fetchone()[0]
         finally:
-            con.close()
-    except sqlite3.Error as e:
-        raise RuntimeError(f"{journal} exists and the database cannot be opened ({e}); "
-                           "another process may have it open; stop the app") from e
-    if not journal.exists():
-        print(f"recovered an interrupted run: rolled back {journal}")
-        return
-    with open(journal, "rb") as f:
-        header = f.read(28)
-    if not _journal_header_is_stale(header):
-        raise RuntimeError(f"{journal} is live: another process has the database open; "
-                           "stop the app")
+            con.execute("ROLLBACK")
+    finally:
+        con.close()
     if ok != "ok":
-        raise RuntimeError(f"{journal} is stale but {db_path} fails integrity_check ({ok}); "
-                           "restore from the backup")
-    journal.unlink()
-    print(f"removed stale journal {journal} (zero header, integrity_check ok)")
+        raise RuntimeError(f"{db_path} fails integrity_check ({ok}) after an interrupted "
+                           "run; restore from the backup")
+    if journal.exists():
+        journal.unlink()
+        print(f"removed stale journal {journal} (database unlocked, integrity_check ok)")
+    else:
+        print(f"recovered an interrupted run: rolled back {journal}")
 
 
 def preflight(db_path, backup_path, owner_email, *, confirmed, no_strava=False,

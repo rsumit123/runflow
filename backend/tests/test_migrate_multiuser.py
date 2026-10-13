@@ -423,14 +423,6 @@ async def test_stale_zero_header_journal_is_cleared_and_migration_proceeds(monke
     assert not Path(path + "-journal").exists()
 
 
-@pytest.mark.parametrize("header,stale", [(b"", True), (bytes(28), True), (bytes(512), True),
-                                          (b"\xd9\xd5\x05\xf9" + bytes(24), False),
-                                          (bytes(27) + b"\x01", False), (b"x", False)])
-def test_journal_header_classification(header, stale):
-    import migrate_multiuser
-    assert migrate_multiuser._journal_header_is_stale(header) is stale
-
-
 async def test_stale_journal_with_a_damaged_database_aborts(monkeypatch):
     path = _old_db()
     Path(path + "-journal").write_bytes(bytes(512))
@@ -573,3 +565,66 @@ async def test_admin_set_password_checks_user_and_terminal_before_prompting(monk
     monkeypatch.setattr(sys, "argv", ["admin.py", "set-password", "a@example.com"])
     with pytest.raises(SystemExit, match="terminal"):
         await asyncio.to_thread(admin.main)
+
+
+KILL_SCRIPT = """
+import asyncio, os, sys
+sys.path.insert(0, {backend!r})
+import migrate_multiuser as m
+real = m._copy_rows
+def k(con, t, c):
+    if t == "route_labels":
+        os._exit(9)
+    return real(con, t, c)
+m._copy_rows = k
+asyncio.run(m.migrate({db!r}, {bak!r}, "owner@example.com", "99", confirmed=True,
+                      no_garmin=True))
+"""
+
+
+async def test_rerun_after_a_hard_kill_inside_a_rebuild_completes(monkeypatch):
+    import subprocess, sys
+    path = _old_db()
+    bak = path + ".bak"
+    backend = str(Path(__file__).resolve().parent.parent)
+    script = Path(tempfile.mkdtemp()) / "kill.py"
+    script.write_text(KILL_SCRIPT.format(backend=backend, db=path, bak=bak))
+    env = {**__import__("os").environ, "DB_PATH": path,
+           "CREDENTIALS_KEY": Fernet.generate_key().decode(),
+           "strava_access_token": "AT", "strava_refresh_token": "RT",
+           "MCP_SECRET": "s"}
+    r = subprocess.run([sys.executable, str(script)], env=env, cwd=backend,
+                       capture_output=True, text=True)
+    assert r.returncode == 9, r.stderr
+    journal = Path(path + "-journal")
+    assert journal.exists(), "the kill should leave a journal behind"
+    assert any(journal.read_bytes()[:28]), "a real journal carries a non-zero nonce"
+
+    mm = _prep(monkeypatch, path, garmin=None)
+    report = await mm.migrate(path, bak, "owner@example.com", confirmed=True, no_garmin=True)
+    assert report["after"]["activities"] == 2 and report["after"]["route_labels"] == 1
+    assert not journal.exists()
+    con = sqlite3.connect(path)
+    assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert mm._pk(con, "daily_wellness") == ["user_id", "date"]
+    con.close()
+
+
+async def test_live_writer_is_never_touched(monkeypatch):
+    path = _old_db()
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO activities (id, name) VALUES (99, 'in flight')")
+    journal = Path(path + "-journal")
+    assert journal.exists()
+    mm = _prep(monkeypatch, path)
+    try:
+        with pytest.raises(RuntimeError, match="another process has the database open"):
+            await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+        assert journal.exists(), "a live writer's journal must not be deleted"
+        assert not Path(path + ".bak").exists()
+    finally:
+        holder.execute("COMMIT")
+    assert holder.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert holder.execute("SELECT COUNT(*) FROM activities").fetchone()[0] == 3
+    holder.close()
