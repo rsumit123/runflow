@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import func, select
 
 import tenancy
-from tests.multiuser_fixtures import (A_ACTIVITY_ID, MARK, MUTATING, api_routes,
+from tests.multiuser_fixtures import (A_ACTIVITY_ID, BACKEND_DIR, MARK, MUTATING, api_routes,
                                       client, fill, param_names, seed_user_a, seed_user_b,
                                       session_cookie, setup_app)
 
@@ -129,8 +129,9 @@ async def _snapshot(database):
                     select(func.count()).select_from(model))).scalar_one()
             a = await s.get(Activity, A_ACTIVITY_ID)
             snap["activity"] = (a.name, a.notes, a.distance)
-            w = (await s.execute(select(PlannedWorkout))).scalar_one()
-            snap["workout"] = (w.title, w.description, w.date, w.garmin_workout_id)
+            snap["workout"] = [(w.id, w.title, w.description, w.date, w.garmin_workout_id)
+                               for w in (await s.execute(
+                                   select(PlannedWorkout).order_by(PlannedWorkout.id))).scalars()]
             p = (await s.execute(select(Plan))).scalar_one()
             snap["plan"] = (p.status, p.target_time_sec)
             g = (await s.execute(select(Goal))).scalar_one()
@@ -235,13 +236,11 @@ UNREACHABLE: dict[str, str] = {}
 # GET routes whose answer is identical for A and B even though A has data B lacks,
 # so "B's answer is unchanged by A" cannot detect a leak there. Each needs a reason.
 SAME_FOR_A_AND_B: dict[str, str] = {
-    "/api/plan/suggestions":
-        "Suggestions are derived from plan adherence (completed vs planned workouts over "
-        "weeks); the seed does not simulate that history, so both users get []. Plan "
-        "lookups by id are covered by /api/plan/workout/{workout_id} and the mutating "
-        "sweep (apply is probed).",
     "/api/sync/status":
-        "Process-wide auto-sync timestamps, not per-user data. Task 7 makes it per-user.",
+        "Cannot reveal A's rows (nothing in it is read from the database), so a sweep "
+        "has nothing to compare. It does currently disclose process-wide sync state, "
+        "including the text of the last sync error, to EVERY signed-in user. Task 7 "
+        "makes it per-user and closes that.",
 }
 
 # Routes allowed to answer 5xx in a sweep, with the reason.
@@ -419,7 +418,7 @@ MUTATING_BODIES = {
     ("POST", "/api/plan/sprint/baseline"): {"time_sec": 14.0, "note": "B was here"},
     ("POST", "/api/plan"): {"weeks": 8, "goal_type": "5k", "target_time_sec": 1800},
     ("PATCH", "/api/plan/workout/{workout_id}"): {"date": "2030-01-01"},
-    ("POST", "/api/plan/suggestions/apply"): {"id": "anything"},
+    # ("POST", "/api/plan/suggestions/apply") is filled in at run time with A's real id.
     ("PUT", "/api/activities/{activity_id}/notes"): {"note": "B was here"},
     ("POST", "/api/workouts/adhoc"): {"name": "B was here", "date": "2030-01-01", "steps": []},
     ("POST", "/api/routes/label"): {"route_key": "rk-a", "name": "B was here"},
@@ -465,10 +464,23 @@ async def test_user_b_mutating_requests_leave_all_of_user_a_unchanged(monkeypatc
     assert sum(len(v) for v in before.values()) >= 12  # the snapshot really holds A's rows
     cookie = await session_cookie(database, 2)
     cands = _id_candidates(ids)
+    # Apply needs a suggestion that really exists for A, or it is a 404 for
+    # everyone and proves nothing. Fetch A's real one as A, then send it as B.
+    async with client(main, await session_cookie(database, 1)) as ca:
+        suggestions = (await ca.get("/api/plan/suggestions")).json()["suggestions"]
+    assert suggestions and suggestions[0]["changes"], suggestions
+    bodies = {**MUTATING_BODIES,
+              ("POST", "/api/plan/suggestions/apply"): {"id": suggestions[0]["id"]}}
     results: dict = {}
     async with client(main, cookie) as c:
+        # First, before any other probe: later ones (POST /api/plan) give B a newer
+        # active plan than A's, and a handler that wrongly saw every user's plans
+        # would then pick B's and look innocent.
+        first = await c.post("/api/plan/suggestions/apply",
+                             json={"id": suggestions[0]["id"]})
+        assert first.status_code == 404, first.text
         for method, path in _mutating_routes(main):
-            body = MUTATING_BODIES.get((method, path), {})
+            body = bodies.get((method, path), {})
             names = param_names(path)
             if names:
                 assert names[0] in cands, path
@@ -500,5 +512,20 @@ async def test_user_b_mutating_requests_leave_all_of_user_a_unchanged(monkeypatc
             wrong.append(f"{method} {path}: every probe was a 422, so the handler was never "
                          "reached; fix the body in MUTATING_BODIES")
     assert not wrong, "\n".join(wrong)
+    # B must not be able to apply A's real suggestion: it is a 404 for B.
+    assert results[("POST", "/api/plan/suggestions/apply", "None")][0] == 404
     # Every mutating route was probed at least once.
     assert len({k[:2] for k in results}) == len(_mutating_routes(main))
+
+
+async def test_no_first_party_module_keeps_a_stale_models(monkeypatch):
+    """Canary for setup_app's reload rule: a module that imported models at the top
+    and survived the reload would hold classes bound to an old Base."""
+    await setup_app(monkeypatch, "canary")
+    import sys
+    fresh = sys.modules["models"]
+    stale = [name for name, mod in list(sys.modules.items())
+             if getattr(mod, "models", fresh) is not fresh
+             and getattr(mod, "__file__", None)
+             and Path(mod.__file__).resolve().parent == BACKEND_DIR]
+    assert not stale, f"modules holding a stale models module: {stale}"

@@ -4,7 +4,9 @@ User A's private data carries MARK in every text field we can reach, so a
 response containing MARK, served to user B, is a leak.
 """
 import re
+import sys
 import tempfile
+from pathlib import Path
 from datetime import datetime, timedelta
 
 import httpx
@@ -13,6 +15,12 @@ from fastapi.routing import APIRoute
 
 import tenancy
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+# config and database are reloaded in place; tenancy holds the ContextVar and the
+# session listeners, so replacing it would lose them. auth, credentials and
+# auth_routes are NOT kept: they import models inside functions, and dropping
+# them is harmless.
+_KEEP_MODULES = {"config", "database", "tenancy"}
 MARK = "ZZ-USER-A-PRIVATE-7f3c"
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 A_ACTIVITY_ID = 9001
@@ -26,11 +34,16 @@ async def setup_app(monkeypatch, tag):
     monkeypatch.setenv("CREDENTIALS_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("SESSION_STATE_SECRET", "test-state-secret")
     monkeypatch.setenv("MCP_SECRET", "")
-    # Every module that imports models at the top level must be re-imported
-    # with them, or it keeps classes bound to an old Base and its routes 500.
-    for m in ("main", "mcp_server", "models", "best_efforts", "bulk_import", "goals",
-              "insights", "metrics"):
-        sys.modules.pop(m, None)
+    # Every first-party module (its file lives in backend/) is dropped and
+    # re-imported with the fresh models, except the ones that are reloaded in
+    # place or must never be replaced. A hand-written list silently goes stale
+    # when a module starts importing models.
+    for name, mod in list(sys.modules.items()):
+        if name in _KEEP_MODULES or name.split(".")[0] == "tests":
+            continue
+        f = getattr(mod, "__file__", None)
+        if f and Path(f).resolve().parent == BACKEND_DIR:
+            sys.modules.pop(name, None)
     importlib.reload(config); importlib.reload(database)
     import models  # noqa: F401
     await database.init_db()
@@ -114,6 +127,15 @@ async def seed_user_a(database, now=None) -> dict:
                                      week_number=1, day_type="easy", title=MARK,
                                      description=MARK)
             s.add(workout)
+            # A missed long run (no run within a day of it) followed by an upcoming
+            # long run that is too big a jump: /api/plan/suggestions then offers A
+            # "cap_long_<workout id>", so A's suggestions are not empty.
+            s.add(PlannedWorkout(plan_id=plan.id, date=now - timedelta(days=6),
+                                 week_number=1, day_type="long", title=MARK,
+                                 description=MARK, target_distance_m=5000))
+            s.add(PlannedWorkout(plan_id=plan.id, date=now + timedelta(days=5),
+                                 week_number=2, day_type="long", title=MARK,
+                                 description=MARK, target_distance_m=20000))
             await s.commit()
             return {"activity": A_ACTIVITY_ID, "plan": plan.id, "workout": workout.id,
                     "goal": goal.id, "label": label.id, "route_key": "rk-a",
