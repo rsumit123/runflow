@@ -223,3 +223,212 @@ async def test_malformed_email_is_just_a_failed_login(monkeypatch):
     import auth
     async with database.async_session() as s:
         assert await auth.authenticate(s, "not-an-email", "a long password") is None
+
+
+# --- fix round ---------------------------------------------------------------
+
+async def test_same_email_signup_race_is_a_clean_error(monkeypatch):
+    import asyncio
+    database = await _fresh(monkeypatch, "r1")
+    import auth
+    from models import Invite, User
+    async with database.async_session() as s:
+        code = await auth.create_invite(s, created_by=None, uses=5)
+        await s.commit()
+
+    async def attempt():
+        async with database.async_session() as s:
+            try:
+                u = await auth.signup(s, "race@x.co", "a long password", code)
+                await s.commit()
+                return u.id
+            except Exception as e:  # noqa: BLE001 - classify below
+                await s.rollback()
+                return e
+
+    results = await asyncio.gather(*[attempt() for _ in range(5)])
+    errors = [r for r in results if isinstance(r, Exception)]
+    assert len(results) - len(errors) == 1
+    assert len(errors) == 4
+    assert all(isinstance(e, auth.AuthError) for e in errors), errors
+    async with database.async_session() as s:
+        assert len((await s.execute(select(User.id))).scalars().all()) == 1
+        assert (await s.execute(select(Invite.uses_left))).scalar_one() == 4
+
+
+async def test_junk_invite_does_not_reveal_a_registered_email(monkeypatch):
+    database = await _fresh(monkeypatch, "r2")
+    import auth
+    async with database.async_session() as s:
+        await auth.create_user(s, "exists@x.co", "a long password")
+        await s.commit()
+    async with database.async_session() as s:
+        with pytest.raises(auth.AuthError, match="not valid"):
+            await auth.signup(s, "exists@x.co", "a long password", "junk-code")
+
+
+async def test_duplicate_with_valid_invite_restores_the_use_without_a_rollback(monkeypatch):
+    database = await _fresh(monkeypatch, "r3")
+    import auth
+    from models import Invite
+    async with database.async_session() as s:
+        await auth.create_user(s, "exists@x.co", "a long password")
+        code = await auth.create_invite(s, created_by=None, uses=2)
+        await s.commit()
+    async with database.async_session() as s:
+        with pytest.raises(auth.AuthError, match="already registered"):
+            await auth.signup(s, "exists@x.co", "a long password", code)
+        # No s.rollback(): the savepoint alone must have restored the use.
+        assert (await s.execute(select(Invite.uses_left))).scalar_one() == 2
+
+
+async def test_authenticate_does_not_block_the_event_loop(monkeypatch):
+    import asyncio, time
+    database = await _fresh(monkeypatch, "b1")
+    import auth
+    async with database.async_session() as s:
+        await auth.create_user(s, "real@b.co", "a long password")
+        await s.commit()
+    gaps, stop = [], False
+
+    async def ticker():
+        last = time.monotonic()
+        while not stop:
+            await asyncio.sleep(0.01)
+            now = time.monotonic()
+            gaps.append(now - last)
+            last = now
+
+    t = asyncio.create_task(ticker())
+    await asyncio.sleep(0.05)
+    async with database.async_session() as s:
+        await auth.authenticate(s, "real@b.co", "wrong password!!")
+        await auth.authenticate(s, "ghost@b.co", "a long password")
+    stop = True
+    await t
+    assert max(gaps) < 0.1, f"event loop stalled for {max(gaps):.3f}s"
+
+
+async def test_session_slide_failure_does_not_log_the_user_out(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    database = await _fresh(monkeypatch, "s1")
+    import auth
+    from models import AuthSession
+    async with database.async_session() as s:
+        u = await auth.create_user(s, "a@b.co", "a long password")
+        raw = await auth.create_session(s, u.id)
+        row = (await s.execute(select(AuthSession))).scalar_one()
+        row.expires_at = datetime.utcnow() + timedelta(days=1)  # forces a slide
+        await s.commit()
+    async with database.async_session() as s:
+        async def locked():
+            raise OperationalError("x", None, Exception("database is locked"))
+        monkeypatch.setattr(s, "commit", locked)
+        assert await auth.resolve_session(s, raw) == u.id
+
+
+def test_limiter_blocked_never_inserts_keys():
+    import auth
+    rl = auth.LoginRateLimiter()
+    for i in range(1000):
+        rl.blocked(f"user{i}@x.co", f"10.0.{i % 250}.{i // 250}")
+    assert len(rl._email) == 0 and len(rl._ip) == 0
+
+
+def test_limiter_truncates_keys():
+    import auth
+    rl = auth.LoginRateLimiter()
+    rl.record_failure("a" * 300 + "@x.co", "9" * 300)
+    assert all(len(k) <= 254 for k in list(rl._email) + list(rl._ip))
+    assert len(rl._email) == 1 and len(rl._ip) == 1
+    # a long email is still blocked consistently
+    for _ in range(5):
+        rl.record_failure("a" * 300 + "@x.co", "9" * 300)
+    assert rl.blocked("a" * 300 + "@x.co", "9" * 300)
+
+
+def test_limiter_drops_keys_whose_entries_are_all_stale():
+    import auth
+    now = [1000.0]
+    rl = auth.LoginRateLimiter(clock=lambda: now[0])
+    rl.record_failure("a@b.co", "1.1.1.1")
+    assert "a@b.co" in rl._email and "1.1.1.1" in rl._ip
+    now[0] += 15 * 60 + 1
+    assert not rl.blocked("a@b.co", "1.1.1.1")
+    assert "a@b.co" not in rl._email and "1.1.1.1" not in rl._ip
+
+
+def test_limiter_is_hard_capped():
+    import auth
+    rl = auth.LoginRateLimiter(max_keys=5)
+    for i in range(50):
+        rl.record_failure(f"u{i}@x.co", f"10.0.0.{i}")
+        assert len(rl._email) <= 5 and len(rl._ip) <= 5
+    # expired entries are swept before anything live is discarded
+    now = [0.0]
+    rl = auth.LoginRateLimiter(max_keys=5, clock=lambda: now[0])
+    for i in range(5):
+        rl.record_failure(f"old{i}@x.co", "1.1.1.1")
+    now[0] += 15 * 60 + 1
+    rl.record_failure("new@x.co", "1.1.1.1")
+    rl.record_failure("new2@x.co", "1.1.1.1")
+    assert set(rl._email) == {"new@x.co", "new2@x.co"}
+
+
+async def test_one_strava_athlete_links_to_one_user(monkeypatch):
+    database = await _fresh(monkeypatch, "c3")
+    import credentials
+    async with database.async_session() as s:
+        await credentials.put(s, 7, "strava", {"refresh_token": "SECRET-RT"}, external_id="123")
+        await s.commit()
+    async with database.async_session() as s:
+        with pytest.raises(credentials.AlreadyLinked) as ei:
+            await credentials.put(s, 8, "strava", {"refresh_token": "SECRET-OTHER"},
+                                  external_id="123")
+        assert "SECRET" not in str(ei.value)
+        await s.rollback()
+    async with database.async_session() as s:
+        assert await credentials.get(s, 8, "strava") is None
+        # the owner re-saving its own athlete (token refresh) is fine
+        await credentials.put(s, 7, "strava", {"refresh_token": "NEW"}, external_id="123")
+        await s.commit()
+        # garmin rows carry no external id and may coexist
+        await credentials.put(s, 7, "garmin", {"t": 1})
+        await credentials.put(s, 8, "garmin", {"t": 2})
+        await s.commit()
+
+
+async def test_credential_external_id_is_unique_in_the_schema(monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    database = await _fresh(monkeypatch, "c4")
+    from models import Credential
+    now = datetime.utcnow()
+    async with database.async_session() as s:
+        for uid in (1, 2):
+            s.add(Credential(user_id=uid, provider="strava", secret_blob="x",
+                             external_id="123", status="ok", updated_at=now))
+        with pytest.raises(IntegrityError):
+            await s.flush()
+
+
+async def test_unusable_hash_costs_exactly_one_dummy_check(monkeypatch):
+    database = await _fresh(monkeypatch, "u1")
+    import auth
+    async with database.async_session() as s:
+        await auth.create_user(s, "owner@b.co", None)
+        await s.commit()
+    calls = []
+    real = auth.verify_password
+    monkeypatch.setattr(auth, "verify_password",
+                        lambda pw, h: calls.append(h) or real(pw, h))
+    async with database.async_session() as s:
+        assert await auth.authenticate(s, "owner@b.co", "a long password") is None
+    assert calls == [auth._DUMMY_HASH]
+
+
+def test_normalize_email_hardening():
+    import auth
+    assert auth.normalize_email("ＡＢ@x.co") == "ab@x.co"
+    for bad in ("a b@x.co", "a@b", "a@b@c.co", "a\tb@x.co", "a\x00b@x.co"):
+        with pytest.raises(auth.AuthError):
+            auth.normalize_email(bad)

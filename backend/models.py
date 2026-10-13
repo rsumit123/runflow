@@ -277,4 +277,4 @@ class Credential(Base):
     status = Column(String, nullable=False, default="ok")  # ok | needs_reconnect
     updated_at = Column(DateTime, nullable=False)
 
-    __table_args__ = (Index("ix_credentials_provider_external", "provider", "external_id"),)
+    __table_args__ = (Index("ix_credentials_provider_external", "provider", "external_id", unique=True),)

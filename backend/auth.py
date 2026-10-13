@@ -5,17 +5,24 @@ sha256 is stored, so a copy of the database does not hand out live sessions.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 import secrets
 import time
+import unicodedata
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
 import bcrypt
 from sqlalchemy import select, update, delete
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 import config
 
+log = logging.getLogger(__name__)
+
+BCRYPT_ROUNDS = 12
 MIN_PASSWORD_LEN = 10
 MAX_PASSWORD_BYTES = 72          # bcrypt's hard limit
 # Not a valid bcrypt string, so nothing ever verifies against it. Used for the
@@ -23,7 +30,7 @@ MAX_PASSWORD_BYTES = 72          # bcrypt's hard limit
 UNUSABLE_PASSWORD = "!unusable"
 # Compared against when the email is unknown, so a miss costs the same time
 # as a wrong password and response timing does not reveal who has an account.
-_DUMMY_HASH = bcrypt.hashpw(b"timing-equaliser", bcrypt.gensalt()).decode()
+_DUMMY_HASH = bcrypt.hashpw(b"timing-equaliser", bcrypt.gensalt(BCRYPT_ROUNDS)).decode()
 
 
 class AuthError(Exception):
@@ -39,8 +46,11 @@ def hash_token(raw: str) -> str:
 
 
 def normalize_email(email: str) -> str:
-    e = (email or "").strip().lower()
-    if "@" not in e or e.startswith("@") or e.endswith("@") or len(e) > 254:
+    e = unicodedata.normalize("NFKC", (email or "").strip()).lower()
+    local, sep, domain = e.partition("@")
+    if (not sep or not local or "." not in domain or "@" in domain
+            or domain.startswith(".") or domain.endswith(".") or len(e) > 254
+            or any(ch.isspace() or unicodedata.category(ch).startswith("C") for ch in e)):
         raise AuthError("Enter a valid email address.")
     return e
 
@@ -53,7 +63,7 @@ def check_password_policy(password: str) -> None:
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(BCRYPT_ROUNDS)).decode()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
@@ -70,7 +80,8 @@ async def create_user(session, email: str, password: str | None,
     if password is not None:
         check_password_policy(password)
     user = User(email=normalize_email(email),
-                password_hash=hash_password(password) if password else UNUSABLE_PASSWORD,
+                password_hash=(await asyncio.to_thread(hash_password, password)
+                               if password else UNUSABLE_PASSWORD),
                 is_admin=is_admin, created_at=datetime.utcnow())
     session.add(user)
     await session.flush()
@@ -90,10 +101,14 @@ async def authenticate(session, email: str, password: str):
         user = await get_user_by_email(session, email)
     except AuthError:
         user = None
-    if user is None:
-        verify_password(password, _DUMMY_HASH)
+    # Run bcrypt in a thread (it takes ~200 ms) so the event loop keeps serving.
+    # An unknown email, or a hash that is not bcrypt (the unusable placeholder),
+    # still pays for one full check so timing does not reveal the account.
+    if user is None or not user.password_hash.startswith("$2"):
+        await asyncio.to_thread(verify_password, password, _DUMMY_HASH)
         return None
-    return user if verify_password(password, user.password_hash) else None
+    ok = await asyncio.to_thread(verify_password, password, user.password_hash)
+    return user if ok else None
 
 
 async def create_session(session, user_id: int) -> str:
@@ -108,7 +123,12 @@ async def create_session(session, user_id: int) -> str:
 
 
 async def resolve_session(session, raw: str | None) -> int | None:
-    """The user id for a cookie value, or None. Slides the expiry forward daily."""
+    """The user id for a cookie value, or None. Slides the expiry forward daily.
+
+    The slide COMMITS the session, so give this its own session; do not call it
+    inside a transaction you still need. The slide is best-effort: if the
+    database is locked it is rolled back and the (valid) session still resolves.
+    """
     if not raw:
         return None
     from models import AuthSession
@@ -117,10 +137,14 @@ async def resolve_session(session, raw: str | None) -> int | None:
     if row is None or row.expires_at <= now:
         return None
     fresh_expiry = now + timedelta(days=config.SESSION_TTL_DAYS)
+    user_id = row.user_id  # read before commit/rollback expire the row
     if fresh_expiry - row.expires_at > timedelta(days=1):
         row.expires_at = fresh_expiry
-        await session.commit()
-    return row.user_id
+        try:
+            await session.commit()
+        except OperationalError:
+            await session.rollback()
+    return user_id
 
 
 async def end_session(session, raw: str | None) -> None:
@@ -145,54 +169,86 @@ async def create_invite(session, created_by: int | None, uses: int = 1,
 
 
 async def signup(session, email: str, password: str, invite_code: str):
-    """Create an account against an invite. Atomic with the caller's commit.
+    """Create an account against an invite.
 
-    The invite is decremented in the same transaction as the insert, so a
-    failed signup (e.g. duplicate email) rolls the use back.
+    The invite is validated and decremented first, so a junk code never reveals
+    whether an email is registered. Decrement and insert share a savepoint: a
+    duplicate email (including a concurrent same-email race, caught by the
+    UNIQUE constraint) rolls the use back and raises a clean AuthError.
     """
     from models import Invite
     email = normalize_email(email)
     check_password_policy(password)
-    if await get_user_by_email(session, email) is not None:
-        raise AuthError("That email is already registered.")
     now = datetime.utcnow()
-    res = await session.execute(
-        update(Invite)
-        .where(Invite.code_hash == hash_token(invite_code or ""),
-               Invite.uses_left > 0,
-               (Invite.expires_at.is_(None)) | (Invite.expires_at > now))
-        .values(uses_left=Invite.uses_left - 1)
-    )
-    if res.rowcount != 1:
-        raise AuthError("That invite code is not valid.")
-    return await create_user(session, email, password)
+    try:
+        async with session.begin_nested():
+            res = await session.execute(
+                update(Invite)
+                .where(Invite.code_hash == hash_token(invite_code or ""),
+                       Invite.uses_left > 0,
+                       (Invite.expires_at.is_(None)) | (Invite.expires_at > now))
+                .values(uses_left=Invite.uses_left - 1)
+            )
+            if res.rowcount != 1:
+                raise AuthError("That invite code is not valid.")
+            return await create_user(session, email, password)
+    except IntegrityError:
+        raise AuthError("That email is already registered.") from None
 
 
 class LoginRateLimiter:
-    """In-memory failed-login counter. Single process, which is what we run."""
+    """In-memory failed-login counter. Single process, which is what we run.
+
+    Memory is bounded: keys are truncated, empty ones dropped, blocked() never
+    inserts, and past max_keys the dict is swept then (failing open) cleared.
+    """
 
     def __init__(self, per_email: int = 5, per_ip: int = 20,
-                 window_sec: float = 15 * 60, clock=time.monotonic):
+                 window_sec: float = 15 * 60, clock=time.monotonic,
+                 max_keys: int = 50_000):
         self.per_email, self.per_ip, self.window = per_email, per_ip, window_sec
         self.clock = clock
-        self._email: dict[str, deque] = defaultdict(deque)
-        self._ip: dict[str, deque] = defaultdict(deque)
+        self.max_keys = max_keys
+        self._email: dict[str, deque] = {}
+        self._ip: dict[str, deque] = {}
 
-    def _prune(self, q: deque) -> deque:
+    @staticmethod
+    def _key(value: str) -> str:
+        return (value or "").strip().lower()[:254]
+
+    def _live(self, d: dict, key: str) -> int:
+        """Entries inside the window for key; drops the key once it is empty."""
+        q = d.get(key)
+        if q is None:
+            return 0
         cutoff = self.clock() - self.window
         while q and q[0] <= cutoff:
             q.popleft()
-        return q
+        if not q:
+            del d[key]
+            return 0
+        return len(q)
+
+    def _enforce_cap(self, d: dict, name: str) -> None:
+        if len(d) <= self.max_keys:
+            return
+        for k in list(d):
+            self._live(d, k)
+        if len(d) > self.max_keys:
+            log.warning("login rate limiter %s table over %d keys; clearing it",
+                        name, self.max_keys)
+            d.clear()
 
     def blocked(self, email: str, ip: str) -> bool:
-        key = (email or "").strip().lower()
-        return (len(self._prune(self._email[key])) >= self.per_email
-                or len(self._prune(self._ip[ip])) >= self.per_ip)
+        return (self._live(self._email, self._key(email)) >= self.per_email
+                or self._live(self._ip, self._key(ip)) >= self.per_ip)
 
     def record_failure(self, email: str, ip: str) -> None:
         now = self.clock()
-        self._email[(email or "").strip().lower()].append(now)
-        self._ip[ip].append(now)
+        self._email.setdefault(self._key(email), deque()).append(now)
+        self._ip.setdefault(self._key(ip), deque()).append(now)
+        self._enforce_cap(self._email, "email")
+        self._enforce_cap(self._ip, "ip")
 
     def record_success(self, email: str) -> None:
-        self._email.pop((email or "").strip().lower(), None)
+        self._email.pop(self._key(email), None)

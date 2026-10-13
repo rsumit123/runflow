@@ -15,6 +15,10 @@ from sqlalchemy import select, delete as sa_delete
 import config
 
 
+class AlreadyLinked(Exception):
+    """This provider account is already linked to a different RunFlow user."""
+
+
 @dataclass
 class Cred:
     data: dict
@@ -40,6 +44,10 @@ async def put(session, user_id: int, provider: str, data: dict,
               external_id: str | None = None, status: str = "ok") -> None:
     from models import Credential
     blob = encrypt(data)
+    if external_id is not None:
+        owner = await user_for_external(session, provider, external_id)
+        if owner is not None and owner != user_id:
+            raise AlreadyLinked(f"That {provider} account is already linked to another user.")
     row = await session.get(Credential, (user_id, provider))
     if row is None:
         row = Credential(user_id=user_id, provider=provider)
