@@ -450,3 +450,77 @@ async def test_racing_link_of_the_same_athlete_is_already_linked(monkeypatch):
             await credentials.put(s, 8, "strava", {"refresh_token": "SECRET-OTHER"},
                                   external_id="123")
         assert "SECRET" not in str(ei.value)
+
+
+# --- no savepoints, hash before the write lock, evict-oldest limiter ------------
+
+async def test_signup_then_caller_rollback_leaves_nothing(monkeypatch):
+    database = await _fresh(monkeypatch, "n1")
+    import auth
+    from models import Invite, User
+    async with database.async_session() as s:
+        code = await auth.create_invite(s, created_by=None, uses=1)
+        await s.commit()
+    async with database.async_session() as s:
+        await auth.signup(s, "new@x.co", "a long password", code)
+        await s.rollback()  # e.g. create_session failed afterwards
+    async with database.async_session() as s:
+        assert (await s.execute(select(User.id))).scalars().all() == []
+        assert (await s.execute(select(Invite.uses_left))).scalar_one() == 1
+
+
+async def test_concurrent_puts_for_different_users_all_succeed(monkeypatch):
+    import asyncio
+    database = await _fresh(monkeypatch, "n2")
+    import credentials
+    from models import Credential
+
+    async def one(uid, ext):
+        async with database.async_session() as s:
+            await credentials.put(s, uid, "strava", {"refresh_token": f"rt{uid}"},
+                                  external_id=ext)
+            await s.commit()
+
+    await asyncio.gather(*[one(11 + i, "abcd"[i]) for i in range(4)])
+    async with database.async_session() as s:
+        assert len((await s.execute(select(Credential.user_id))).scalars().all()) == 4
+
+
+async def test_signup_does_not_hold_the_write_lock_while_hashing(monkeypatch):
+    import asyncio, time
+    database = await _fresh(monkeypatch, "n3")
+    import auth
+    from models import Invite
+    async with database.async_session() as s:
+        code = await auth.create_invite(s, created_by=None, uses=1)
+        await s.commit()
+
+    async def do_signup():
+        async with database.async_session() as s:
+            await auth.signup(s, "new@x.co", "a long password", code)
+            await s.commit()
+
+    t = asyncio.create_task(do_signup())
+    await asyncio.sleep(0.05)  # signup is now inside (or before) its bcrypt call
+    start = time.monotonic()
+    async with database.async_session() as s:
+        s.add(Invite(code_hash="unrelated", uses_left=1, created_at=datetime.utcnow()))
+        await s.commit()
+    elapsed = time.monotonic() - start
+    await t
+    assert elapsed < 0.15, f"a writer waited {elapsed:.3f}s behind signup's hashing"
+
+
+def test_limiter_cap_evicts_oldest_not_everything():
+    import auth
+    rl = auth.LoginRateLimiter(max_keys=10)
+    for _ in range(5):
+        rl.record_failure("victim@x.co", "9.9.9.9")
+    for i in range(8):
+        rl.record_failure(f"flood{i}@x.co", f"10.0.0.{i}")
+    rl.record_failure("victim@x.co", "9.9.9.9")  # victim is now the most recent key
+    for i in range(8, 11):
+        rl.record_failure(f"flood{i}@x.co", f"10.0.0.{i}")
+    assert rl.blocked("victim@x.co", "1.2.3.4")
+    assert len(rl._email) <= 10 and len(rl._ip) <= 10
+    assert "flood0@x.co" not in rl._email  # the oldest went first

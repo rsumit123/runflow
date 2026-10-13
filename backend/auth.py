@@ -76,12 +76,16 @@ def verify_password(password: str, password_hash: str) -> bool:
 async def create_user(session, email: str, password: str | None,
                       is_admin: bool = False):
     """Create a user. password=None gives an unusable hash (set it later)."""
-    from models import User
     if password is not None:
         check_password_policy(password)
-    user = User(email=normalize_email(email),
-                password_hash=(await asyncio.to_thread(hash_password, password)
-                               if password else UNUSABLE_PASSWORD),
+    pw_hash = (await asyncio.to_thread(hash_password, password)
+               if password else UNUSABLE_PASSWORD)
+    return await _insert_user(session, email, pw_hash, is_admin)
+
+
+async def _insert_user(session, email: str, pw_hash: str, is_admin: bool = False):
+    from models import User
+    user = User(email=normalize_email(email), password_hash=pw_hash,
                 is_admin=is_admin, created_at=datetime.utcnow())
     session.add(user)
     await session.flush()
@@ -171,28 +175,33 @@ async def create_invite(session, created_by: int | None, uses: int = 1,
 async def signup(session, email: str, password: str, invite_code: str):
     """Create an account against an invite.
 
-    The invite is validated and decremented first, so a junk code never reveals
-    whether an email is registered. Decrement and insert share a savepoint: a
-    duplicate email (including a concurrent same-email race, caught by the
-    UNIQUE constraint) rolls the use back and raises a clean AuthError.
+    The invite is validated and decremented before the email is inserted, so a
+    junk code never reveals whether an email is registered. The password is
+    hashed first so bcrypt never runs while SQLite's write lock is held.
+
+    Everything happens in the caller's transaction: if the caller rolls back,
+    the account and the invite use both go. A duplicate email (including a
+    concurrent same-email race, caught by the UNIQUE constraint) ROLLS BACK THE
+    CALLER'S SESSION, which restores the invite use, and raises AuthError.
     """
     from models import Invite
     email = normalize_email(email)
     check_password_policy(password)
+    pw_hash = await asyncio.to_thread(hash_password, password)
     now = datetime.utcnow()
+    res = await session.execute(
+        update(Invite)
+        .where(Invite.code_hash == hash_token(invite_code or ""),
+               Invite.uses_left > 0,
+               (Invite.expires_at.is_(None)) | (Invite.expires_at > now))
+        .values(uses_left=Invite.uses_left - 1)
+    )
+    if res.rowcount != 1:
+        raise AuthError("That invite code is not valid.")
     try:
-        async with session.begin_nested():
-            res = await session.execute(
-                update(Invite)
-                .where(Invite.code_hash == hash_token(invite_code or ""),
-                       Invite.uses_left > 0,
-                       (Invite.expires_at.is_(None)) | (Invite.expires_at > now))
-                .values(uses_left=Invite.uses_left - 1)
-            )
-            if res.rowcount != 1:
-                raise AuthError("That invite code is not valid.")
-            return await create_user(session, email, password)
+        return await _insert_user(session, email, pw_hash)
     except IntegrityError:
+        await session.rollback()
         raise AuthError("That email is already registered.") from None
 
 
@@ -235,9 +244,13 @@ class LoginRateLimiter:
         for k in list(d):
             self._live(d, k)
         if len(d) > self.max_keys:
-            log.warning("login rate limiter %s table over %d keys; clearing it",
+            # Evict the oldest keys (insertion order; recent failures are moved
+            # to the end), so a flood cannot wipe a victim's lockout.
+            target = int(self.max_keys * 0.9)
+            log.warning("login rate limiter %s table over %d keys; evicting oldest",
                         name, self.max_keys)
-            d.clear()
+            while len(d) > target:
+                del d[next(iter(d))]
 
     def blocked(self, email: str, ip: str) -> bool:
         return (self._live(self._email, self._key(email)) >= self.per_email
@@ -245,8 +258,10 @@ class LoginRateLimiter:
 
     def record_failure(self, email: str, ip: str) -> None:
         now = self.clock()
-        self._email.setdefault(self._key(email), deque()).append(now)
-        self._ip.setdefault(self._key(ip), deque()).append(now)
+        for d, key in ((self._email, self._key(email)), (self._ip, self._key(ip))):
+            q = d.pop(key, None) or deque()
+            q.append(now)
+            d[key] = q  # re-insert: most recently used keys sit at the end
         self._enforce_cap(self._email, "email")
         self._enforce_cap(self._ip, "ip")
 

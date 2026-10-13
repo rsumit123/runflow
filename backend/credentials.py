@@ -43,6 +43,11 @@ def decrypt(blob: str) -> dict:
 
 async def put(session, user_id: int, provider: str, data: dict,
               external_id: str | None = None, status: str = "ok") -> None:
+    """Store or replace a credential. Does not commit.
+
+    If another user already holds the (provider, external_id), raises
+    AlreadyLinked; a conflict found at flush time ROLLS BACK THE CALLER'S SESSION.
+    """
     from models import Credential
     blob = encrypt(data)
     if external_id is not None:
@@ -50,18 +55,19 @@ async def put(session, user_id: int, provider: str, data: dict,
         if owner is not None and owner != user_id:
             raise AlreadyLinked(f"That {provider} account is already linked to another user.")
     try:
-        async with session.begin_nested():
-            row = await session.get(Credential, (user_id, provider))
-            if row is None:
-                row = Credential(user_id=user_id, provider=provider)
-                session.add(row)
-            row.secret_blob = blob
-            if external_id is not None:
-                row.external_id = str(external_id)
-            row.status = status
-            row.updated_at = datetime.utcnow()
-            await session.flush()
+        row = await session.get(Credential, (user_id, provider))
+        if row is None:
+            row = Credential(user_id=user_id, provider=provider)
+            session.add(row)
+        row.secret_blob = blob
+        if external_id is not None:
+            row.external_id = str(external_id)
+        row.status = status
+        row.updated_at = datetime.utcnow()
+        await session.flush()
     except IntegrityError:
+        # The session is unusable after a constraint error, so roll it back.
+        await session.rollback()
         if external_id is None:
             raise
         # Lost a race: another user linked this account after the check above.
