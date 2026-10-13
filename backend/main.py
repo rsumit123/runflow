@@ -10,7 +10,8 @@ import httpx
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -165,15 +166,30 @@ async def _strava_not_connected(request, exc):
                         content={"detail": "Strava is not connected. Connect it in Settings."})
 
 
-@app.exception_handler(garmin_auth.GarminNotConnected)
+@app.exception_handler(garmin_auth.GarminAccessError)
 async def _garmin_not_connected(request, exc):
     return JSONResponse(status_code=409,
                         content={"detail": "Garmin is not connected. Connect it in Settings."})
 
 
+@app.exception_handler(garmin_auth.GarminUnavailable)
+async def _garmin_unavailable(request, exc):
+    return JSONResponse(status_code=503,
+                        content={"detail": "Garmin is unreachable right now, try again shortly."})
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request, exc):
+    # FastAPI's default echoes the offending input, which for a sign-in body is
+    # the password. Keep where and what, drop the value (and ctx, which can hold it).
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")}
+        for e in exc.errors()]})
+
+
 class GarminConnectBody(BaseModel):
     email: str
-    password: str
+    password: SecretStr
 
 
 class GarminMfaBody(BaseModel):
@@ -184,7 +200,9 @@ class GarminMfaBody(BaseModel):
 async def garmin_connect(body: GarminConnectBody):
     try:
         status = await garmin_auth.start_login(tenancy.current_user_id(), body.email,
-                                               body.password)
+                                               body.password.get_secret_value())
+    except garmin_auth.GarminRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except garmin_auth.GarminLoginFailed as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"status": status}
@@ -814,7 +832,37 @@ async def plan_projections(session: AsyncSession = Depends(get_session)):
     return fproj.projections(dicts, datetime.utcnow())
 
 
-async def _unschedule_plan(session: AsyncSession, plan: Plan) -> int:
+async def _try_remove_from_watch(w: PlannedWorkout) -> None:
+    """Take a workout off the watch, and forget its id ONLY once Garmin confirms it
+    is gone (a 404 means it already was). On any failure the id is kept, because it
+    is the only handle that can ever remove the session, and the error is raised."""
+    try:
+        await garmin.remove_workout(w.garmin_workout_id)
+    except garmin_auth.GarminAccessError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if "API Error 404" not in str(exc):
+            raise
+    w.garmin_workout_id = None
+
+
+async def _remove_from_watch(w: PlannedWorkout) -> Optional[str]:
+    """_try_remove_from_watch for callers that carry on regardless: returns None
+    when the id is gone, else a warning for the response (the id is kept)."""
+    try:
+        await _try_remove_from_watch(w)
+    except garmin_auth.GarminNotConnected:
+        return "Garmin isn't connected; the old session is still on your watch."
+    except garmin_auth.GarminUnavailable:
+        return "Garmin is unreachable right now; the old session is still on your watch."
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not remove Garmin workout %s: %s", w.garmin_workout_id, exc)
+        return "Garmin could not remove the old session; it may still be on your watch."
+    return None
+
+
+async def _unschedule_plan(session: AsyncSession, plan: Plan,
+                           warnings: Optional[list] = None) -> int:
     """Pull a plan's workouts off the Garmin watch/calendar.
 
     Abandoning a plan in the DB while its workouts stay on the watch leaves the
@@ -829,20 +877,24 @@ async def _unschedule_plan(session: AsyncSession, plan: Plan) -> int:
     )).scalars().all()
     removed = 0
     for w in wos:
-        try:
-            await garmin.remove_workout(w.garmin_workout_id)
+        # A Garmin hiccup must not block retiring the plan, but the ids of what is
+        # still on the watch are kept, so prune-watch can remove them later.
+        warn = await _remove_from_watch(w)
+        if warn is None:
             removed += 1
-        except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not block retiring the plan
-            logger.warning("Could not remove Garmin workout %s: %s", w.garmin_workout_id, exc)
-        w.garmin_workout_id = None
+            continue
+        if warnings is not None:
+            warnings.append(warn)
+        break      # Garmin is down or not connected: the rest would fail the same way
     return removed
 
 
-async def _abandon_active_plans(session: AsyncSession) -> int:
+async def _abandon_active_plans(session: AsyncSession,
+                                 warnings: Optional[list] = None) -> int:
     """Retire every active plan — in the DB AND on the watch."""
     removed = 0
     for old in (await session.execute(select(Plan).where(Plan.status == "active"))).scalars().all():
-        removed += await _unschedule_plan(session, old)
+        removed += await _unschedule_plan(session, old, warnings)
         old.status = "abandoned"
     return removed
 
@@ -865,7 +917,8 @@ async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> 
     days = tuple(sorted(req.training_days)[:3]) if req.training_days and len(req.training_days) >= 3 else (0, 2, 5)
     gen = spgen.generate_sprint_plan(profile, req.weeks, target, anchor, days=days)
 
-    await _abandon_active_plans(session)
+    garmin_warnings: list = []
+    await _abandon_active_plans(session, garmin_warnings)
     plan = Plan(
         goal_type="sprint_100m", goal_distance_m=100.0,
         target_time_sec=round(target), sprint_target_sec=target,
@@ -882,7 +935,10 @@ async def _create_sprint_plan(req: PlanCreateRequest, session: AsyncSession) -> 
         profile, _sprint_weeks_overview(gen["workouts"]),
     )
     await session.commit()
-    return await _plan_response(session, plan)
+    resp = await _plan_response(session, plan)
+    if garmin_warnings:
+        resp["garmin_warning"] = garmin_warnings[0]
+    return resp
 
 
 @app.get("/api/fitness-model")
@@ -922,7 +978,8 @@ async def create_plan(req: PlanCreateRequest, session: AsyncSession = Depends(ge
     gen = pgen.generate_plan(model, req.weeks, req.target_time_sec, anchor)
 
     # Only one active plan at a time — and it must be the only one on the watch too.
-    await _abandon_active_plans(session)
+    garmin_warnings: list = []
+    await _abandon_active_plans(session, garmin_warnings)
 
     plan = Plan(
         goal_type="5k", goal_distance_m=5000.0, target_time_sec=req.target_time_sec,
@@ -939,7 +996,10 @@ async def create_plan(req: PlanCreateRequest, session: AsyncSession = Depends(ge
         _weeks_overview(gen["workouts"]),
     )
     await session.commit()
-    return await _plan_response(session, plan)
+    resp = await _plan_response(session, plan)
+    if garmin_warnings:
+        resp["garmin_warning"] = garmin_warnings[0]
+    return resp
 
 
 @app.get("/api/plan")
@@ -958,10 +1018,14 @@ async def abandon_plan(plan_id: int, session: AsyncSession = Depends(get_session
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    removed = await _unschedule_plan(session, plan)
+    warnings: list = []
+    removed = await _unschedule_plan(session, plan, warnings)
     plan.status = "abandoned"
     await session.commit()
-    return {"status": "abandoned", "id": plan_id, "removed_from_watch": removed}
+    out = {"status": "abandoned", "id": plan_id, "removed_from_watch": removed}
+    if warnings:
+        out["garmin_warning"] = warnings[0]
+    return out
 
 
 class SuggestionApplyRequest(BaseModel):
@@ -1213,6 +1277,7 @@ async def move_workout(workout_id: int, req: WorkoutMoveRequest,
     # no Garmin id — but the moment you move it to a future date it belongs on the
     # watch like any other. Guarding on garmin_workout_id missed exactly that case.
     synced = None
+    garmin_warning = None
     is_future = w.date.date() >= datetime.utcnow().date()
     has_steps = bool((w.structure or {}).get("steps"))
 
@@ -1220,23 +1285,27 @@ async def move_workout(workout_id: int, req: WorkoutMoveRequest,
         try:
             await _garmin_push(w)      # replaces any previous upload, so no duplicates
             synced = True
+        except garmin_auth.GarminNotConnected:
+            garmin_warning = "Garmin isn't connected; the watch was not updated."
+            synced = False
+        except garmin_auth.GarminUnavailable:
+            garmin_warning = "Garmin is unreachable right now; the watch was not updated."
+            synced = False
         except Exception as exc:  # noqa: BLE001 — a Garmin hiccup must not block the move
             logger.warning("Garmin re-sync after move failed for %s: %s", workout_id, exc)
             synced = False
     elif w.garmin_workout_id:
         # Moved into the past (or turned into a rest day) — take it off the watch
         # rather than leaving it stranded on a day it no longer belongs to.
-        try:
-            await garmin.remove_workout(w.garmin_workout_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not unschedule moved workout %s: %s", workout_id, exc)
-        w.garmin_workout_id = None
+        garmin_warning = await _remove_from_watch(w)   # keeps the id if it failed
         synced = False
 
     await session.commit()
     resp = await _plan_response(session, plan)
     resp["warning"] = warning
     resp["garmin_synced"] = synced
+    if garmin_warning:
+        resp["garmin_warning"] = garmin_warning
     return resp
 
 
@@ -1463,7 +1532,7 @@ async def push_adhoc_workout(req: AdhocWorkoutRequest):
         raise HTTPException(status_code=400, detail="Cannot schedule a workout in the past.")
     try:
         res = await garmin.push_workout(req.name, req.steps, when.isoformat())
-    except garmin_auth.GarminNotConnected:
+    except garmin_auth.GarminAccessError:
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Ad-hoc Garmin push failed: %s", exc)
@@ -1477,7 +1546,7 @@ async def delete_adhoc_workout(workout_id: int):
     """Remove a one-off workout from Garmin Connect and the watch calendar."""
     try:
         await garmin.remove_workout(workout_id)
-    except garmin_auth.GarminNotConnected:
+    except garmin_auth.GarminAccessError:
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Ad-hoc Garmin removal failed for %s: %s", workout_id, exc)
@@ -3064,7 +3133,7 @@ async def import_garmin_sync(session: AsyncSession = Depends(get_session)):
         while True:
             try:
                 acts = await gc.get_recent_running(limit=page_size, start=start)
-            except garmin_auth.GarminNotConnected:
+            except garmin_auth.GarminAccessError:
                 raise
             except Exception as exc:
                 logger.error("Garmin fetch failed at start=%d: %s", start, exc)
@@ -3095,7 +3164,7 @@ async def import_garmin_sync(session: AsyncSession = Depends(get_session)):
             start += page_size
             await _asyncio.sleep(1)  # be gentle with Garmin
         return {"imported": imported, "already_existed": already_existed, "skipped_non_running": 0}
-    except (HTTPException, garmin_auth.GarminNotConnected):
+    except (HTTPException, garmin_auth.GarminAccessError):
         raise
     except RuntimeError as exc:  # missing token, etc.
         raise HTTPException(status_code=400, detail=str(exc))
@@ -3440,11 +3509,10 @@ async def _garmin_push(w: PlannedWorkout) -> Optional[int]:
     if not steps:
         return None
     if w.garmin_workout_id:
-        try:
-            await garmin.remove_workout(w.garmin_workout_id)
-        except Exception as exc:  # noqa: BLE001 — a stale id shouldn't block a re-push
-            logger.warning("Could not remove old Garmin workout %s: %s", w.garmin_workout_id, exc)
-        w.garmin_workout_id = None
+        # If the old session cannot be removed, do NOT push a replacement: that
+        # would overwrite the only id that can still remove it and leave two on
+        # the watch. The id stays, the error propagates, and a retry fixes both.
+        await _try_remove_from_watch(w)
     res = await garmin.push_workout(w.title or "RunFlow workout", steps,
                                     w.date.date().isoformat())
     w.garmin_workout_id = res["workout_id"]
@@ -3590,7 +3658,7 @@ async def backfill_training_effect(session: AsyncSession = Depends(get_session))
     while True:
         try:
             acts = await garmin.get_recent_running(limit=page, start=start)
-        except garmin_auth.GarminNotConnected:
+        except garmin_auth.GarminAccessError:
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("TE backfill fetch failed at %d: %s", start, exc)
@@ -3828,13 +3896,10 @@ async def accept_today_guidance(session: AsyncSession = Depends(get_session)):
     ceiling = snap.get("easy_hr_ceiling")
     was = w.day_type
 
+    garmin_warning = None
     if rec["action"] == "rest":
         if w.garmin_workout_id:
-            try:
-                await garmin.remove_workout(w.garmin_workout_id)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Could not pull workout %s off the watch: %s", w.id, exc)
-            w.garmin_workout_id = None
+            garmin_warning = await _remove_from_watch(w)   # keeps the id if it failed
         w.day_type = "rest"
         w.title = "Rest — recovery day"
         w.description = rec["reason"]
@@ -3852,12 +3917,18 @@ async def accept_today_guidance(session: AsyncSession = Depends(get_session)):
         w.structure = pgen._run_structure(pgen._steady_steps(km, low, high, ceiling))
         try:
             await _garmin_push(w)
+        except garmin_auth.GarminNotConnected:
+            garmin_warning = "Garmin isn't connected; the old session is still on your watch."
+        except garmin_auth.GarminUnavailable:
+            garmin_warning = "Garmin is unreachable right now; the old session is still on your watch."
         except Exception as exc:  # noqa: BLE001 — the plan change still stands
             logger.warning("Re-push after readiness downgrade failed for %s: %s", w.id, exc)
 
     await session.commit()
     resp = await _plan_response(session, plan)
     resp["adjustment"] = {"was": was, "now": w.day_type, "reason": rec["reason"]}
+    if garmin_warning:
+        resp["garmin_warning"] = garmin_warning
     return resp
 
 
@@ -3966,17 +4037,20 @@ async def prune_watch(session: AsyncSession = Depends(get_session)):
         .where(Plan.status != "active", PlannedWorkout.garmin_workout_id.isnot(None))
     )).scalars().all()
 
-    removed, failed = 0, []
+    removed, failed, warning = 0, [], None
     for w in stale:
-        try:
-            await garmin.remove_workout(w.garmin_workout_id)
+        gid = w.garmin_workout_id
+        warn = await _remove_from_watch(w)      # the id stays if the removal failed
+        if warn is None:
             removed += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Prune failed for garmin workout %s: %s", w.garmin_workout_id, exc)
-            failed.append(w.garmin_workout_id)
-        w.garmin_workout_id = None
+        else:
+            failed.append(gid)
+            warning = warning or warn
     await session.commit()
-    return {"removed": removed, "failed": len(failed), "candidates": len(stale)}
+    out = {"removed": removed, "failed": len(failed), "candidates": len(stale)}
+    if warning:
+        out["garmin_warning"] = warning
+    return out
 
 
 @app.post("/api/plan/sync-to-watch")
@@ -4000,6 +4074,8 @@ async def sync_plan_to_watch(session: AsyncSession = Depends(get_session)):
         try:
             await _garmin_push(w)
             pushed += 1
+        except garmin_auth.GarminAccessError:
+            raise      # not connected (409) or unreachable (503): not N separate failures
         except Exception as exc:  # noqa: BLE001 — one bad workout shouldn't abort the sync
             logger.warning("Garmin sync failed for workout %s: %s", w.id, exc)
             failed.append({"id": w.id, "title": w.title, "error": str(exc)[:120]})
@@ -4046,7 +4122,7 @@ async def push_workout_to_garmin(workout_id: int,
                             detail="This workout has no structured steps to send.")
     try:
         await _garmin_push(w)
-    except garmin_auth.GarminNotConnected:
+    except garmin_auth.GarminAccessError:
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Garmin push failed for workout %s: %s", workout_id, exc)
@@ -4070,10 +4146,11 @@ async def delete_planned_workout(workout_id: int,
     if w.date and w.date.date() < datetime.utcnow().date():
         raise HTTPException(status_code=400, detail="Can't delete a past workout.")
     if w.garmin_workout_id:
-        try:
-            await garmin.remove_workout(w.garmin_workout_id)
-        except Exception as exc:  # noqa: BLE001 — a Garmin hiccup shouldn't block the delete
-            logger.warning("Garmin remove failed while deleting workout %s: %s", workout_id, exc)
+        warn = await _remove_from_watch(w)
+        if warn:
+            # Deleting the row would throw away the only id that can take the
+            # session off the watch. Leave the workout in the plan until it can go.
+            return {"deleted": None, "garmin_warning": warn}
     await session.delete(w)
     await session.commit()
     return {"deleted": workout_id}
@@ -4090,7 +4167,7 @@ async def remove_workout_from_garmin(workout_id: int,
         return {"garmin_workout_id": None}
     try:
         await garmin.remove_workout(w.garmin_workout_id)
-    except garmin_auth.GarminNotConnected:
+    except garmin_auth.GarminAccessError:
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Garmin remove failed for workout %s: %s", workout_id, exc)

@@ -59,7 +59,7 @@ class GarminClient:
         async def _try(name: str, *args):
             try:
                 return await garmin_auth.run(g, name, *args)
-            except garmin_auth.GarminNotConnected:
+            except garmin_auth.GarminAccessError:
                 raise  # rejected tokens are not a missing metric
             except Exception as exc:  # noqa: BLE001 — a missing metric is not an error
                 logger.warning("Garmin %s failed for %s: %s", name, day, exc)

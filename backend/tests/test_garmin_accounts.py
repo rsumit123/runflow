@@ -1,8 +1,16 @@
 """Each user connects their own Garmin. The password is used once and never kept."""
+import asyncio
+import json
 import logging
+import threading
+import time
 from pathlib import Path
 
+import garminconnect
+import garminconnect.client
 import pytest
+import requests
+from garminconnect import GarminConnectAuthenticationError, GarminConnectConnectionError
 
 import tenancy
 from tests import multiuser_fixtures
@@ -10,7 +18,38 @@ from tests.multiuser_fixtures import client, session_cookie
 
 pytestmark = pytest.mark.no_user
 
+# Captured at import, before the autouse network guard replaces it.
+REAL_GARMIN_LOGIN = garminconnect.Garmin.login
+
+
+def rejected(msg="401"):
+    """What the real library raises when Garmin refuses stored tokens: an auth error
+    chained from the 'API Error 401' connection error of Client._run_request."""
+    try:
+        try:
+            raise GarminConnectConnectionError("API Error 401 - Unauthorized")
+        except GarminConnectConnectionError as e:
+            raise GarminConnectAuthenticationError("Failed to retrieve social profile") from e
+    except GarminConnectAuthenticationError as e:
+        return e
+
 PASSWORD = "hunter2-unique-PW-8841"
+
+
+class Req:
+    def __init__(self, body):
+        self.body = body
+
+
+class Resp:
+    """Shaped like requests/curl_cffi responses: .request.body is what was sent."""
+    text = "<csrf>"
+
+    def __init__(self, body):
+        self.request, self.history = Req(body), []
+
+    def __repr__(self):
+        return f"<Resp request.body={self.request.body!r}>"
 
 
 class FakeClient:
@@ -26,6 +65,8 @@ class FakeGarmin:
     mfa = False
     reject = False
     restore_error = None
+    in_login = hold = None
+    widget = False
 
     def __init__(self, email=None, password=None, return_on_mfa=False, **kw):
         # Real attribute names: username / password.
@@ -40,6 +81,11 @@ class FakeGarmin:
                 raise FakeGarmin.restore_error
             self.client = FakeClient(tokenstore)
             return None, None
+        if FakeGarmin.in_login is not None:
+            FakeGarmin.in_login()
+        if FakeGarmin.widget:
+            # Real widget strategy keeps the last response, request body included.
+            self.client._widget_last_resp = Resp(f"password={self.password}&embed=true")
         if FakeGarmin.reject:
             raise RuntimeError("401 Unauthorized")
         if FakeGarmin.mfa:
@@ -61,6 +107,8 @@ class FakeGarmin:
 def fake_garmin():
     FakeGarmin.instances, FakeGarmin.mfa, FakeGarmin.reject = [], False, False
     FakeGarmin.restore_error = None
+    FakeGarmin.in_login = FakeGarmin.hold = None
+    FakeGarmin.widget = False
     yield
 
 
@@ -220,11 +268,10 @@ async def test_user_without_garmin_cannot_reach_the_owners_garmin(monkeypatch):
 
 
 async def test_rejected_tokens_mark_needs_reconnect(monkeypatch):
-    from garminconnect import GarminConnectAuthenticationError
     main, database = await setup_app(monkeypatch, "g10")
     import garmin_auth
     await _seed(database, 2, "B" * 600)
-    FakeGarmin.restore_error = GarminConnectAuthenticationError("expired")
+    FakeGarmin.restore_error = rejected()
     with tenancy.user_context(2):
         with pytest.raises(garmin_auth.GarminNotConnected):
             await garmin_auth.get_garmin()
@@ -242,20 +289,19 @@ async def test_a_transient_failure_does_not_disconnect(monkeypatch):
     await _seed(database, 2, "B" * 600)
     FakeGarmin.restore_error = ConnectionError("network down")
     with tenancy.user_context(2):
-        with pytest.raises(ConnectionError):
+        with pytest.raises(garmin_auth.GarminUnavailable):
             await garmin_auth.get_garmin()
     assert (await _status(database, 2)).status == "ok"
 
 
 async def test_a_midcall_rejection_marks_needs_reconnect_and_is_a_409(monkeypatch):
-    from garminconnect import GarminConnectAuthenticationError
     main, database = await setup_app(monkeypatch, "g12")
     import garmin_auth
     await _seed(database, 2, "B" * 600)
     with tenancy.user_context(2):
         g = await garmin_auth.get_garmin()
         def boom(*a):
-            raise GarminConnectAuthenticationError("401")
+            raise rejected()
         g.get_activities = boom
         with pytest.raises(garmin_auth.GarminNotConnected):
             await garmin_auth.run(g, "get_activities", 0, 1)
@@ -264,7 +310,6 @@ async def test_a_midcall_rejection_marks_needs_reconnect_and_is_a_409(monkeypatc
 
 
 async def test_a_reconnect_that_landed_meanwhile_is_not_clobbered(monkeypatch):
-    from garminconnect import GarminConnectAuthenticationError
     main, database = await setup_app(monkeypatch, "g13")
     import garmin_auth
     await _seed(database, 2, "B" * 600)
@@ -274,7 +319,7 @@ async def test_a_reconnect_that_landed_meanwhile_is_not_clobbered(monkeypatch):
         g.client.tokens = "R" * 600               # old client rotates
         await garmin_auth.save_if_rotated(2)      # must not overwrite the new grant
         def boom(*a):
-            raise GarminConnectAuthenticationError("401")
+            raise rejected()
         g.get_activities = boom
         with pytest.raises(garmin_auth.GarminNotConnected):
             await garmin_auth.run(g, "get_activities", 0, 1)   # nor flag it
@@ -302,3 +347,207 @@ async def test_the_password_is_dropped_from_the_pending_mfa_client(monkeypatch):
         await c.post("/api/garmin/connect", json={"email": "b@g.co", "password": PASSWORD})
     g = garmin_auth._pending_mfa[2][0]
     assert g.password is None
+
+
+# ---- I1: an outage is not a rejection (REAL garminconnect classes) ----------
+
+def _real_tokens():
+    return json.dumps({"di_token": "a.b.c", "di_refresh_token": "r" * 600,
+                       "di_client_id": "cid"})
+
+
+async def _real_app(monkeypatch, tag):
+    main, database = await multiuser_fixtures.setup_app(monkeypatch, tag)
+    import garmin_auth
+    garmin_auth.reset()
+    monkeypatch.setattr(garminconnect.Garmin, "login", REAL_GARMIN_LOGIN)
+    monkeypatch.setattr(garminconnect.time, "sleep", lambda s: None)
+    # Library-internal refresh would hit the network; not what is under test.
+    monkeypatch.setattr(garminconnect.client.Client, "_refresh_session", lambda self: None)
+    return main, database, garmin_auth
+
+
+async def test_a_garmin_outage_does_not_disconnect_the_user(monkeypatch):
+    main, database, garmin_auth = await _real_app(monkeypatch, "g20")
+    assert len(_real_tokens()) > 512
+    await _seed(database, 2, _real_tokens())
+
+    def down(self, *a, **k):
+        raise requests.ConnectionError("Garmin unreachable")
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", down)
+    with tenancy.user_context(2):
+        with pytest.raises(garmin_auth.GarminUnavailable):
+            await garmin_auth.get_garmin()
+    assert (await _status(database, 2)).status == "ok"
+    # ...and over HTTP it is a 503, not a 409 asking for a reconnect.
+    cookie = await session_cookie(database, 2)
+    async with client(main, cookie) as c:
+        r = await c.delete("/api/workouts/adhoc/5")
+    assert r.status_code == 503 and "try again" in r.json()["detail"].lower()
+    assert (await _status(database, 2)).status == "ok"
+
+
+async def test_a_genuine_401_from_garmin_does_need_a_reconnect(monkeypatch):
+    main, database, garmin_auth = await _real_app(monkeypatch, "g21")
+    await _seed(database, 2, _real_tokens())
+
+    def unauthorized(self, request, **k):
+        r = requests.Response()
+        r.status_code = 401
+        r._content = b'{"message": "Unauthorized"}'
+        return r
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", unauthorized)
+    with tenancy.user_context(2):
+        with pytest.raises(garmin_auth.GarminNotConnected):
+            await garmin_auth.get_garmin()
+    assert (await _status(database, 2)).status == "needs_reconnect"
+
+
+async def test_an_unauthenticated_error_without_a_401_is_not_a_rejection_in_run(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g22")
+    import garmin_auth
+    await _seed(database, 2, "B" * 600)
+    with tenancy.user_context(2):
+        g = await garmin_auth.get_garmin()
+        def flaky(*a):
+            raise GarminConnectAuthenticationError("Failed to retrieve social profile")
+        g.get_activities = flaky
+        with pytest.raises(garmin_auth.GarminUnavailable):
+            await garmin_auth.run(g, "get_activities", 0, 1)
+    assert (await _status(database, 2)).status == "ok"
+
+
+# ---- I2: a validation error must not echo the password ----------------------
+
+async def test_a_422_never_echoes_the_password(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g23")
+    cookie = await session_cookie(database, 2)
+    async with client(main, cookie) as c:
+        r = await c.post("/api/garmin/connect", json={"password": PASSWORD})
+    assert r.status_code == 422
+    assert PASSWORD not in r.text
+    assert any(e["loc"][-1] == "email" for e in r.json()["detail"])
+
+
+# ---- I3: sign-in attempts are rate limited and bounded ----------------------
+
+async def test_the_sixth_attempt_in_an_hour_is_429_and_never_reaches_garmin(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g24")
+    FakeGarmin.reject = True
+    cookie = await session_cookie(database, 2)
+    async with client(main, cookie) as c:
+        codes = [(await c.post("/api/garmin/connect",
+                               json={"email": "b@g.co", "password": PASSWORD})).status_code
+                 for _ in range(6)]
+    assert codes == [400] * 5 + [429]
+    assert len(FakeGarmin.instances) == 5
+
+
+async def test_the_global_cap_holds_across_users(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g25")
+    import garmin_auth
+    FakeGarmin.reject = True
+    garmin_auth.CONNECT_GLOBAL_PER_HOUR = 7
+    c1 = await session_cookie(database, 1)
+    c2 = await session_cookie(database, 2)
+    codes = []
+    for i in range(9):
+        async with client(main, c1 if i % 2 else c2) as c:
+            codes.append((await c.post("/api/garmin/connect",
+                          json={"email": "x@g.co", "password": PASSWORD})).status_code)
+    assert codes == [400] * 7 + [429] * 2
+    assert len(FakeGarmin.instances) == 7
+
+
+async def test_at_most_two_logins_run_at_once(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g26")
+    import garmin_auth
+    FakeGarmin.mfa = True
+    lock, state = threading.Lock(), {"now": 0, "max": 0}
+    release = threading.Event()
+
+    def slow():
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        release.wait(5)
+        with lock:
+            state["now"] -= 1
+    FakeGarmin.in_login = slow
+    tasks = [asyncio.create_task(garmin_auth.start_login(uid, "x@g.co", PASSWORD))
+             for uid in (11, 12, 13, 14, 15)]
+    await asyncio.sleep(0.5)
+    assert state["now"] == 2          # the other three are waiting, not running
+    release.set()
+    assert set(await asyncio.gather(*tasks)) == {"needs_mfa"}
+    assert state["max"] == 2
+
+
+# ---- I4: no password copy lingers in the pending-MFA object ------------------
+
+async def test_no_password_copy_survives_in_the_pending_client(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g27")
+    import garmin_auth
+    FakeGarmin.mfa = True
+    FakeGarmin.widget = True
+    cookie = await session_cookie(database, 2)
+    async with client(main, cookie) as c:
+        r = await c.post("/api/garmin/connect", json={"email": "b@g.co", "password": PASSWORD})
+        assert r.json() == {"status": "needs_mfa"}
+        g = garmin_auth._pending_mfa[2][0]
+        assert PASSWORD not in repr(vars(g.client)) and PASSWORD not in repr(vars(g))
+        # the widget MFA step still needs the page it was sent (CSRF token): kept
+        assert g.client._widget_last_resp.text == "<csrf>"
+        # an attribute we do not know by name is found by what it contains
+        FakeGarmin.widget = False
+        g.client.__dict__["_some_other_cache"] = Resp(f"password={PASSWORD}")
+        garmin_auth._scrub(g, PASSWORD)
+        assert PASSWORD not in repr(vars(g.client))
+
+
+# ---- M1: three code attempts per pending sign-in -----------------------------
+
+async def test_three_wrong_codes_drop_the_pending_login(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g28")
+    import garmin_auth
+    FakeGarmin.mfa = True
+    cookie = await session_cookie(database, 2)
+    async with client(main, cookie) as c:
+        await c.post("/api/garmin/connect", json={"email": "b@g.co", "password": PASSWORD})
+        bad = []
+        for i in range(3):
+            bad.append(await c.post("/api/garmin/mfa", json={"code": "000000"}))
+            assert (2 in garmin_auth._pending_mfa) == (i < 2)   # kept for 2 retries
+        assert [b.status_code for b in bad] == [400, 400, 400]
+        assert 2 not in garmin_auth._pending_mfa
+        # the right code now has nothing to complete
+        late = await c.post("/api/garmin/mfa", json={"code": "123456"})
+    assert late.status_code == 400 and "again" in late.json()["detail"].lower()
+
+
+async def test_a_wrong_code_then_the_right_one_still_connects(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g29")
+    FakeGarmin.mfa = True
+    cookie = await session_cookie(database, 2)
+    async with client(main, cookie) as c:
+        await c.post("/api/garmin/connect", json={"email": "b@g.co", "password": PASSWORD})
+        assert (await c.post("/api/garmin/mfa", json={"code": "000000"})).status_code == 400
+        good = await c.post("/api/garmin/mfa", json={"code": "123456"})
+    assert good.json() == {"status": "connected"}
+
+
+# ---- M3: tokens refreshed by a call that then fails are still saved ----------
+
+async def test_rotated_tokens_are_saved_even_when_the_call_fails(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g30")
+    import garmin_auth
+    await _seed(database, 2, "B" * 600)
+    with tenancy.user_context(2):
+        g = await garmin_auth.get_garmin()
+        def refresh_then_fail(*a):
+            g.client.tokens = "R" * 600
+            raise RuntimeError("boom after refresh")
+        g.get_activities = refresh_then_fail
+        with pytest.raises(RuntimeError, match="boom"):
+            await garmin_auth.run(g, "get_activities", 0, 1)
+    assert (await _status(database, 2)).data == {"tokens": "R" * 600}
