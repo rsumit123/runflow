@@ -8,12 +8,15 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+import auth_routes
 import config
+import tenancy
 from database import init_db, get_session, async_session
 from models import (Activity, Split, Stream, BestEffort, RouteLabel, RouteMerge, Goal, Plan,
                     PlannedWorkout, DailyWellness, ChatMessage)
@@ -119,6 +122,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RunFlow", lifespan=lifespan)
 
+# Added before CORS so CORS wraps it: a 401 must still carry CORS headers.
+app.add_middleware(auth_routes.AuthMiddleware)
+
 # CORS — allow local frontend
 app.add_middleware(
     CORSMiddleware,
@@ -130,6 +136,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_routes.router)
+
+
+@app.exception_handler(tenancy.NoUserContext)
+async def _no_user_context(request, exc):
+    logger.error("NoUserContext on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal error"})
 
 # MCP connector for the Claude app. The secret is in the mount path because
 # custom connectors support only authless or OAuth — no bearer-token field.
@@ -450,49 +464,6 @@ async def _bg_import_all(job_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Auth endpoints
 # ---------------------------------------------------------------------------
-
-@app.get("/api/auth/url")
-async def auth_url():
-    """Return the Strava OAuth authorization URL."""
-    params = {
-        "client_id": config.STRAVA_CLIENT_ID,
-        "redirect_uri": config.OAUTH_REDIRECT_URI,
-        "response_type": "code",
-        "approval_prompt": "auto",
-        "scope": "activity:read_all",
-    }
-    url = f"{config.STRAVA_AUTH_URL}?{urlencode(params)}"
-    return {"url": url}
-
-
-@app.get("/api/auth/callback")
-async def auth_callback(code: str = Query(...)):
-    """Exchange the OAuth code for tokens and save them."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            config.STRAVA_TOKEN_URL,
-            data={
-                "client_id": config.STRAVA_CLIENT_ID,
-                "client_secret": config.STRAVA_CLIENT_SECRET,
-                "code": code,
-                "grant_type": "authorization_code",
-            },
-        )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=400, detail=f"Token exchange failed: {resp.text}")
-        data = resp.json()
-
-    access_token = data.get("access_token", "")
-    refresh_token = data.get("refresh_token", "")
-
-    config.update_env_tokens(access_token, refresh_token)
-
-    # Update the global strava client tokens
-    strava.access_token = access_token
-    strava.refresh_token = refresh_token
-
-    return {"message": "Authenticated successfully", "athlete": data.get("athlete", {})}
-
 
 # ---------------------------------------------------------------------------
 # Activity endpoints
@@ -2772,6 +2743,7 @@ async def import_all(background_tasks: BackgroundTasks):
     """
     job_id = str(uuid.uuid4())
     import_progress[job_id] = {
+        "user_id": tenancy.current_user_id(),
         "status": "starting",
         "type": "api",
         "imported": 0,
@@ -2893,7 +2865,8 @@ class BulkImportRequest(BaseModel):
 
 
 @app.post("/api/import/bulk")
-async def import_bulk(req: BulkImportRequest, background_tasks: BackgroundTasks):
+async def import_bulk(req: BulkImportRequest, background_tasks: BackgroundTasks,
+                      _admin=Depends(auth_routes.require_admin)):
     """
     Import running activities from a Strava data export (ZIP or extracted directory).
     Runs as a background task — returns a job_id to poll for progress.
@@ -2907,6 +2880,7 @@ async def import_bulk(req: BulkImportRequest, background_tasks: BackgroundTasks)
 
     job_id = str(uuid.uuid4())
     import_progress[job_id] = {
+        "user_id": tenancy.current_user_id(),
         "status": "starting",
         "type": "bulk",
         "imported": 0,
@@ -2946,6 +2920,7 @@ async def import_status(
     Return import status. If job_id is provided, return progress for that
     specific background job. Otherwise, return general DB counts.
     """
+    uid = tenancy.current_user_id()
     # General DB counts (always returned)
     total_result = await session.execute(select(func.count(Activity.id)))
     total = total_result.scalar() or 0
@@ -2962,21 +2937,22 @@ async def import_status(
 
     if job_id:
         job = import_progress.get(job_id)
-        if job is None:
+        if job is None or job.get("user_id") != uid:
             raise HTTPException(status_code=404, detail="Job not found")
         response["job"] = {
             "job_id": job_id,
-            **job,
+            **{k: v for k, v in job.items() if k != "user_id"},
         }
 
     # Also return any active jobs
     active_jobs = {
         k: v for k, v in import_progress.items()
-        if v.get("status") in ("starting", "running")
+        if v.get("status") in ("starting", "running") and v.get("user_id") == uid
     }
     if active_jobs:
         response["active_jobs"] = [
-            {"job_id": k, **v} for k, v in active_jobs.items()
+            {"job_id": k, **{a: b for a, b in v.items() if a != "user_id"}}
+            for k, v in active_jobs.items()
         ]
 
     return response
