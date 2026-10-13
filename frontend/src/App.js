@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import ActivityDetail from './pages/ActivityDetail';
 import Import from './pages/Import';
@@ -14,6 +14,8 @@ import Signup from './pages/Signup';
 import Settings from './pages/Settings';
 import { RequireAuth, useAuth } from './auth/AuthContext';
 import { GarminWarningBanner } from './garminWarning';
+import { errorText } from './errors';
+import ErrorBoundary from './ErrorBoundary';
 
 const navLinks = [
   { path: '/', label: 'Dashboard' },
@@ -29,14 +31,18 @@ const navLinks = [
 function App() {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user, authError, logout } = useAuth();
   const onAuthPage = ['/login', '/signup'].includes(location.pathname);
 
+  const [signOutError, setSignOutError] = useState('');
   const signOut = async () => {
     setMenuOpen(false);
-    await logout();
-    navigate('/login');
+    setSignOutError('');
+    try {
+      await logout();   // navigates to a plain /login on success
+    } catch (err) {
+      setSignOutError(errorText(err, "Couldn't sign out. You are still signed in. Try again."));
+    }
   };
 
   // Close menu on navigation
@@ -93,6 +99,8 @@ function App() {
         <button
           onClick={() => setMenuOpen(!menuOpen)}
           className="mobile-menu-btn"
+          aria-label="Menu"
+          aria-expanded={menuOpen}
           style={{
             display: 'none',
             background: 'none',
@@ -156,12 +164,18 @@ function App() {
         )}
       </nav>}
 
+      {!onAuthPage && (authError || signOutError) && user && (
+        <div role="alert" style={{ padding: '8px 16px', backgroundColor: '#2b2110', color: '#f5a623', fontSize: 13 }}>
+          {signOutError || "Can't reach RunFlow right now."}
+        </div>
+      )}
       <GarminWarningBanner />
       <div style={{
         maxWidth: '1100px',
         margin: '0 auto',
         padding: '20px 12px',
       }}>
+        <ErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
@@ -176,6 +190,7 @@ function App() {
           <Route path="/phases" element={<RequireAuth><Phases /></RequireAuth>} />
           <Route path="/import" element={<RequireAuth><Import /></RequireAuth>} />
         </Routes>
+        </ErrorBoundary>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import api from '../api';
+import { errorText } from '../errors';
 
 function formatPace(secPerKm) {
   if (secPerKm === null || secPerKm === undefined) return '-';
@@ -153,7 +154,7 @@ function PlanWorkoutDetail() {
         setData(res.data);
         setGarminId(res.data?.workout?.garmin_workout_id ?? null);
       })
-      .catch((err) => setError(err.response?.data?.detail || 'Failed to load workout'))
+      .catch((err) => setError(errorText(err, 'Failed to load workout')))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -162,7 +163,7 @@ function PlanWorkoutDetail() {
     setPushError(null);
     api.post(`/plan/workout/${id}/push`)
       .then((res) => setGarminId(res.data?.garmin_workout_id ?? null))
-      .catch((err) => setPushError(err.response?.data?.detail || 'Couldn’t reach Garmin — try again.'))
+      .catch((err) => setPushError(errorText(err, 'Couldn’t reach Garmin — try again.')))
       .finally(() => setPushing(false));
   };
 
@@ -171,7 +172,7 @@ function PlanWorkoutDetail() {
     setPushError(null);
     api.delete(`/plan/workout/${id}/push`)
       .then(() => setGarminId(null))
-      .catch((err) => setPushError(err.response?.data?.detail || 'Couldn’t reach Garmin — try again.'))
+      .catch((err) => setPushError(errorText(err, 'Couldn’t reach Garmin — try again.')))
       .finally(() => setPushing(false));
   };
 

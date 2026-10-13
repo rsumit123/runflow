@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import api from '../api';
+import { errorText } from '../errors';
 import SplitsTable from '../components/SplitsTable';
 import RouteMap from '../components/RouteMap';
 import Conditions from '../components/Conditions';
@@ -317,7 +318,7 @@ function ActivityDetail() {
       await api.delete(`/activities/${id}`);
       navigate('/');
     } catch (err) {
-      alert('Failed to delete: ' + (err.response?.data?.detail || err.message));
+      alert('Failed to delete: ' + errorText(err, err.message));
       setDeleting(false);
     }
   };
@@ -346,7 +347,7 @@ function ActivityDetail() {
       setShowMarkPrompt(false);
       setShowIntervalForm(false);
     } catch (err) {
-      alert('Failed to mark as interval: ' + (err.response?.data?.detail || err.message));
+      alert('Failed to mark as interval: ' + errorText(err, err.message));
     }
     setMarking(false);
   };
@@ -363,7 +364,7 @@ function ActivityDetail() {
       setIntervals(null);
       setShowIntervalForm(false);
     } catch (err) {
-      alert('Failed to untag: ' + (err.response?.data?.detail || err.message));
+      alert('Failed to untag: ' + errorText(err, err.message));
     }
   };
 
@@ -433,7 +434,7 @@ function ActivityDetail() {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load activity');
+        setError(errorText(err, 'Failed to load activity'));
         setLoading(false);
       });
 

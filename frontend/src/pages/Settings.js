@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { API_URL } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { errorText } from '../errors';
 import { authStyles as a } from './authStyles';
 
 const card = {
@@ -32,8 +33,7 @@ const STRAVA_REASONS = {
   exchange_failed: 'Connecting Strava failed. Try again.',
 };
 
-const detail = (err, fallback) =>
-  (err.response && err.response.data && err.response.data.detail) || fallback;
+const detail = errorText;
 
 const statusText = (s) =>
   s === 'ok' ? 'Connected' : s === 'needs_reconnect' ? 'Needs reconnecting' : 'Not connected';
@@ -44,7 +44,7 @@ function Status({ value }) {
   return <span style={{ color: statusColor(value), fontSize: 14, fontWeight: 600 }}>{statusText(value)}</span>;
 }
 
-function CopyRow({ value }) {
+function CopyRow({ value, label }) {
   const [copied, setCopied] = useState('');
   const copy = async () => {
     try {
@@ -57,20 +57,20 @@ function CopyRow({ value }) {
   return (
     <div>
       <div style={row}>
-        <input readOnly value={value} style={secretBox} onFocus={(e) => e.target.select()} />
+        <input readOnly aria-label={label} value={value} style={secretBox} onFocus={(e) => e.target.select()} />
         <button type="button" style={quiet} onClick={copy}>Copy</button>
       </div>
-      {copied && <p style={note}>{copied}</p>}
+      {copied && <p role="status" style={note}>{copied}</p>}
     </div>
   );
 }
 
-function StravaSection({ user, refresh, banner }) {
+function StravaSection({ user, refresh, banner, clearBanner }) {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const disconnect = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); clearBanner();
     try {
       await api.post('/strava/disconnect');
       await refresh();
@@ -84,14 +84,17 @@ function StravaSection({ user, refresh, banner }) {
 
   // A top-level navigation, so the session cookie travels and the API can
   // redirect on to Strava. XHR could not follow that redirect.
-  const connect = () => window.location.assign(`${API_URL}/strava/connect`);
+  const connect = () => {
+    clearBanner();
+    window.location.assign(`${API_URL}/strava/connect`);
+  };
 
-  const shown = banner || msg;
+  const shown = msg || banner;
   return (
     <section style={card}>
       <h2 style={h2}>Strava</h2>
       <p style={{ margin: '0 0 12px' }}><Status value={user.strava} /></p>
-      {shown && <p style={shown.ok ? ok : bad}>{shown.text}</p>}
+      {shown && <p role={shown.ok ? 'status' : 'alert'} style={shown.ok ? ok : bad}>{shown.text}</p>}
       <div style={{ ...row, marginTop: 12 }}>
         <button style={primary} onClick={connect}>
           {user.strava === 'needs_reconnect' ? 'Reconnect Strava' : user.strava ? 'Connect again' : 'Connect Strava'}
@@ -143,7 +146,12 @@ function GarminSection({ user, refresh }) {
       await refresh();
       setMsg({ ok: true, text: 'Garmin connected.' });
     } catch (err) {
-      setMsg({ ok: false, text: detail(err, 'That code did not work.') });
+      setMsg({
+        ok: false,
+        text: err.response && err.response.status === 503
+          ? 'Garmin is unreachable right now. Try again in a few minutes.'
+          : detail(err, 'That code did not work.'),
+      });
     } finally {
       setBusy(false);
     }
@@ -176,9 +184,15 @@ function GarminSection({ user, refresh }) {
             <input style={input} inputMode="numeric" autoComplete="one-time-code" maxLength={6}
                    value={code} onChange={(e) => setCode(e.target.value)} required />
           </label>
-          <button style={primary} type="submit" disabled={busy}>
-            {busy ? 'Checking…' : 'Submit code'}
-          </button>
+          <div style={row}>
+            <button style={primary} type="submit" disabled={busy}>
+              {busy ? 'Checking…' : 'Submit code'}
+            </button>
+            <button type="button" style={quiet} disabled={busy}
+                    onClick={() => { setNeedsMfa(false); setCode(''); setMsg(null); }}>
+              Start over
+            </button>
+          </div>
         </form>
       ) : connected ? (
         <button style={quiet} onClick={disconnect} disabled={busy}>Disconnect</button>
@@ -202,7 +216,7 @@ function GarminSection({ user, refresh }) {
           </div>
         </form>
       )}
-      {msg && <p style={msg.ok ? ok : bad}>{msg.text}</p>}
+      {msg && <p role={msg.ok ? 'status' : 'alert'} style={msg.ok ? ok : bad}>{msg.text}</p>}
     </section>
   );
 }
@@ -242,11 +256,11 @@ function ConnectorSection() {
       </button>
       {url && (
         <div style={{ marginTop: 12 }}>
-          <CopyRow value={url} />
+          <CopyRow value={url} label="Connector URL" />
           <p style={note}>This URL is a password. Paste it into Claude → Settings → Connectors. It won't be shown again.</p>
         </div>
       )}
-      {msg && <p style={msg.ok ? ok : bad}>{msg.text}</p>}
+      {msg && <p role={msg.ok ? 'status' : 'alert'} style={msg.ok ? ok : bad}>{msg.text}</p>}
     </section>
   );
 }
@@ -300,11 +314,11 @@ function InvitesSection() {
       </form>
       {link && (
         <div style={{ marginTop: 12 }}>
-          <CopyRow value={link} />
+          <CopyRow value={link} label="Invite link" />
           <p style={note}>Shown once. Send this link to the person you are inviting.</p>
         </div>
       )}
-      {msg && <p style={msg.ok ? ok : bad}>{msg.text}</p>}
+      {msg && <p role={msg.ok ? 'status' : 'alert'} style={msg.ok ? ok : bad}>{msg.text}</p>}
       {invites.length > 0 && (
         <ul style={{ listStyle: 'none', padding: 0, margin: '16px 0 0' }}>
           {invites.map((inv) => (
@@ -346,9 +360,14 @@ export default function Settings() {
     navigate('/settings', { replace: true });
   }, [params, refresh, navigate]);
 
+  const [signOutError, setSignOutError] = useState('');
   const signOut = async () => {
-    await logout();
-    navigate('/login');
+    setSignOutError('');
+    try {
+      await logout();
+    } catch (err) {
+      setSignOutError(errorText(err, "Couldn't sign out. You are still signed in. Try again."));
+    }
   };
 
   if (!user) return null;
@@ -359,8 +378,9 @@ export default function Settings() {
         <h2 style={h2}>Account</h2>
         <p style={{ ...note, wordBreak: 'break-all' }}>{user.email}</p>
         <button style={quiet} onClick={signOut}>Sign out</button>
+        {signOutError && <p role="alert" style={bad}>{signOutError}</p>}
       </section>
-      <StravaSection user={user} refresh={refresh} banner={banner} />
+      <StravaSection user={user} refresh={refresh} banner={banner} clearBanner={() => setBanner(null)} />
       <GarminSection user={user} refresh={refresh} />
       <ConnectorSection />
       {user.is_admin && <InvitesSection />}

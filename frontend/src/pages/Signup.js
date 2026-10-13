@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext';
+import React, { useRef, useState } from 'react';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { safeNext, useAuth } from '../auth/AuthContext';
+import { errorText } from '../errors';
 import { authStyles as s } from './authStyles';
 
 export default function Signup() {
-  const { signup } = useAuth();
+  const { user, signup } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [email, setEmail] = useState('');
@@ -12,22 +13,27 @@ export default function Signup() {
   const [invite, setInvite] = useState(params.get('invite') || '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const submitted = useRef(false);   // the submit handler navigates itself
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true); setError('');
+    submitted.current = true;
     const pw = password;
     setPassword('');   // the password does not outlive the submit
     try {
       await signup(email, pw, invite.trim());
       navigate('/settings', { replace: true });
     } catch (err) {
-      setError((err.response && err.response.data && err.response.data.detail)
-        || 'Could not create the account.');
+      setError(err.isAxiosError ? errorText(err, 'Could not create the account.') : err.message);
     } finally {
+      submitted.current = false;
       setBusy(false);
     }
   };
+
+  // Already signed in: nothing to do here.
+  if (user && !submitted.current) return <Navigate to={safeNext(params.get('next'))} replace />;
 
   return (
     <div style={s.page}>
@@ -45,7 +51,7 @@ export default function Signup() {
           <input style={s.input} type="password" autoComplete="new-password" minLength={10}
                  value={password} onChange={(e) => setPassword(e.target.value)} required />
         </label>
-        {error && <div style={s.error}>{error}</div>}
+        {error && <div role="alert" style={s.error}>{error}</div>}
         <button style={s.button} type="submit" disabled={busy}>
           {busy ? 'Creating…' : 'Create account'}
         </button>

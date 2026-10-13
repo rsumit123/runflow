@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import { errorText } from '../errors';
 
 function formatPace(secPerKm) {
   if (!secPerKm) return '-';
@@ -60,7 +61,7 @@ function Phases() {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load phases');
+        setError(errorText(err, 'Failed to load phases'));
         setLoading(false);
       });
   };

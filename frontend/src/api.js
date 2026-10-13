@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { publishGarminWarning } from './garminWarning';
+import { publishGarminWarning, resetGarminWarning } from './garminWarning';
+import { notifySessionEnded } from './auth/sessionEvents';
 
 export const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
@@ -18,8 +19,7 @@ const warningIn = (response) => {
 
 // Any response can carry a `garmin_warning`; show it app-wide instead of
 // making every call site remember to.
-// A 401 anywhere but the auth calls means the session has gone: send the user
-// to log in, and bring them back here afterwards.
+// A 401 anywhere but the auth calls means the session has gone.
 api.interceptors.response.use(
   (response) => {
     const warning = warningIn(response);
@@ -31,10 +31,12 @@ api.interceptors.response.use(
     if (warning) publishGarminWarning(warning);
     const status = error.response && error.response.status;
     const url = (error.config && error.config.url) || '';
-    const onAuthPage = ['/login', '/signup'].includes(window.location.pathname);
-    if (status === 401 && !url.startsWith('/auth/') && !onAuthPage) {
-      const next = encodeURIComponent(window.location.pathname + window.location.search);
-      window.location.assign(`/login?next=${next}`);
+    if (status === 401 && !url.startsWith('/auth/')) {
+      // The session is gone. Tell AuthContext; RequireAuth then moves to the
+      // login page inside the SPA, so in-progress state is not thrown away by a
+      // reload. The previous user's Garmin warning must not outlive the session.
+      resetGarminWarning();
+      notifySessionEnded();
     }
     return Promise.reject(error);
   },

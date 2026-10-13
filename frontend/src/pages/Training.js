@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import api from '../api';
+import { errorText } from '../errors';
 import { color, font, space, button } from '../theme';
 import TodayHero from '../components/TodayHero';
 import Collapse from '../components/Collapse';
@@ -218,7 +219,7 @@ function PlanSection() {
         return loadCalibration();
       })
       .catch((err) => setCalError(
-        (err.response && err.response.data && err.response.data.detail) || 'Calibration failed.'
+        errorText(err, 'Calibration failed.')
       ))
       .finally(() => setCalApplying(false));
   };
@@ -330,7 +331,7 @@ function PlanSection() {
         return loadPlan();
       })
       .catch((err) => {
-        setSyncError(err.response?.data?.detail || 'Couldn\'t reach Garmin — try again.');
+        setSyncError(errorText(err, 'Couldn\'t reach Garmin — try again.'));
       })
       .finally(() => setSyncing(false));
   };
@@ -1347,7 +1348,7 @@ function Training() {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load training data');
+        setError(errorText(err, 'Failed to load training data'));
         setLoading(false);
       });
   }, []);

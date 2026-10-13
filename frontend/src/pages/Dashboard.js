@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import { errorText } from '../errors';
 
 function formatDate(dateString) {
   if (!dateString) return '-';
@@ -119,7 +120,7 @@ function Dashboard() {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load activities');
+        setError(errorText(err, 'Failed to load activities'));
         setLoading(false);
       });
   };
@@ -142,7 +143,7 @@ function Dashboard() {
       setPullResult(res.data);
       loadActivities(1);
     } catch (err) {
-      setPullResult({ error: err.response?.data?.detail || 'Failed to pull' });
+      setPullResult({ error: errorText(err, 'Failed to pull') });
     }
     setPulling(false);
   };

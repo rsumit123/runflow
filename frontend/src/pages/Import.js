@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import { errorText } from '../errors';
 import { useAuth } from '../auth/AuthContext';
 
 const pageTitle = {
@@ -260,7 +261,7 @@ function Import() {
     } catch (err) {
       setImportStatus({
         type: 'error',
-        message: err.response?.data?.detail || 'Failed to import activities.',
+        message: errorText(err, 'Failed to import activities.'),
       });
       setImportLoading(false);
     }
@@ -279,7 +280,7 @@ function Import() {
     } catch (err) {
       setSyncStatus({
         type: 'error',
-        message: err.response?.data?.detail || 'Failed to sync activities.',
+        message: errorText(err, 'Failed to sync activities.'),
       });
     }
     setSyncLoading(false);
@@ -297,7 +298,7 @@ function Import() {
     } catch (err) {
       setSyncStatus({
         type: 'error',
-        message: err.response?.data?.detail || 'Garmin sync failed.',
+        message: errorText(err, 'Garmin sync failed.'),
       });
     } finally {
       setGarminLoading(false);
@@ -323,7 +324,7 @@ function Import() {
     } catch (err) {
       setBulkStatus({
         type: 'error',
-        message: err.response?.data?.detail || 'Failed to import from export.',
+        message: errorText(err, 'Failed to import from export.'),
       });
       setBulkLoading(false);
     }
