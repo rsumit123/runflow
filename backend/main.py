@@ -42,6 +42,7 @@ from metrics import get_metrics_trend, compute_interval_metrics, compute_lap_met
 import asyncio as _asyncio
 import garmin_transform as gt
 from garmin_client import GarminClient
+import garmin_auth
 import fitness_model as fmodel
 import mcp_server
 import fitness_projection as fproj
@@ -162,6 +163,46 @@ app.include_router(auth_routes.router)
 async def _strava_not_connected(request, exc):
     return JSONResponse(status_code=409,
                         content={"detail": "Strava is not connected. Connect it in Settings."})
+
+
+@app.exception_handler(garmin_auth.GarminNotConnected)
+async def _garmin_not_connected(request, exc):
+    return JSONResponse(status_code=409,
+                        content={"detail": "Garmin is not connected. Connect it in Settings."})
+
+
+class GarminConnectBody(BaseModel):
+    email: str
+    password: str
+
+
+class GarminMfaBody(BaseModel):
+    code: str
+
+
+@app.post("/api/garmin/connect")
+async def garmin_connect(body: GarminConnectBody):
+    try:
+        status = await garmin_auth.start_login(tenancy.current_user_id(), body.email,
+                                               body.password)
+    except garmin_auth.GarminLoginFailed as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": status}
+
+
+@app.post("/api/garmin/mfa")
+async def garmin_mfa(body: GarminMfaBody):
+    try:
+        status = await garmin_auth.complete_mfa(tenancy.current_user_id(), body.code.strip())
+    except garmin_auth.GarminLoginFailed as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": status}
+
+
+@app.post("/api/garmin/disconnect")
+async def garmin_disconnect():
+    await garmin_auth.disconnect(tenancy.current_user_id())
+    return {"garmin": None}
 
 
 @app.exception_handler(tenancy.NoUserContext)
@@ -1422,6 +1463,8 @@ async def push_adhoc_workout(req: AdhocWorkoutRequest):
         raise HTTPException(status_code=400, detail="Cannot schedule a workout in the past.")
     try:
         res = await garmin.push_workout(req.name, req.steps, when.isoformat())
+    except garmin_auth.GarminNotConnected:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Ad-hoc Garmin push failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"Garmin push failed: {exc}")
@@ -1434,6 +1477,8 @@ async def delete_adhoc_workout(workout_id: int):
     """Remove a one-off workout from Garmin Connect and the watch calendar."""
     try:
         await garmin.remove_workout(workout_id)
+    except garmin_auth.GarminNotConnected:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Ad-hoc Garmin removal failed for %s: %s", workout_id, exc)
         raise HTTPException(status_code=502, detail=f"Garmin removal failed: {exc}")
@@ -3019,6 +3064,8 @@ async def import_garmin_sync(session: AsyncSession = Depends(get_session)):
         while True:
             try:
                 acts = await gc.get_recent_running(limit=page_size, start=start)
+            except garmin_auth.GarminNotConnected:
+                raise
             except Exception as exc:
                 logger.error("Garmin fetch failed at start=%d: %s", start, exc)
                 if start == 0:
@@ -3048,7 +3095,7 @@ async def import_garmin_sync(session: AsyncSession = Depends(get_session)):
             start += page_size
             await _asyncio.sleep(1)  # be gentle with Garmin
         return {"imported": imported, "already_existed": already_existed, "skipped_non_running": 0}
-    except HTTPException:
+    except (HTTPException, garmin_auth.GarminNotConnected):
         raise
     except RuntimeError as exc:  # missing token, etc.
         raise HTTPException(status_code=400, detail=str(exc))
@@ -3543,6 +3590,8 @@ async def backfill_training_effect(session: AsyncSession = Depends(get_session))
     while True:
         try:
             acts = await garmin.get_recent_running(limit=page, start=start)
+        except garmin_auth.GarminNotConnected:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("TE backfill fetch failed at %d: %s", start, exc)
             break
@@ -3997,6 +4046,8 @@ async def push_workout_to_garmin(workout_id: int,
                             detail="This workout has no structured steps to send.")
     try:
         await _garmin_push(w)
+    except garmin_auth.GarminNotConnected:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Garmin push failed for workout %s: %s", workout_id, exc)
         raise HTTPException(status_code=502, detail=f"Garmin push failed: {exc}")
@@ -4039,6 +4090,8 @@ async def remove_workout_from_garmin(workout_id: int,
         return {"garmin_workout_id": None}
     try:
         await garmin.remove_workout(w.garmin_workout_id)
+    except garmin_auth.GarminNotConnected:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Garmin remove failed for workout %s: %s", workout_id, exc)
         raise HTTPException(status_code=502, detail=f"Garmin remove failed: {exc}")

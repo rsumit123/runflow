@@ -248,21 +248,7 @@ SAME_FOR_A_AND_B: dict[str, str] = {
 }
 
 # Routes allowed to answer 5xx in a sweep, with the reason.
-ALLOWED_5XX: dict[tuple[str, str], str] = {
-    ("GET", "/api/plan/today-guidance"):
-        "User B has no cached wellness for today and no Garmin connection, so the route "
-        "reaches garmin.wellness() and raises RuntimeError('Garmin token store empty'). "
-        "Task 6 turns 'Garmin not connected' into a 409; remove this entry then.",
-    ("DELETE", "/api/workouts/adhoc/{workout_id}"):
-        "The id is a Garmin Connect workout id, not a database row. Today the route calls "
-        "the one process-wide Garmin client, which has no token store in tests, so it 502s. "
-        "Until Task 6 gives each user their own Garmin client, any signed-in user could "
-        "ask the OWNER's Garmin account to delete a workout. Task 6 makes it 409 for a "
-        "user with no Garmin connection; remove this entry then.",
-    ("POST", "/api/import/garmin/sync"):
-        "Fetches from the process-wide Garmin client, which has no token store in tests "
-        "(502). Task 6 makes this per-user and 409 when Garmin is not connected.",
-}
+ALLOWED_5XX: dict[tuple[str, str], str] = {}
 
 # Mutating routes with a path id that may answer something other than 4xx to B
 # for A's id, with the reason. Their answer must still be identical to the one for
@@ -274,8 +260,6 @@ ALLOWED_NON_4XX_FOR_FOREIGN_ID: dict[tuple[str, str], str] = {
     ("DELETE", "/api/activities/{activity_id}/chat"):
         "Deletes the caller's own chat messages for that activity id and reports a count "
         "(0); it never 404s, for any id. Identical to a nonexistent id.",
-    ("DELETE", "/api/workouts/adhoc/{workout_id}"):
-        "The id is a Garmin Connect workout id, not a database row (see ALLOWED_5XX).",
 }
 
 # Mutating routes with a path id for which every probe is a 422 (the handler is
