@@ -138,6 +138,7 @@ def main() -> None:
             raise SystemExit("this deletes every run, plan and note the user has; add --yes")
         asyncio.run(delete_user(a.email))
         print("deleted")
+        print("Restart the backend container so no cached connection outlives this user.")
 
 
 if __name__ == "__main__":

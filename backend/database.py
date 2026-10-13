@@ -6,7 +6,12 @@ import os
 DB_PATH = Path(os.getenv("DB_PATH", Path(__file__).resolve().parent / "training.db"))
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(
+    DATABASE_URL, echo=False,
+    # Wait for a competing writer instead of failing "database is locked" after
+    # the 5 s default. Rollback journal (no WAL) is assumed by the migration.
+    connect_args={"timeout": 30},
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

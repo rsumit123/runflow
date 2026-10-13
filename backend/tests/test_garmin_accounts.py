@@ -709,3 +709,26 @@ def test_canary_refresh_outcome_matches_the_real_library_message(monkeypatch, st
     g = garminconnect.Garmin()
     g.client.di_refresh_token, g.client.di_client_id = "r" * 50, "cid"
     assert garmin_auth.refresh_outcome(g) == expected
+
+
+async def test_a_cached_garmin_client_is_not_returned_after_its_credential_changes(monkeypatch):
+    main, database = await setup_app(monkeypatch, "g-cache")
+    import credentials, garmin_auth
+
+    async def put(tokens):
+        async with database.async_session() as s:
+            await credentials.put(s, 2, "garmin", {"tokens": tokens})
+            await s.commit()
+    await put("A" * 600)
+    with tenancy.user_context(2):
+        g1 = await garmin_auth.get_garmin()
+        assert await garmin_auth.get_garmin() is g1
+        await put("B" * 600)
+        g2 = await garmin_auth.get_garmin()
+        assert g2 is not g1 and g2.client.tokens == "B" * 600
+        async with database.async_session() as s:
+            await credentials.delete(s, 2, "garmin")
+            await s.commit()
+        with pytest.raises(garmin_auth.GarminNotConnected):
+            await garmin_auth.get_garmin()
+    assert 2 not in garmin_auth._clients

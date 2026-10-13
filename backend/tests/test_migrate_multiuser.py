@@ -655,3 +655,22 @@ async def test_stale_journal_is_removed_while_the_exclusive_lock_is_held(monkeyp
     monkeypatch.setattr(mm.sqlite3, "connect", lambda *a, **k: Spy(real(*a, **k)))
     mm._resolve_journal(path)
     assert seen == {"journal_gone": True, "other": "database is locked"}
+
+
+async def test_migrated_users_table_is_autoincrement_and_the_next_user_is_2(monkeypatch):
+    path = _old_db()
+    await _run(monkeypatch, path, tempfile.mktemp(suffix=".bak"))
+    con = sqlite3.connect(path)
+    try:
+        assert "AUTOINCREMENT" in con.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0].upper()
+        assert con.execute("SELECT id FROM users WHERE email = 'owner@example.com'"
+                           ).fetchone() == (1,)
+        assert con.execute("SELECT seq FROM sqlite_sequence WHERE name = 'users'"
+                           ).fetchone() == (1,)
+        con.execute("INSERT INTO users (email, password_hash, is_admin, created_at) "
+                    "VALUES ('n@example.com', 'x', 0, '2026-01-01')")
+        assert con.execute("SELECT id FROM users WHERE email = 'n@example.com'"
+                           ).fetchone() == (2,)
+    finally:
+        con.close()

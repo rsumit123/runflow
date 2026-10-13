@@ -8,6 +8,7 @@ from typing import Any, Optional
 from urllib.parse import urlencode
 
 import httpx
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -234,8 +235,24 @@ _redact._runflow_redact = True
 _access_log.addFilter(_redact)
 
 
+def _require_production_config() -> None:
+    """In production (Secure cookies) refuse to start half-configured, rather than
+    serving logins that then fail on the first provider connect."""
+    if not config.SESSION_COOKIE_SECURE:
+        return
+    if not config.CREDENTIALS_KEY:
+        raise RuntimeError("CREDENTIALS_KEY is not set; refusing to start in production")
+    try:
+        Fernet(config.CREDENTIALS_KEY.encode())
+    except Exception:  # noqa: BLE001 - any malformed key
+        raise RuntimeError("CREDENTIALS_KEY is not a valid Fernet key; refusing to start") from None
+    if not config.SESSION_STATE_SECRET:
+        raise RuntimeError("SESSION_STATE_SECRET is not set; refusing to start in production")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _require_production_config()
     _warn_on_dev_public_url()
     await init_db()
     task = _asyncio.create_task(_auto_sync_loop())
@@ -499,6 +516,16 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
         logger.error("Failed to fetch detail for activity %s: %s", act.id, exc)
         return
 
+    # Streams. Fetched before anything below touches the database: the first query
+    # flushes the pending activity row and opens a write transaction, and that must
+    # not stay open across a Strava round trip (it would lock out every other user).
+    # Streams
+    try:
+        streams_resp = await strava.get_activity_streams(act.id)
+    except Exception as exc:
+        logger.warning("Failed to fetch streams for activity %s: %s", act.id, exc)
+        streams_resp = []
+
     # Update fields that may only appear in detail
     act.elev_high = detail.get("elev_high", act.elev_high)
     act.elev_low = detail.get("elev_low", act.elev_low)
@@ -525,13 +552,6 @@ async def _import_detail_and_streams(session: AsyncSession, act: Activity) -> No
             average_heartrate=sd.get("average_heartrate"),
         )
         session.add(split)
-
-    # Streams
-    try:
-        streams_resp = await strava.get_activity_streams(act.id)
-    except Exception as exc:
-        logger.warning("Failed to fetch streams for activity %s: %s", act.id, exc)
-        streams_resp = []
 
     # Remove old streams
     existing_streams = await session.execute(
@@ -652,9 +672,11 @@ async def _bg_import_all(job_id: str) -> None:
                 act = await _upsert_activity_summary(session, act_data)
                 await _import_detail_and_streams(session, act)
                 progress["imported"] += 1
+                # Commit every activity: a write transaction left open across the
+                # next Strava await would lock every other user's writes out.
+                await session.commit()
 
                 if progress["imported"] % 10 == 0:
-                    await session.commit()
                     logger.info("[bg] Imported %d activities so far...", progress["imported"])
 
             page += 1
@@ -3154,6 +3176,7 @@ async def import_by_date(req: DateImportRequest, session: AsyncSession = Depends
             act = await _upsert_activity_summary(session, act_data)
             await _import_detail_and_streams(session, act)
             imported += 1
+            await session.commit()  # never hold a write lock across the next network call
 
         await session.commit()
         page += 1
@@ -3237,9 +3260,7 @@ async def import_sync(session: AsyncSession = Depends(get_session)):
             act = await _upsert_activity_summary(session, act_data)
             await _import_detail_and_streams(session, act)
             imported += 1
-
-            if imported % 10 == 0:
-                await session.commit()
+            await session.commit()  # never hold a write lock across the next network call
 
         await session.commit()
 

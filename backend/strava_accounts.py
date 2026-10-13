@@ -135,13 +135,20 @@ async def save_tokens(user_id: int, data: dict) -> None:
 async def client_for(user_id: int | None) -> StravaClient:
     if user_id is None:
         raise tenancy.NoUserContext("Strava needs a user in context")
-    if user_id in _clients:
-        return _clients[user_id]
+    # A cached client is only good while the stored credential is the grant it
+    # was built from. A user can be deleted (and the id reused) by another
+    # process, or reconnect, without this process hearing about it.
+    cached = _clients.get(user_id)
+    if cached is not None and await _still_current(user_id, cached):
+        return cached
     # Two cold requests must not each build (and each refresh with) their own client.
     lock = _client_locks.setdefault(user_id, asyncio.Lock())
     async with lock:
-        if user_id in _clients:
-            return _clients[user_id]
+        cached = _clients.get(user_id)
+        if cached is not None:
+            if await _still_current(user_id, cached):
+                return cached
+            await _drop(user_id)
         async with database.async_session() as s:
             cred = await credentials.get(s, user_id, "strava")
         if cred is None or cred.status != "ok":
@@ -177,6 +184,14 @@ async def client_for(user_id: int | None) -> StravaClient:
                               on_refresh=on_refresh, on_invalid=on_invalid)
         _clients[user_id] = client
         return client
+
+
+async def _still_current(user_id: int, client: StravaClient) -> bool:
+    """True while the stored credential still carries the client's refresh token."""
+    async with database.async_session() as s:
+        cred = await credentials.get(s, user_id, "strava")
+    return (cred is not None and cred.status == "ok"
+            and cred.data.get("refresh_token") == client.refresh_token)
 
 
 async def token_revoked(user_id: int) -> bool:

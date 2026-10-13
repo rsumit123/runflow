@@ -30,6 +30,11 @@ PUBLIC_ROUTES = {
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
 rate_limiter = auth.LoginRateLimiter()
+# Signup runs bcrypt, so an anonymous flood could saturate the thread pool. Every
+# attempt counts (not just failures): at most 10 per IP per 15 minutes. The email
+# dimension is unused (a huge cap), the key is a constant.
+SIGNUP_ATTEMPTS_PER_IP = 10
+signup_limiter = auth.LoginRateLimiter(per_email=10**9, per_ip=SIGNUP_ATTEMPTS_PER_IP)
 
 
 def _header(scope, name: bytes) -> str | None:
@@ -201,7 +206,11 @@ async def require_admin():
 
 
 @router.post("/auth/signup")
-async def signup(body: SignupBody, response: Response):
+async def signup(body: SignupBody, request: Request, response: Response):
+    ip = _client_ip(request)
+    if signup_limiter.blocked("signup", ip):
+        raise HTTPException(429, "Too many attempts. Try again in 15 minutes.")
+    signup_limiter.record_failure("signup", ip)
     async with database.async_session() as s:
         try:
             user = await auth.signup(s, body.email, body.password, body.invite_code)

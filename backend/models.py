@@ -232,6 +232,9 @@ class PlannedWorkout(TenantMixin, Base):
 
 class User(Base):
     __tablename__ = "users"
+    # AUTOINCREMENT: without it SQLite reuses the highest id after a delete, and a
+    # new signup would inherit the deleted user's cached provider connections.
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String, unique=True, nullable=False, index=True)  # lowercased

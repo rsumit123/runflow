@@ -256,16 +256,26 @@ async def _stored_tokens(uid: int) -> tuple[str | None, str | None]:
     return cred.data.get("tokens"), cred.status
 
 
+async def _cache_is_current(uid: int) -> bool:
+    tokens, status = await _stored_tokens(uid)
+    return tokens is not None and status == "ok" and tokens == _saved_tokens.get(uid)
+
+
 async def get_garmin() -> Garmin:
     uid = tenancy.current_user_id()
     if uid is None:
         raise tenancy.NoUserContext("Garmin needs a user in context")
-    if uid in _clients:
+    # A cached client is only reused while the stored credential is the one it
+    # was built from (the user may have been deleted, or reconnected, elsewhere).
+    if uid in _clients and await _cache_is_current(uid):
         return _clients[uid]
     # Two cold requests must not each build (and each refresh with) their own client.
     async with _lock(uid):
         if uid in _clients:
-            return _clients[uid]
+            if await _cache_is_current(uid):
+                return _clients[uid]
+            _clients.pop(uid, None)
+            _saved_tokens.pop(uid, None)
         tokens, status = await _stored_tokens(uid)
         if tokens is None or status != "ok":
             raise GarminNotConnected("Garmin is not connected")
