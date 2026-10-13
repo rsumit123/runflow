@@ -50,16 +50,23 @@ async def _run(monkeypatch, path, backup, **kw):
     import migrate_multiuser
     monkeypatch.setattr(migrate_multiuser, "_read_garmin_tokens", lambda d: "G" * 600)
     return await migrate_multiuser.migrate(path, backup, "Owner@Example.com",
-                                           strava_athlete_id=kw.get("athlete", "4242"))
+                                           strava_athlete_id=kw.get("athlete", "4242"),
+                                           confirmed=True)
 
 
 async def test_migration_assigns_everything_to_the_owner(monkeypatch):
     path = _old_db()
-    original = Path(path).read_bytes()
+    c0 = sqlite3.connect(path)
+    original = "\n".join(c0.iterdump())
+    c0.close()
     backup = path + ".bak"
     report = await _run(monkeypatch, path, backup)
 
-    assert Path(backup).read_bytes() == original
+    # The sqlite backup API copies pages, not bytes (the header change counter differs),
+    # so compare the whole content: schema and every row.
+    cb = sqlite3.connect(backup)
+    assert "\n".join(cb.iterdump()) == original
+    cb.close()
     assert report["before"]["activities"] == report["after"]["activities"] == 2
     assert report["before"]["daily_wellness"] == report["after"]["daily_wellness"] == 2
     assert report["before"]["route_labels"] == report["after"]["route_labels"] == 1
@@ -103,7 +110,7 @@ async def test_migration_is_idempotent(monkeypatch):
 async def test_migration_refuses_without_a_backup_path(monkeypatch):
     import migrate_multiuser
     with pytest.raises(ValueError, match="backup"):
-        await migrate_multiuser.migrate(_old_db(), None, "o@x.co")
+        await migrate_multiuser.migrate(_old_db(), None, "o@x.co", confirmed=True)
 
 
 async def test_migration_refuses_while_the_app_has_the_db_open(monkeypatch):
@@ -111,7 +118,7 @@ async def test_migration_refuses_while_the_app_has_the_db_open(monkeypatch):
     Path(path + "-wal").write_bytes(b"x")
     import migrate_multiuser
     with pytest.raises(RuntimeError, match="stop"):
-        await migrate_multiuser.migrate(path, path + ".bak", "o@x.co")
+        await migrate_multiuser.migrate(path, path + ".bak", "o@x.co", confirmed=True)
 
 
 async def test_admin_set_password_then_login(monkeypatch):
@@ -246,3 +253,233 @@ async def test_migration_of_the_full_original_schema_keeps_every_column_and_row(
 def migrate_tables():
     import migrate_multiuser
     return migrate_multiuser.TENANT_TABLES
+
+
+# ---- fix round: backup verification, preflight, rebuild safety, admin ----
+
+def _prep(monkeypatch, path, *, key="gen", strava=True, garmin="ok", mcp=True):
+    """Point the app modules at `path` and set the environment; returns the migration module.
+    garmin: "ok" (valid-looking tokens), "junk" (only .DS_Store), or None (no directory)."""
+    import importlib, sys, config, database
+    monkeypatch.setenv("DB_PATH", path)
+    if key == "gen":
+        key = Fernet.generate_key().decode()
+    if key is None:
+        monkeypatch.delenv("CREDENTIALS_KEY", raising=False)
+    else:
+        monkeypatch.setenv("CREDENTIALS_KEY", key)
+    for name, val, on in (("strava_access_token", "OLD-AT", strava),
+                          ("strava_refresh_token", "OLD-RT", strava),
+                          ("MCP_SECRET", "the-old-mcp-secret", mcp)):
+        if on:
+            monkeypatch.setenv(name, val)
+        else:
+            monkeypatch.delenv(name, raising=False)
+    if garmin is None:
+        monkeypatch.setenv("GARMIN_TOKENSTORE", "/nonexistent-garmin-dir")
+    else:
+        d = Path(tempfile.mkdtemp())
+        (d / (".DS_Store" if garmin == "junk" else "oauth.json")).write_text("{}")
+        monkeypatch.setenv("GARMIN_TOKENSTORE", str(d))
+    for m in ("main", "mcp_server", "models"):
+        sys.modules.pop(m, None)
+    importlib.reload(config); importlib.reload(database)
+    import migrate_multiuser
+    if garmin == "ok":
+        monkeypatch.setattr(migrate_multiuser, "_read_garmin_tokens", lambda d: "G" * 600)
+    return migrate_multiuser
+
+
+def _no_files_left(path):
+    return not any(Path(path + s).exists() for s in ("-wal", "-shm", "-journal"))
+
+
+async def test_truncated_existing_backup_aborts_before_any_write(monkeypatch):
+    path = _old_db()
+    before = Path(path).read_bytes()
+    bak = path + ".bak"
+    Path(bak).write_bytes(before[:3000] if len(before) > 3000 else before[: len(before) // 2])
+    mm = _prep(monkeypatch, path)
+    with pytest.raises(RuntimeError, match=r"\.bak"):
+        await mm.migrate(path, bak, "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+
+
+async def test_existing_backup_with_other_counts_is_rejected(monkeypatch):
+    path = _old_db()
+    bak = path + ".bak"
+    src = sqlite3.connect(path); dst = sqlite3.connect(bak); src.backup(dst)
+    dst.execute("DELETE FROM activities"); dst.commit(); dst.close(); src.close()
+    before = Path(path).read_bytes()
+    mm = _prep(monkeypatch, path)
+    with pytest.raises(RuntimeError, match="row counts"):
+        await mm.migrate(path, bak, "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+
+
+async def test_valid_existing_backup_is_accepted_and_untouched(monkeypatch):
+    path = _old_db()
+    bak = path + ".bak"
+    src = sqlite3.connect(path); dst = sqlite3.connect(bak); src.backup(dst); dst.close(); src.close()
+    good = Path(bak).read_bytes()
+    mm = _prep(monkeypatch, path)
+    report = await mm.migrate(path, bak, "o@x.co", confirmed=True)
+    assert report["after"]["activities"] == 2
+    assert Path(bak).read_bytes() == good
+
+
+async def test_backup_path_equal_to_db_is_refused(monkeypatch):
+    path = _old_db()
+    before = Path(path).read_bytes()
+    mm = _prep(monkeypatch, path)
+    with pytest.raises(RuntimeError, match="itself"):
+        await mm.migrate(path, path, "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+
+
+async def test_fresh_backup_is_complete_and_intact(monkeypatch):
+    path = _old_db()
+    bak = path + ".bak"
+    mm = _prep(monkeypatch, path)
+    await mm.migrate(path, bak, "o@x.co", confirmed=True)
+    con = sqlite3.connect(bak)
+    assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert con.execute("SELECT COUNT(*) FROM activities").fetchone()[0] == 2
+    assert "user_id" not in [r[1] for r in con.execute("PRAGMA table_info(activities)")]
+    con.close()
+    assert not Path(bak + ".tmp").exists()
+
+
+@pytest.mark.parametrize("key", [None, "abc"])
+async def test_bad_credentials_key_aborts_before_any_write(monkeypatch, key):
+    path = _old_db()
+    before = Path(path).read_bytes()
+    mm = _prep(monkeypatch, path, key=key)
+    with pytest.raises(RuntimeError, match="CREDENTIALS_KEY"):
+        await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+    assert not Path(path + ".bak").exists()
+
+
+async def test_garmin_dir_without_token_files_aborts_before_any_write(monkeypatch):
+    path = _old_db()
+    before = Path(path).read_bytes()
+    mm = _prep(monkeypatch, path, garmin="junk")
+    with pytest.raises(RuntimeError, match="Garmin"):
+        await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+    assert not Path(path + ".bak").exists()
+
+
+async def test_missing_sources_need_explicit_flags(monkeypatch):
+    path = _old_db()
+    before = Path(path).read_bytes()
+    mm = _prep(monkeypatch, path, strava=False, garmin=None, mcp=False)
+    with pytest.raises(RuntimeError, match="--no-"):
+        await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+    report = await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True,
+                              no_strava=True, no_garmin=True, no_connector=True)
+    assert report["after"]["activities"] == 2
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 0
+    con.close()
+
+
+async def test_unconfirmed_migration_is_refused(monkeypatch):
+    path = _old_db()
+    before = Path(path).read_bytes()
+    mm = _prep(monkeypatch, path)
+    with pytest.raises(RuntimeError, match="not confirmed"):
+        await mm.migrate(path, path + ".bak", "o@x.co", confirmed=False)
+    assert Path(path).read_bytes() == before
+
+
+async def test_journal_file_blocks_the_migration(monkeypatch):
+    path = _old_db()
+    Path(path + "-journal").write_bytes(b"x")
+    mm = _prep(monkeypatch, path)
+    with pytest.raises(RuntimeError, match="stop"):
+        await mm.migrate(path, path + ".bak", "o@x.co", confirmed=True)
+
+
+async def test_typo_in_owner_email_needs_the_fix_flag(monkeypatch):
+    path = _old_db()
+    mm = _prep(monkeypatch, path)
+    await mm.migrate(path, path + ".bak", "typo@x.co", confirmed=True)
+    before = Path(path).read_bytes()
+    with pytest.raises(RuntimeError, match="--fix-owner-email"):
+        await mm.migrate(path, path + ".bak", "right@x.co", confirmed=True)
+    assert Path(path).read_bytes() == before
+    await mm.migrate(path, path + ".bak", "Right@x.co", confirmed=True, fix_owner_email=True)
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT id, email FROM users").fetchall() == [(1, "right@x.co")]
+    con.close()
+
+
+async def test_admin_set_email(monkeypatch):
+    path = _old_db()
+    mm = _prep(monkeypatch, path)
+    await mm.migrate(path, path + ".bak", "typo@x.co", confirmed=True)
+    import admin
+    await admin.set_email("typo@x.co", "Right@X.co")
+    assert [u[1] for u in await admin.list_users()] == ["right@x.co"]
+    with pytest.raises(SystemExit, match="no user"):
+        await admin.set_email("typo@x.co", "other@x.co")
+
+
+async def test_failed_row_copy_rolls_the_rebuild_back(monkeypatch):
+    path = _old_db()
+    mm = _prep(monkeypatch, path)
+
+    def short_copy(con, table, cols):
+        con.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM {table}__old "
+                    f"WHERE rowid != (SELECT MAX(rowid) FROM {table}__old)")
+    monkeypatch.setattr(mm, "_copy_rows", short_copy)
+    con = sqlite3.connect(path, isolation_level=None)
+    con.execute("ALTER TABLE daily_wellness ADD COLUMN user_id INTEGER")
+    con.execute("UPDATE daily_wellness SET user_id = 1")
+    with pytest.raises(RuntimeError, match="copied 1 of 2"):
+        mm._rebuild(con, "daily_wellness")
+    assert mm._pk(con, "daily_wellness") == ["date"]
+    assert con.execute("SELECT COUNT(*) FROM daily_wellness").fetchone()[0] == 2
+    assert con.execute("SELECT name FROM sqlite_master WHERE name LIKE '%__old'").fetchall() == []
+    con.close()
+
+
+async def test_admin_delete_user_removes_invites_they_created(monkeypatch):
+    from tests.multiuser_fixtures import seed_user_a, seed_user_b, setup_app
+    main, database = await setup_app(monkeypatch, "inv")
+    import admin, auth
+    from models import Invite
+    from sqlalchemy import select
+    async with database.async_session() as s:
+        await auth.create_invite(s, created_by=2, uses=1)
+        await auth.create_invite(s, created_by=1, uses=1)
+        await s.commit()
+    await admin.delete_user("b@example.com")
+    async with database.async_session() as s:
+        creators = (await s.execute(select(Invite.created_by))).scalars().all()
+    assert creators == [1]
+
+
+@pytest.mark.parametrize("flag", ["--uses", "--expires-days"])
+def test_admin_create_invite_rejects_nonpositive_numbers(monkeypatch, flag):
+    import sys, admin
+    monkeypatch.setattr(sys, "argv", ["admin.py", "create-invite", flag, "0"])
+    with pytest.raises(SystemExit, match="at least 1"):
+        admin.main()
+
+
+async def test_admin_set_password_checks_user_and_terminal_before_prompting(monkeypatch):
+    import asyncio, sys, admin
+    from tests.multiuser_fixtures import setup_app
+    await setup_app(monkeypatch, "pw")
+    monkeypatch.setattr("getpass.getpass", lambda *a: pytest.fail("prompted"))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(sys, "argv", ["admin.py", "set-password", "nobody@example.com"])
+    with pytest.raises(SystemExit, match="no user"):
+        await asyncio.to_thread(admin.main)
+    monkeypatch.setattr(sys, "argv", ["admin.py", "set-password", "a@example.com"])
+    with pytest.raises(SystemExit, match="terminal"):
+        await asyncio.to_thread(admin.main)

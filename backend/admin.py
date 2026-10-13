@@ -2,6 +2,7 @@
 
   python admin.py set-password EMAIL        prompts twice; never an argument
   python admin.py create-invite [--uses N] [--expires-days D]
+  python admin.py set-email OLD NEW
   python admin.py list-users
   python admin.py delete-user EMAIL --yes   removes the user and all their data
 """
@@ -32,6 +33,27 @@ async def set_password(email: str, password: str) -> None:
         await s.commit()
 
 
+async def set_email(old: str, new: str) -> None:
+    try:
+        new_email = auth.normalize_email(new)
+    except auth.AuthError as e:
+        raise SystemExit(str(e))
+    async with database.async_session() as s:
+        user = await auth.get_user_by_email(s, old)
+        if user is None:
+            raise SystemExit(f"no user {old}")
+        other = await auth.get_user_by_email(s, new_email)
+        if other is not None and other.id != user.id:
+            raise SystemExit(f"{new_email} already belongs to another user")
+        user.email = new_email
+        await s.commit()
+
+
+async def user_exists(email: str) -> bool:
+    async with database.async_session() as s:
+        return await auth.get_user_by_email(s, email) is not None
+
+
 async def create_invite(uses: int, expires_days: int | None) -> str:
     async with database.async_session() as s:
         code = await auth.create_invite(s, created_by=None, uses=uses,
@@ -49,7 +71,7 @@ async def list_users() -> list[tuple]:
 
 async def delete_user(email: str) -> None:
     import models
-    from models import AuthSession, ConnectorToken, Credential, User
+    from models import AuthSession, ConnectorToken, Credential, Invite, User
     async with database.async_session() as s:
         user = await auth.get_user_by_email(s, email)
         if user is None:
@@ -69,6 +91,8 @@ async def delete_user(email: str) -> None:
                 await s.execute(delete(cls).where(cls.user_id == uid))
             for cls in (AuthSession, ConnectorToken, Credential):
                 await s.execute(delete(cls).where(cls.user_id == uid))
+            # Invites cannot be redeemed without their creator, and would dangle.
+            await s.execute(delete(Invite).where(Invite.created_by == uid))
             await s.execute(delete(User).where(User.id == uid))
             await s.commit()
 
@@ -82,17 +106,29 @@ def main() -> None:
     ci.add_argument("--uses", type=int, default=1)
     ci.add_argument("--expires-days", type=int, default=14)
     sub.add_parser("list-users")
+    se = sub.add_parser("set-email"); se.add_argument("old"); se.add_argument("new")
     du = sub.add_parser("delete-user"); du.add_argument("email")
     du.add_argument("--yes", action="store_true")
     a = p.parse_args()
 
     if a.cmd == "set-password":
+        if not asyncio.run(user_exists(a.email)):
+            raise SystemExit(f"no user {a.email}")
+        if not sys.stdin.isatty():
+            raise SystemExit("set-password needs a terminal to read the password from")
         pw = getpass.getpass("New password: ")
         if pw != getpass.getpass("Again: "):
             raise SystemExit("passwords did not match")
         asyncio.run(set_password(a.email, pw))
         print("password set")
+    elif a.cmd == "set-email":
+        asyncio.run(set_email(a.old, a.new))
+        print("email changed")
     elif a.cmd == "create-invite":
+        if a.uses < 1:
+            raise SystemExit("--uses must be at least 1")
+        if a.expires_days < 1:
+            raise SystemExit("--expires-days must be at least 1")
         print(asyncio.run(create_invite(a.uses, a.expires_days)))
     elif a.cmd == "list-users":
         for row in asyncio.run(list_users()):
