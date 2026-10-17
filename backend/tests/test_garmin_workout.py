@@ -16,11 +16,11 @@ def _steps_for(day_type, weeks=8, target=1642):
     raise AssertionError(f"no {day_type} workout with steps")
 
 
-def test_easy_run_has_warmup_run_cooldown_steps():
+def test_easy_run_is_a_single_run_step():
     steps, w = _steps_for("easy")
     kinds = [s["type"] for s in steps]
-    assert kinds == ["warmup", "run", "cooldown"]
-    run = steps[1]
+    assert kinds == ["run"]
+    run = steps[0]
     assert run["end_kind"] == "distance"
     assert run["end_value"] == w["target_distance_m"]
     assert run["target_kind"] == "pace"
@@ -29,6 +29,7 @@ def test_easy_run_has_warmup_run_cooldown_steps():
 
 def test_quality_session_has_a_repeat_of_400s():
     steps, _ = _steps_for("quality")
+    assert [s["type"] for s in steps] == ["repeat"]
     rep = next(s for s in steps if s["type"] == "repeat")
     assert rep["iterations"] == 6
     work, recov = rep["steps"]

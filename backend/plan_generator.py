@@ -21,14 +21,9 @@ LONG_RUN_CAP_KM = 5.0        # a 5K plan's long run needn't exceed race distance
 LONG_RUN_START_CAP_KM = 4.0  # don't start the long run too high
 DOWN_WEEK_FACTOR = 0.7
 
-# Every steady run is bookended by an easy warm-up and cool-down (Garmin-Coach
-# style). Quality/race sessions carry their own warm-up in the description.
-WARMUP_5K = "2 min easy jog + a few leg swings to open the legs up."
-COOLDOWN_5K = "2 min easy jog, then light stretching."
-RUN_STRUCTURE = {"warmup": WARMUP_5K, "cooldown": COOLDOWN_5K}
-
-WARMUP_SEC = 120
-COOLDOWN_SEC = 120
+# No session carries a warm-up or cool-down step. The athlete warms up before
+# starting the watch and walks after the run, so those steps only recorded easy
+# jogging and walking into the run's time and dragged its average pace down.
 
 
 def _step(kind: str, end_kind: str, end_value: float,
@@ -43,48 +38,38 @@ def _step(kind: str, end_kind: str, end_value: float,
 
 def _steady_steps(dist_km: float, pace_low: int, pace_high: int,
                   ceiling: Optional[int]) -> list[dict[str, Any]]:
-    """warm-up -> the run at its pace band -> cool-down."""
+    """The whole run at its pace band, as one step."""
     note = f"Keep HR ≤{ceiling} bpm" if ceiling else None
-    return [
-        _step("warmup", "time", WARMUP_SEC, note="Easy jog + leg swings"),
-        _step("run", "distance", round(dist_km * 1000), pace_low, pace_high, note),
-        _step("cooldown", "time", COOLDOWN_SEC, note="Easy jog, then stretch"),
-    ]
+    return [_step("run", "distance", round(dist_km * 1000), pace_low, pace_high, note)]
 
 
 def _quality_steps(goal_pace: int, easy_low: int, easy_high: int) -> list[dict[str, Any]]:
     return [
-        _step("warmup", "distance", 1500, note="Easy warm-up"),
         {"type": "repeat", "iterations": 6, "steps": [
             _step("run", "distance", 400, goal_pace - 10, goal_pace + 5, "5K effort"),
             _step("recovery", "time", 90, note="Jog recovery"),
         ]},
-        _step("cooldown", "time", 300, note="Easy cool-down"),
     ]
 
 
 def _strides_steps(easy_low: int, easy_high: int) -> list[dict[str, Any]]:
     return [
-        _step("warmup", "time", WARMUP_SEC, note="Easy jog + leg swings"),
         _step("run", "distance", 2000, easy_low, easy_high, "Easy aerobic"),
         {"type": "repeat", "iterations": 4, "steps": [
             _step("run", "time", 20, note="Stride — fast but relaxed"),
             _step("recovery", "time", 60, note="Full walk-back recovery"),
         ]},
-        _step("cooldown", "time", COOLDOWN_SEC, note="Easy jog, then stretch"),
     ]
 
 
 def _race_steps(goal_pace: int) -> list[dict[str, Any]]:
     return [
-        _step("warmup", "time", 600, note="Easy jog + build-ups"),
         _step("run", "distance", 5000, goal_pace - 5, goal_pace + 5, "Even pacing — start controlled"),
-        _step("cooldown", "time", 300, note="Easy cool-down"),
     ]
 
 
 def _run_structure(steps: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"warmup": WARMUP_5K, "cooldown": COOLDOWN_5K, "steps": steps}
+    return {"steps": steps}
 
 
 def _wo(week_monday: datetime, weekday: int, week_num: int, day_type: str,
@@ -170,7 +155,7 @@ def generate_plan(model: dict[str, Any], weeks: int, target_time_sec: int,
         # Wed — quality (once base supports it, not on down weeks)
         if not is_down and w >= QUALITY_START_WEEK:
             workouts.append(_wo(wk_mon, 2, w, "quality", min(4.0, long_km), goal_pace - 10, goal_pace + 5, None,
-                                "Speed session", f"1.5 km easy warm-up, 6 × 400 m at ~{_fmt_pace(goal_pace)}/km (5K effort) with 90 s jog recovery, easy cool-down.",
+                                "Speed session", f"6 × 400 m at ~{_fmt_pace(goal_pace)}/km (5K effort) with 90 s jog recovery. Be warmed up before you start the watch.",
                                 {"steps": _quality_steps(goal_pace, easy_low, easy_high)}))
         # Thu — easy (not on down weeks)
         if not is_down:

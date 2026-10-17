@@ -67,14 +67,17 @@ def test_long_run_is_the_longest_of_its_week():
             )
 
 
-def test_steady_runs_carry_warmup_cooldown():
+def test_no_session_carries_a_warmup_or_cooldown():
+    """The athlete warms up before starting the watch and walks after stopping,
+    so a warm-up or cool-down step only drags the recorded pace down."""
     out = pg.generate_plan(MODEL, 8, 1650, START)
     for w in out["workouts"]:
-        if w["day_type"] in ("easy", "long", "strides"):
-            assert w["structure"] and w["structure"].get("warmup") and w["structure"].get("cooldown")
-        if w["day_type"] == "quality" and not w["title"].startswith("Race"):
-            # quality carries its own warm-up/cool-down in the description text
-            assert "warm-up" in w["description"].lower() and "cool-down" in w["description"].lower()
+        st = w["structure"] or {}
+        assert "warmup" not in st and "cooldown" not in st
+        kinds = [s["type"] for s in st.get("steps") or []]
+        assert "warmup" not in kinds and "cooldown" not in kinds, (w["title"], kinds)
+        assert "warm-up" not in (w["description"] or "").lower()
+        assert "cool-down" not in (w["description"] or "").lower()
 
 
 def test_easy_runs_carry_hr_ceiling():
