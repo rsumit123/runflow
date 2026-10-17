@@ -42,3 +42,36 @@ async def test_persist_garmin_activity(monkeypatch):
             select(Split).where(Split.activity_id == act.id)
         )).scalars().first()
         assert "average_cadence" in main._split_to_dict(split)
+
+
+@pytest.mark.asyncio
+async def test_persist_cuts_a_walked_cooldown(monkeypatch):
+    tmp = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("DB_PATH", tmp)
+    import importlib, config, database
+    importlib.reload(config); importlib.reload(database)
+    await database.init_db()
+    from models import Activity, Split, Stream
+    import main
+    importlib.reload(main)
+
+    summary = json.loads((FIX / "garmin_summary.json").read_text())
+    splits = json.loads((FIX / "garmin_splits.json").read_text())
+    details = json.loads((FIX / "garmin_details.json").read_text())
+    for lap in splits["lapDTOs"]:
+        if lap["intensityType"] == "COOLDOWN":
+            lap["averageSpeed"] = 1.0
+    kept = [l for l in splits["lapDTOs"] if l["intensityType"] != "COOLDOWN"]
+
+    async with database.async_session() as s:
+        await main._persist_garmin_activity(s, summary, splits, details, [])
+        await s.commit()
+        act = await s.get(Activity, summary["activityId"])
+        assert act.distance == sum(l["distance"] for l in kept)
+        assert act.elapsed_time == 1021
+        n_splits = len((await s.execute(
+            select(Split).where(Split.activity_id == act.id))).scalars().all())
+        assert n_splits == len(kept)
+        t = (await s.execute(select(Stream).where(
+            Stream.activity_id == act.id, Stream.stream_type == "time"))).scalar_one()
+        assert max(t.data) < 1021

@@ -143,3 +143,73 @@ def running_dynamics_summary(streams: dict[str, list]) -> dict | None:
         "vertical_oscillation": avg("vertical_oscillation"),
     }
     return d if any(v is not None for v in d.values()) else None
+
+
+# Slower than 10:00/km is walking, not running.
+WALK_SPEED_MPS = 1000 / 600
+
+
+def _walked_cooldown(lap: dict[str, Any]) -> bool:
+    return (lap.get("intensityType") == "COOLDOWN"
+            and (lap.get("averageSpeed") or 0) < WALK_SPEED_MPS)
+
+
+def trim_walked_cooldown(fields: dict[str, Any], splits_payload: dict[str, Any],
+                         streams: dict[str, list]):
+    """Cut a walked cool-down off the end of a structured workout.
+
+    The watch keeps recording the workout's cool-down step after the run is over,
+    and the athlete walks it. Those trailing COOLDOWN laps are dropped from the
+    laps, the streams and the totals, so the run's pace is the running. A
+    cool-down that was actually run is kept. Returns (fields, splits_payload,
+    streams, trimmed); the inputs are not modified.
+    """
+    laps = splits_payload.get("lapDTOs") or []
+    k = len(laps)
+    while k > 0 and _walked_cooldown(laps[k - 1]):
+        k -= 1
+    if k == len(laps) or k == 0:
+        return fields, splits_payload, streams, False
+
+    start, cut_at = fields.get("start_date"), _parse_garmin_dt(laps[k].get("startTimeGMT"))
+    if start is None or cut_at is None:
+        return fields, splits_payload, streams, False
+    cut = int((cut_at - start).total_seconds())
+    kept = laps[:k]
+
+    times = streams.get("time") or []
+    end = next((i for i, t in enumerate(times) if t is not None and t >= cut), len(times))
+    streams = {name: data[:end] for name, data in streams.items()}
+
+    def total(key):
+        vals = [l.get(key) for l in kept]
+        return sum(vals) if all(v is not None for v in vals) else None
+
+    def weighted(key):
+        pairs = [(l.get(key), l.get("duration") or 0) for l in kept]
+        secs = sum(d for v, d in pairs if v is not None)
+        return sum(v * d for v, d in pairs if v is not None) / secs if secs else None
+
+    def peak(key):
+        vals = [l.get(key) for l in kept if l.get(key) is not None]
+        return max(vals) if vals else None
+
+    fields = dict(fields)
+    distance, moving = total("distance"), total("movingDuration")
+    if distance is not None:
+        fields["distance"] = distance
+    if moving:
+        fields["moving_time"] = round(moving)
+        if distance is not None:
+            fields["average_speed"] = distance / fields["moving_time"]
+    fields["elapsed_time"] = cut
+    for name, value in (("max_speed", peak("maxSpeed")),
+                        ("max_heartrate", peak("maxHR")),
+                        ("average_heartrate", weighted("averageHR")),
+                        ("average_cadence", weighted("averageRunCadence")),
+                        ("total_elevation_gain", total("elevationGain"))):
+        if value is not None:
+            fields[name] = value
+    if streams.get("latlng"):
+        fields["end_latlng"] = streams["latlng"][-1]
+    return fields, {**splits_payload, "lapDTOs": kept}, streams, True

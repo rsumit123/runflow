@@ -601,6 +601,8 @@ async def _persist_garmin_activity(session, summary, splits_payload, details, zo
     """Map Garmin payloads into Activity/Split/Stream and run the analysis helpers."""
     fields = gt.summary_to_activity_fields(summary)
     activity_id = fields["id"]
+    streams = gt.details_to_streams(details)
+    fields, splits_payload, streams, _ = gt.trim_walked_cooldown(fields, splits_payload, streams)
 
     act = await session.get(Activity, activity_id)
     if act is None:
@@ -619,7 +621,6 @@ async def _persist_garmin_activity(session, summary, splits_payload, details, zo
     # Streams (replace existing)
     for old in (await session.execute(select(Stream).where(Stream.activity_id == activity_id))).scalars().all():
         await session.delete(old)
-    streams = gt.details_to_streams(details)
     for stype, data in streams.items():
         session.add(Stream(activity_id=activity_id, stream_type=stype, data=data))
 
