@@ -572,6 +572,20 @@ def _get_route_index() -> list[str]:
     return sorted(paths)
 
 
+def _is_callable(path: str) -> bool:
+    """Whether a concrete path (e.g. /api/activities/123) is one of those GET
+    routes. The index holds templates, so match each route's own pattern."""
+    import main as _main
+    if not path.startswith("/api") or path.startswith(CALL_API_DENY):
+        return False
+    for r in _main.app.routes:
+        methods = getattr(r, "methods", None) or set()
+        regex = getattr(r, "path_regex", None)
+        if "GET" in methods and regex is not None and regex.match(path):
+            return True
+    return False
+
+
 def _thin_streams(value):
     """Downsample stream-shaped lists rather than dropping them."""
     if isinstance(value, dict):
@@ -620,8 +634,8 @@ async def call_api(
 
         if not path.startswith("/"):
             path = "/" + path
-        index = _get_route_index()
-        if path not in index:
+        if not _is_callable(path):
+            index = _get_route_index()
             near = [p for p in index if p.split("/")[:3] == path.split("/")[:3]]
             hint = ", ".join(near[:8]) if near else ", ".join(index[:12])
             return (

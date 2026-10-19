@@ -484,3 +484,24 @@ async def test_training_context_summarises_rather_than_dumping_json(monkeypatch)
     assert out.count("{") < 5, "output should be prose/table, not a JSON blob"
     assert "gate" in out.lower()
     assert "current phase" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_call_api_reaches_a_route_with_a_path_parameter(monkeypatch):
+    """The index holds templates like /api/activities/{activity_id}; a concrete
+    path must match its template, not be compared to it literally."""
+    mcp_server = await _seed(monkeypatch, "pp")
+
+    out = await mcp_server.call_api(path="/api/activities/1")
+
+    assert "no get route" not in out.lower()
+    assert "Clean run" in out
+
+
+@pytest.mark.asyncio
+async def test_call_api_still_refuses_a_denied_route_with_a_parameter(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "pq")
+
+    out = await mcp_server.call_api(path="/api/admin/users/1")
+
+    assert "no get route" in out.lower()
