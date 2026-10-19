@@ -100,3 +100,12 @@ def test_csv_average_already_in_steps_per_minute_is_not_doubled():
     assert bi._csv_cadence_spm(159.0) == 159.0
     assert bi._csv_cadence_spm(83.0) == 166.0
     assert bi._csv_cadence_spm(10.0) is None
+
+
+def test_an_implausible_average_is_rejected_not_stored():
+    # Samsung Health files mix two clusters (~100/foot and ~160 spm); read
+    # either way the run averages ~200 spm, which no one runs at 7:00/km.
+    out = bi.clean_cadence_values([100.0] * 20 + [104.0] * 20)
+    assert out["avg_spm"] is None and out["implausible"] is True
+    ok = bi.clean_cadence_values([82.0] * 20)
+    assert ok["avg_spm"] == 164.0 and ok["implausible"] is False

@@ -912,6 +912,9 @@ CADENCE_MIN_SAMPLES = 10
 # cadence is typically above this, so a file whose median moving sample is,
 # is read as steps per minute.
 CADENCE_SPM_MEDIAN = 110
+# A run's average outside this range (steps per minute) is a broken recording,
+# such as Samsung Health files that mix both units. It is left empty, not stored.
+CADENCE_PLAUSIBLE_SPM = (120, 195)
 
 
 def _extract_cadence_from_tcx(filepath: str) -> list[float]:
@@ -982,8 +985,12 @@ def clean_cadence_values(values: list[float]) -> dict[str, Any]:
         values = [v / 2 for v in values]          # steps per minute -> per foot
     clean = [v for v in values if CADENCE_MIN_VALID <= v <= CADENCE_MAX_VALID]
     if len(clean) < CADENCE_MIN_SAMPLES:
-        return {"clean": [], "avg_spm": None}
-    return {"clean": clean, "avg_spm": round(2 * sum(clean) / len(clean), 1)}
+        return {"clean": [], "avg_spm": None, "implausible": False}
+    avg = round(2 * sum(clean) / len(clean), 1)
+    lo, hi = CADENCE_PLAUSIBLE_SPM
+    if not lo <= avg <= hi:
+        return {"clean": [], "avg_spm": None, "implausible": True}
+    return {"clean": clean, "avg_spm": avg, "implausible": False}
 
 
 def _csv_cadence_spm(value: float) -> float | None:
@@ -991,7 +998,9 @@ def _csv_cadence_spm(value: float) -> float | None:
     per foot, as is when the recorder already wrote steps per minute."""
     if value < CADENCE_MIN_VALID:
         return None
-    return value if value > CADENCE_SPM_MEDIAN else round(2 * value, 1)
+    spm = value if value > CADENCE_SPM_MEDIAN else round(2 * value, 1)
+    lo, hi = CADENCE_PLAUSIBLE_SPM
+    return spm if lo <= spm <= hi else None
 
 
 def _csv_average_cadence(csv_path: str) -> dict[int, float]:
@@ -1020,7 +1029,8 @@ async def enrich_cadence_from_export(session: AsyncSession, export_path: str) ->
         raise FileNotFoundError(f"activities.csv not found in {base_dir}")
     csv_cadence = _csv_average_cadence(csv_path)
 
-    counts = {"from_file": 0, "from_csv": 0, "already_had": 0, "no_cadence": 0, "not_in_db": 0}
+    counts = {"from_file": 0, "from_csv": 0, "already_had": 0, "no_cadence": 0,
+              "implausible": 0, "not_in_db": 0}
     for act_data in _parse_csv_activities(csv_path):
         activity_id = act_data["id"]
         existing = await session.get(Activity, activity_id)
@@ -1031,7 +1041,7 @@ async def enrich_cadence_from_export(session: AsyncSession, export_path: str) ->
             counts["already_had"] += 1
             continue
 
-        summary = {"clean": [], "avg_spm": None}
+        summary = {"clean": [], "avg_spm": None, "implausible": False}
         activity_file = _find_activity_file(base_dir, act_data.get("filename", ""))
         if activity_file:
             try:
@@ -1048,6 +1058,10 @@ async def enrich_cadence_from_export(session: AsyncSession, export_path: str) ->
             session.add(Stream(activity_id=activity_id, stream_type="cadence",
                                data=summary["clean"]))
             counts["from_file"] += 1
+        elif summary["implausible"]:
+            # The CSV average is computed from the same broken samples.
+            counts["implausible"] += 1
+            continue
         elif _csv_cadence_spm(csv_cadence.get(activity_id, 0)) is not None:
             existing.average_cadence = _csv_cadence_spm(csv_cadence[activity_id])
             counts["from_csv"] += 1
