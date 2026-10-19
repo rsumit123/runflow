@@ -277,7 +277,7 @@ async def get_run_detail(run_id: int) -> str:
 async def compare_runs(run_ids: list[int]) -> str:
     """Two to five runs side by side on the metrics that matter.
 
-    Distance, pace, average HR, Zone 5 share, cardiac drift, Training Effect,
+    Distance, pace, average HR, cadence (steps per minute), Zone 5 share, cardiac drift, Training Effect,
     dew point and weather-normalized pace. Use this to answer "am I improving?".
     The pause count is shown too, because comparing a fragmented run against a
     continuous one is misleading — pauses deflate both average HR and pace.
@@ -291,7 +291,7 @@ async def compare_runs(run_ids: list[int]) -> str:
         if len(run_ids) < 2:
             return "Give at least 2 run ids to compare."
         async with async_session() as session:
-            lines = ["id | date | dist | pace | avgHR | Z5% | drift | TE | dew | "
+            lines = ["id | date | dist | pace | avgHR | cadence | Z5% | drift | TE | dew | "
                      "norm pace | pauses"]
             for rid in run_ids:
                 a = await session.get(Activity, rid)
@@ -307,6 +307,7 @@ async def compare_runs(run_ids: list[int]) -> str:
                 lines.append(
                     f"{a.id} | {a.start_date:%Y-%m-%d} | {km:.2f}km | "
                     f"{_fmt_pace(pace)} | {mv.num(a.average_heartrate)} | "
+                    f"{mv.num(a.average_cadence)} | "
                     f"{mv.num(shares.get(5))}% | "
                     f"{f'{drift:+.1f}' if drift is not None else '—'} | "
                     f"{mv.num(a.aerobic_te)} | {mv.num(a.dew_point_c)}°C | "

@@ -505,3 +505,14 @@ async def test_call_api_still_refuses_a_denied_route_with_a_parameter(monkeypatc
     out = await mcp_server.call_api(path="/api/admin/users/1")
 
     assert "no get route" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_compare_runs_shows_cadence(monkeypatch):
+    mcp_server = await _seed(monkeypatch, "cc")
+
+    out = await mcp_server.compare_runs(run_ids=[1, 2])
+
+    header, row1 = out.splitlines()[0], next(l for l in out.splitlines() if l.startswith("1 |"))
+    assert "cadence" in header
+    assert "| 156 |" in row1
