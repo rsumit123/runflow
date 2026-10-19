@@ -893,3 +893,154 @@ async def enrich_hr_from_export(
         "not_in_db": not_in_db,
         "total_in_csv": total,
     }
+
+
+# ---------------------------------------------------------------------------
+# Cadence seeding from a Strava export (enrich already-imported runs)
+# ---------------------------------------------------------------------------
+#
+# The Strava API import never stored cadence. The export carries it per sample
+# (FIT record cadence, TCX trackpoint Cadence/RunCadence) and per run in
+# activities.csv. All of these count one foot. A run's average is stored in
+# steps per minute (doubled), the unit of Garmin's run averages; the per-sample
+# stream stays per foot, matching Garmin's cadence stream.
+
+CADENCE_MIN_VALID = 30     # per foot; below this is a stop, not a stride
+CADENCE_MAX_VALID = 125    # per foot; above this is noise
+CADENCE_MIN_SAMPLES = 10
+
+
+def _extract_cadence_from_tcx(filepath: str) -> list[float]:
+    """Per-trackpoint cadence: <Cadence> on the trackpoint or <RunCadence> in its
+    extensions. A lap-level <Cadence> summary is not counted."""
+    root = _read_xml_root(filepath)
+    if root is None:
+        return []
+    values: list[float] = []
+    for tp in root.iter():
+        if _local(tp.tag) != "Trackpoint":
+            continue
+        for el in tp.iter():
+            if _local(el.tag) in ("Cadence", "RunCadence") and el.text:
+                try:
+                    values.append(float(el.text))
+                except ValueError:
+                    pass
+                break
+    return values
+
+
+def _extract_cadence_from_fit(filepath: str) -> list[float]:
+    """Per-record cadence values from a FIT file."""
+    try:
+        import fitdecode
+    except ImportError:
+        return []
+    values: list[float] = []
+    try:
+        with fitdecode.FitReader(filepath) as fit:
+            for frame in fit:
+                if not isinstance(frame, fitdecode.FitDataMessage) or frame.name != "record":
+                    continue
+                if not frame.has_field("cadence"):
+                    continue
+                cad = frame.get_value("cadence")
+                if cad is not None:
+                    try:
+                        values.append(float(cad))
+                    except (ValueError, TypeError):
+                        pass
+    except Exception as exc:  # noqa: BLE001 — fitdecode raises many types
+        logger.warning("FIT cadence parse failed for %s: %s", filepath, exc)
+    return values
+
+
+def _extract_cadence_values(filepath: str) -> list[float]:
+    """Dispatch cadence extraction by file type (decompressing .gz first).
+    GPX exports carry no cadence."""
+    filepath = _decompress_if_needed(filepath)
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == ".tcx":
+        return _extract_cadence_from_tcx(filepath)
+    if ext == ".fit":
+        return _extract_cadence_from_fit(filepath)
+    return []
+
+
+def clean_cadence_values(values: list[float]) -> dict[str, Any]:
+    """Drop stops and noise; average in steps per minute.
+
+    Returns {clean: [...per foot], avg_spm}. avg_spm is None when there aren't
+    enough trustworthy samples.
+    """
+    clean = [v for v in values if CADENCE_MIN_VALID <= v <= CADENCE_MAX_VALID]
+    if len(clean) < CADENCE_MIN_SAMPLES:
+        return {"clean": [], "avg_spm": None}
+    return {"clean": clean, "avg_spm": round(2 * sum(clean) / len(clean), 1)}
+
+
+def _csv_average_cadence(csv_path: str) -> dict[int, float]:
+    """Activity ID -> the export's per-run Average Cadence (per foot)."""
+    out: dict[int, float] = {}
+    with open(csv_path, "r", encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            try:
+                cad = float((row.get("Average Cadence") or "").strip())
+                out[int(row["Activity ID"])] = cad
+            except (ValueError, KeyError):
+                continue
+    return out
+
+
+async def enrich_cadence_from_export(session: AsyncSession, export_path: str) -> dict[str, int]:
+    """Add cadence to already-imported runs that have none, from a Strava export.
+
+    Non-destructive: a run that already has an average cadence is skipped, and
+    only the ``cadence`` stream is written. The file's samples are preferred;
+    the CSV's per-run average is the fallback when the file has none.
+    """
+    base_dir = extract_zip_if_needed(export_path)
+    csv_path = os.path.join(base_dir, "activities.csv")
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"activities.csv not found in {base_dir}")
+    csv_cadence = _csv_average_cadence(csv_path)
+
+    counts = {"from_file": 0, "from_csv": 0, "already_had": 0, "no_cadence": 0, "not_in_db": 0}
+    for act_data in _parse_csv_activities(csv_path):
+        activity_id = act_data["id"]
+        existing = await session.get(Activity, activity_id)
+        if existing is None or existing.source == "garmin":
+            counts["not_in_db"] += 1
+            continue
+        if existing.average_cadence is not None:
+            counts["already_had"] += 1
+            continue
+
+        summary = {"clean": [], "avg_spm": None}
+        activity_file = _find_activity_file(base_dir, act_data.get("filename", ""))
+        if activity_file:
+            try:
+                summary = clean_cadence_values(_extract_cadence_values(activity_file))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Cadence extraction failed for %s: %s", activity_id, exc)
+
+        if summary["avg_spm"] is not None:
+            existing.average_cadence = summary["avg_spm"]
+            old = await session.execute(select(Stream).where(
+                Stream.activity_id == activity_id, Stream.stream_type == "cadence"))
+            for s in old.scalars().all():
+                await session.delete(s)
+            session.add(Stream(activity_id=activity_id, stream_type="cadence",
+                               data=summary["clean"]))
+            counts["from_file"] += 1
+        elif csv_cadence.get(activity_id, 0) >= CADENCE_MIN_VALID:
+            existing.average_cadence = round(2 * csv_cadence[activity_id], 1)
+            counts["from_csv"] += 1
+        else:
+            counts["no_cadence"] += 1
+            continue
+        if (counts["from_file"] + counts["from_csv"]) % 25 == 0:
+            await session.commit()
+
+    await session.commit()
+    return counts

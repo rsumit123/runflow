@@ -735,8 +735,8 @@ function ActivityDetail() {
           {activity.average_cadence && (
             <div style={statCard}>
               <div style={statLabel}>Avg Cadence</div>
-              {/* Strava stores cadence as per-foot RPM (×2 = spm); Garmin already stores spm */}
-              <div style={statValue}>{Math.round(activity.average_cadence * (activity.source === 'garmin' ? 1 : 2))}</div>
+              {/* A run's average is stored in steps per minute for every source */}
+              <div style={statValue}>{Math.round(activity.average_cadence)}</div>
               <div style={statUnit}>spm</div>
             </div>
           )}
@@ -1197,7 +1197,7 @@ function ActivityDetail() {
         );
       })()}
 
-      {/* ── Cadence (Garmin only — guarded on cadence stream) ── */}
+      {/* ── Cadence (guarded on cadence stream; samples count one foot, so ×2 = spm) ── */}
       {(() => {
         const cadenceStream = getStreamData(activity, 'cadence');
         if (!cadenceStream) return null;
@@ -1212,7 +1212,7 @@ function ActivityDetail() {
               )}
             </div>
             <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={cadenceStream.map((v, i) => ({ i, spm: v }))} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+              <LineChart data={cadenceStream.map((v, i) => ({ i, spm: v == null ? null : v * 2 }))} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e2936" />
                 <XAxis dataKey="i" tick={false} height={4} />
                 <YAxis tick={{ fill: '#666', fontSize: 10 }} domain={['auto', 'auto']} width={35} />
