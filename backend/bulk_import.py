@@ -908,6 +908,10 @@ async def enrich_hr_from_export(
 CADENCE_MIN_VALID = 30     # per foot; below this is a stop, not a stride
 CADENCE_MAX_VALID = 125    # per foot; above this is noise
 CADENCE_MIN_SAMPLES = 10
+# Some recorders write steps per minute instead. No one's per-foot running
+# cadence is typically above this, so a file whose median moving sample is,
+# is read as steps per minute.
+CADENCE_SPM_MEDIAN = 110
 
 
 def _extract_cadence_from_tcx(filepath: str) -> list[float]:
@@ -973,10 +977,21 @@ def clean_cadence_values(values: list[float]) -> dict[str, Any]:
     Returns {clean: [...per foot], avg_spm}. avg_spm is None when there aren't
     enough trustworthy samples.
     """
+    moving = sorted(v for v in values if v >= CADENCE_MIN_VALID)
+    if moving and moving[len(moving) // 2] > CADENCE_SPM_MEDIAN:
+        values = [v / 2 for v in values]          # steps per minute -> per foot
     clean = [v for v in values if CADENCE_MIN_VALID <= v <= CADENCE_MAX_VALID]
     if len(clean) < CADENCE_MIN_SAMPLES:
         return {"clean": [], "avg_spm": None}
     return {"clean": clean, "avg_spm": round(2 * sum(clean) / len(clean), 1)}
+
+
+def _csv_cadence_spm(value: float) -> float | None:
+    """The CSV's per-run Average Cadence in steps per minute: doubled when it is
+    per foot, as is when the recorder already wrote steps per minute."""
+    if value < CADENCE_MIN_VALID:
+        return None
+    return value if value > CADENCE_SPM_MEDIAN else round(2 * value, 1)
 
 
 def _csv_average_cadence(csv_path: str) -> dict[int, float]:
@@ -1033,8 +1048,8 @@ async def enrich_cadence_from_export(session: AsyncSession, export_path: str) ->
             session.add(Stream(activity_id=activity_id, stream_type="cadence",
                                data=summary["clean"]))
             counts["from_file"] += 1
-        elif csv_cadence.get(activity_id, 0) >= CADENCE_MIN_VALID:
-            existing.average_cadence = round(2 * csv_cadence[activity_id], 1)
+        elif _csv_cadence_spm(csv_cadence.get(activity_id, 0)) is not None:
+            existing.average_cadence = _csv_cadence_spm(csv_cadence[activity_id])
             counts["from_csv"] += 1
         else:
             counts["no_cadence"] += 1

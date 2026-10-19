@@ -87,3 +87,16 @@ async def test_enrich_fills_only_missing_cadence(tmp_path, monkeypatch):
         # Idempotent: a second pass changes nothing.
         again = await bi.enrich_cadence_from_export(s, exp)
         assert again["from_file"] == 0 and again["from_csv"] == 0
+
+
+def test_a_file_already_in_steps_per_minute_is_not_doubled():
+    # Some recorders write steps per minute; a few walking samples sit low.
+    out = bi.clean_cadence_values([0.0] + [160.0] * 12 + [90.0] * 2)
+    assert out["avg_spm"] == round((160 * 12 + 90 * 2) / 14, 1)
+    assert out["clean"] == [80.0] * 12 + [45.0] * 2, "stream stays per foot"
+
+
+def test_csv_average_already_in_steps_per_minute_is_not_doubled():
+    assert bi._csv_cadence_spm(159.0) == 159.0
+    assert bi._csv_cadence_spm(83.0) == 166.0
+    assert bi._csv_cadence_spm(10.0) is None
